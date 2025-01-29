@@ -71,6 +71,29 @@ void Renderer::CreateFence()
 	}
 }
 
+bool Renderer::CheckTearingSupport()
+{
+	bool tearingAllowed;
+	
+	ComPtr<IDXGIFactory4> factory;
+
+	if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+	{
+		ComPtr<IDXGIFactory5> factory5;
+		ThrowIfFailed(factory.As(&factory5));
+
+		if (FAILED(factory5->CheckFeatureSupport(
+			DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+			&tearingAllowed,
+			sizeof(tearingAllowed))))
+		{
+			tearingAllowed = false;
+		}
+	}
+
+	return tearingAllowed;
+}
+
 Microsoft::WRL::ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
 {
 	ComPtr<IDXGIFactory6> factory;
