@@ -29,6 +29,21 @@ Window& Window::Get()
 	return *instance;
 }
 
+long Window::GetWidth() const
+{
+	return m_windowRect.right - m_windowRect.left;
+}
+
+long Window::GetHeight() const
+{
+	return m_windowRect.bottom - m_windowRect.top;
+}
+
+HWND Window::GetHandle() const
+{
+	return m_windowHandle;
+}
+
 Window::~Window()
 {
 	delete instance;

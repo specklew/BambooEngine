@@ -3,6 +3,7 @@
 #include "Renderer.h"
 
 #include "Helpers.h"
+#include "Window.h"
 
 using namespace Microsoft::WRL;
 
@@ -12,6 +13,7 @@ void Renderer::Initialize()
 	CreateCommandQueue();
 	CreateCommandAllocators();
 	CreateFence();
+	CreateSwapChain();
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)
@@ -30,7 +32,15 @@ void Renderer::SetupDevice()
 	D3D12GetDebugInterface(IID_PPV_ARGS(&debugController));
 	debugController->EnableDebugLayer();
 #endif
+	
+	UINT createFactoryFlags = 0;
 
+#ifdef _DEBUG
+	createFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+#endif
+
+	ThrowIfFailed(::CreateDXGIFactory2(createFactoryFlags, IID_PPV_ARGS(&m_dxgiFactory)));
+	
 	m_dxgiAdapter = GetHardwareAdapter();
 
 	if (m_dxgiAdapter)
@@ -71,53 +81,67 @@ void Renderer::CreateFence()
 	}
 }
 
+void Renderer::CreateSwapChain()
+{
+	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+	swapChainDesc.BufferCount = NUM_FRAMES;
+	swapChainDesc.Width = Window::Get().GetWidth();
+	swapChainDesc.Height = Window::Get().GetHeight();
+	swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	swapChainDesc.SampleDesc.Count = 1;
+	swapChainDesc.SampleDesc.Quality = 0;
+	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	swapChainDesc.Flags = CheckTearingSupport() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+	
+	IDXGISwapChain1* swapChain1;
+	
+	ThrowIfFailed(m_dxgiFactory->CreateSwapChainForHwnd(
+		m_d3d12CommandQueue.Get(),
+		Window::Get().GetHandle(),
+		&swapChainDesc,
+		nullptr,
+		nullptr,
+		&swapChain1));
+
+	ThrowIfFailed(m_dxgiFactory->MakeWindowAssociation(Window::Get().GetHandle(), DXGI_MWA_NO_ALT_ENTER));
+
+	ThrowIfFailed(swapChain1->QueryInterface(IID_PPV_ARGS(&m_dxgiSwapChain)));
+
+	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
+}
+
 bool Renderer::CheckTearingSupport()
 {
 	bool tearingAllowed;
-	
-	ComPtr<IDXGIFactory4> factory;
 
-	if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+	if (FAILED(m_dxgiFactory->CheckFeatureSupport(
+		DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+		&tearingAllowed,
+		sizeof(tearingAllowed))))
 	{
-		ComPtr<IDXGIFactory5> factory5;
-		ThrowIfFailed(factory.As(&factory5));
-
-		if (FAILED(factory5->CheckFeatureSupport(
-			DXGI_FEATURE_PRESENT_ALLOW_TEARING,
-			&tearingAllowed,
-			sizeof(tearingAllowed))))
-		{
-			tearingAllowed = false;
-		}
+		tearingAllowed = false;
 	}
+	
 
 	return tearingAllowed;
 }
 
 Microsoft::WRL::ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
 {
-	ComPtr<IDXGIFactory6> factory;
-	UINT createFactoryFlags = 0;
-
-#ifdef _DEBUG
-	createFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-#endif
-
-	ThrowIfFailed(::CreateDXGIFactory2(createFactoryFlags, IID_PPV_ARGS(&factory)));
-
 	ComPtr<IDXGIAdapter1> adapter1;
 	ComPtr<IDXGIAdapter4> adapter;
 
 	if (useWarp)
 	{
-		ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&adapter1)));
+		ThrowIfFailed(m_dxgiFactory->EnumWarpAdapter(IID_PPV_ARGS(&adapter1)));
 		ThrowIfFailed(adapter1.As(&adapter));
 		return adapter;
 	}
 
 	size_t maxDedicatedVideoMemory = 0;
 
-	for (UINT i = 0; factory->EnumAdapters1(i, &adapter1) != DXGI_ERROR_NOT_FOUND; ++i){
+	for (UINT i = 0; m_dxgiFactory->EnumAdapters1(i, &adapter1) != DXGI_ERROR_NOT_FOUND; ++i){
 		DXGI_ADAPTER_DESC1 desc;
 		adapter1->GetDesc1(&desc);
 

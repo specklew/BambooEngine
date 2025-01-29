@@ -13,6 +13,7 @@ private:
 	void CreateCommandQueue();
 	void CreateCommandAllocators();
 	void CreateFence();
+	void CreateSwapChain();
 
 	bool CheckTearingSupport();
 	
@@ -21,9 +22,11 @@ private:
 	
 	Microsoft::WRL::ComPtr<IDXGIAdapter4> m_dxgiAdapter;
 	Microsoft::WRL::ComPtr<ID3D12Device2> m_d3d12Device;
+	Microsoft::WRL::ComPtr<IDXGIFactory6> m_dxgiFactory;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue;
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_d3d12CommandAllocators[NUM_FRAMES];
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_d3d12Fence;
+	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_dxgiSwapChain;
 
 	UINT m_frameIndex = 0;
 	UINT64 m_fenceValues[NUM_FRAMES] = {};

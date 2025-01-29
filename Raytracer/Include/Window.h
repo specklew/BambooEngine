@@ -9,6 +9,10 @@ public:
 	Window(const Window&) = delete;
 	Window& operator=(const Window&) = delete;
 
+	long GetWidth() const;
+	long GetHeight() const;
+	HWND GetHandle() const;
+	
 private:
 	Window() = default;
 	~Window();
