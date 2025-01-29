@@ -14,6 +14,12 @@ void Renderer::Initialize()
 	CreateCommandAllocators();
 	CreateFence();
 	CreateSwapChain();
+	
+	CreateCommandList();
+	ResetCommandList();
+	
+	CreateRTVDescriptorHeap();
+	CreateRenderTargetViews();
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)
@@ -111,9 +117,52 @@ void Renderer::CreateSwapChain()
 	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
 }
 
+void Renderer::CreateCommandList()
+{
+	ThrowIfFailed(m_d3d12Device->CreateCommandList(
+		0,
+		D3D12_COMMAND_LIST_TYPE_DIRECT,
+		m_d3d12CommandAllocators[m_frameIndex].Get(),
+		nullptr,
+		IID_PPV_ARGS(&m_d3d12CommandList)));
+
+	ThrowIfFailed(m_d3d12CommandList->Close());
+}
+
+void Renderer::ResetCommandList()
+{
+	ThrowIfFailed(m_d3d12CommandAllocators[m_frameIndex]->Reset());
+	ThrowIfFailed(m_d3d12CommandList->Reset(m_d3d12CommandAllocators[m_frameIndex].Get(), nullptr));
+}
+
+void Renderer::CreateRTVDescriptorHeap()
+{
+	D3D12_DESCRIPTOR_HEAP_DESC desc = {};
+	desc.NumDescriptors = NUM_FRAMES;
+	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+
+	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_d3d12RTVDescriptorHeap)));
+
+	m_rtvDescriptorSize = m_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+}
+
+void Renderer::CreateRenderTargetViews()
+{
+	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+
+	for (UINT i = 0; i < NUM_FRAMES; ++i)
+	{
+		ThrowIfFailed(m_dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
+		m_d3d12Device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
+
+		rtvHandle.ptr += m_rtvDescriptorSize;
+	}
+}
+
 bool Renderer::CheckTearingSupport()
 {
-	bool tearingAllowed;
+	BOOL tearingAllowed;
 
 	if (FAILED(m_dxgiFactory->CheckFeatureSupport(
 		DXGI_FEATURE_PRESENT_ALLOW_TEARING,
@@ -127,7 +176,7 @@ bool Renderer::CheckTearingSupport()
 	return tearingAllowed;
 }
 
-Microsoft::WRL::ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
+ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
 {
 	ComPtr<IDXGIAdapter1> adapter1;
 	ComPtr<IDXGIAdapter4> adapter;
@@ -161,7 +210,7 @@ Microsoft::WRL::ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
 	return adapter;
 }
 
-Microsoft::WRL::ComPtr<ID3D12Device2> Renderer::GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter)
+ComPtr<ID3D12Device2> Renderer::GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter)
 {
 	ComPtr<ID3D12Device2> device;
 	ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)));

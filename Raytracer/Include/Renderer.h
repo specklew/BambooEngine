@@ -14,7 +14,13 @@ private:
 	void CreateCommandAllocators();
 	void CreateFence();
 	void CreateSwapChain();
+	void CreateCommandList();
 
+	void ResetCommandList();
+
+	void CreateRTVDescriptorHeap();
+	void CreateRenderTargetViews();
+	
 	bool CheckTearingSupport();
 	
 	Microsoft::WRL::ComPtr<IDXGIAdapter4> GetHardwareAdapter(bool useWarp = false);
@@ -27,8 +33,14 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_d3d12CommandAllocators[NUM_FRAMES];
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_d3d12Fence;
 	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_dxgiSwapChain;
+	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_d3d12CommandList;
+
+	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_d3d12RTVDescriptorHeap;
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_d3d12RenderTargets[NUM_FRAMES];
 
 	UINT m_frameIndex = 0;
 	UINT64 m_fenceValues[NUM_FRAMES] = {};
 	HANDLE m_fenceEvent = nullptr;
+
+	UINT m_rtvDescriptorSize = 0;
 };
