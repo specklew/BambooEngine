@@ -2,6 +2,8 @@
 
 #include "Renderer.h"
 
+#include <chrono>
+
 #include "Helpers.h"
 #include "Window.h"
 
@@ -28,7 +30,60 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 void Renderer::Render(double elapsedTime, double totalTime)
 {
-}
+	auto allocator = m_d3d12CommandAllocators[m_frameIndex];
+	auto backBuffer = m_d3d12RenderTargets[m_frameIndex];
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+		   backBuffer.Get(),
+		   D3D12_RESOURCE_STATE_PRESENT,
+		   D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+		m_d3d12CommandList->ResourceBarrier(1, &barrier);
+
+		FLOAT clearColor[4] = { 0.3f, 0.6f, 0.9f, 1.0f };
+
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
+			m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+			m_frameIndex,
+			m_rtvDescriptorSize);
+
+		m_d3d12CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+	}
+
+	{
+		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+			backBuffer.Get(),
+			D3D12_RESOURCE_STATE_RENDER_TARGET,
+			D3D12_RESOURCE_STATE_PRESENT);
+
+		m_d3d12CommandList->ResourceBarrier(1, &barrier);
+
+		ThrowIfFailed(m_d3d12CommandList->Close());
+	}
+
+	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
+	
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	UINT presentFlags = CheckTearingSupport() ? DXGI_PRESENT_ALLOW_TEARING : 0;
+
+	ThrowIfFailed(m_dxgiSwapChain->Present(0, presentFlags));
+
+	ResetCommandList();
+	
+	// Signalling
+	m_fenceValues[m_frameIndex]++;
+	ThrowIfFailed(m_d3d12CommandQueue->Signal(m_d3d12Fence.Get(), m_fenceValues[m_frameIndex]));
+
+	// Wait for fence value
+	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
+	if (m_d3d12Fence->GetCompletedValue() < m_fenceValues[m_frameIndex])
+	{
+		std::chrono::milliseconds duration = std::chrono::milliseconds::max();
+		ThrowIfFailed(m_d3d12Fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
+		WaitForSingleObject(m_fenceEvent, static_cast<DWORD>(duration.count()));
+	}
+}	
 
 void Renderer::SetupDevice()
 {

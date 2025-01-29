@@ -4,6 +4,10 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include <windows.h>
 #include <wrl.h>
 #include <shellapi.h>
