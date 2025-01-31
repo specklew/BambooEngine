@@ -20,6 +20,8 @@ private:
 
 	void CreateRTVDescriptorHeap();
 	void CreateRenderTargetViews();
+
+	void WaitForGPU();
 	
 	bool CheckTearingSupport();
 	

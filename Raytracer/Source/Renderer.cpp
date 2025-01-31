@@ -30,6 +30,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 void Renderer::Render(double elapsedTime, double totalTime)
 {
+	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
+	
 	auto allocator = m_d3d12CommandAllocators[m_frameIndex];
 	auto backBuffer = m_d3d12RenderTargets[m_frameIndex];
 
@@ -69,20 +71,9 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	ThrowIfFailed(m_dxgiSwapChain->Present(0, presentFlags));
 
-	ResetCommandList();
+	WaitForGPU();
 	
-	// Signalling
-	m_fenceValues[m_frameIndex]++;
-	ThrowIfFailed(m_d3d12CommandQueue->Signal(m_d3d12Fence.Get(), m_fenceValues[m_frameIndex]));
-
-	// Wait for fence value
-	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
-	if (m_d3d12Fence->GetCompletedValue() < m_fenceValues[m_frameIndex])
-	{
-		std::chrono::milliseconds duration = std::chrono::milliseconds::max();
-		ThrowIfFailed(m_d3d12Fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
-		WaitForSingleObject(m_fenceEvent, static_cast<DWORD>(duration.count()));
-	}
+	ResetCommandList();
 }	
 
 void Renderer::SetupDevice()
@@ -213,6 +204,16 @@ void Renderer::CreateRenderTargetViews()
 
 		rtvHandle.ptr += m_rtvDescriptorSize;
 	}
+}
+
+void Renderer::WaitForGPU()
+{
+	ThrowIfFailed(m_d3d12CommandQueue->Signal(m_d3d12Fence.Get(), m_fenceValues[m_frameIndex]));
+	ThrowIfFailed(m_d3d12Fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
+
+	::WaitForSingleObject(m_fenceEvent, INFINITE);
+
+	m_fenceValues[m_frameIndex]++;
 }
 
 bool Renderer::CheckTearingSupport()
