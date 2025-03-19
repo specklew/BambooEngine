@@ -21,7 +21,12 @@ private:
 	void CreateRTVDescriptorHeap();
 	void CreateRenderTargetViews();
 
-	void WaitForGPU();
+	void CreateDepthStencilView();
+	void CreateDSVDescriptorHeap();
+
+	void SetViewport();
+
+	void FlushCommandQueue();
 	
 	bool CheckTearingSupport();
 	
@@ -39,6 +44,8 @@ private:
 
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_d3d12RTVDescriptorHeap;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_d3d12RenderTargets[NUM_FRAMES];
+	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_d3d12DSVDescriptorHeap;
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_depthStencilBuffer;
 
 	UINT m_frameIndex = 0;
 	UINT64 m_fenceValues[NUM_FRAMES] = {};

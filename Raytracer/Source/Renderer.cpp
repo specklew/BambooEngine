@@ -3,6 +3,9 @@
 #include "Renderer.h"
 
 #include <chrono>
+#include "imgui.h"
+#include "backends/imgui_impl_dx12.h"
+#include "backends/imgui_impl_win32.h"
 
 #include "Helpers.h"
 #include "Window.h"
@@ -12,6 +15,7 @@ using namespace Microsoft::WRL;
 void Renderer::Initialize()
 {
 	SetupDevice();
+	
 	CreateCommandQueue();
 	CreateCommandAllocators();
 	CreateFence();
@@ -22,6 +26,9 @@ void Renderer::Initialize()
 	
 	CreateRTVDescriptorHeap();
 	CreateRenderTargetViews();
+
+	CreateDSVDescriptorHeap();
+	CreateDepthStencilView();
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)
@@ -30,6 +37,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 void Renderer::Render(double elapsedTime, double totalTime)
 {
+	SetViewport();
+	
 	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
 	
 	auto allocator = m_d3d12CommandAllocators[m_frameIndex];
@@ -71,7 +80,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	ThrowIfFailed(m_dxgiSwapChain->Present(0, presentFlags));
 
-	WaitForGPU();
+	FlushCommandQueue();
 	
 	ResetCommandList();
 }	
@@ -206,12 +215,91 @@ void Renderer::CreateRenderTargetViews()
 	}
 }
 
-void Renderer::WaitForGPU()
+void Renderer::CreateDepthStencilView()
+{
+	DXGI_FORMAT depthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	
+	D3D12_RESOURCE_DESC desc;
+	desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	desc.Alignment = 0;
+	desc.Width = Window::Get().GetWidth();
+	desc.Height = Window::Get().GetHeight();
+	desc.MipLevels = 1;
+	desc.Format = depthStencilFormat;
+	desc.SampleDesc.Count = 1;
+	desc.SampleDesc.Quality = 0;
+	desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+	desc.DepthOrArraySize = 1;
+
+	D3D12_CLEAR_VALUE clearValue;
+	clearValue.Format = depthStencilFormat;
+	clearValue.DepthStencil.Depth = 1.0f;
+	clearValue.DepthStencil.Stencil = 0.0f;
+	
+	CD3DX12_HEAP_PROPERTIES heapProp(D3D12_HEAP_TYPE_DEFAULT);
+	
+	ThrowIfFailed(m_d3d12Device->CreateCommittedResource(
+		&heapProp,
+		D3D12_HEAP_FLAG_NONE,
+		&desc,
+		D3D12_RESOURCE_STATE_COMMON,
+		&clearValue,
+		IID_PPV_ARGS(&m_depthStencilBuffer)));
+
+	m_d3d12Device->CreateDepthStencilView(
+		m_depthStencilBuffer.Get(),
+		nullptr,
+		m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	
+	m_d3d12CommandList->ResourceBarrier(
+		1,
+		&CD3DX12_RESOURCE_BARRIER::Transition(
+			m_depthStencilBuffer.Get(),
+			D3D12_RESOURCE_STATE_COMMON,
+			D3D12_RESOURCE_STATE_DEPTH_WRITE));
+
+	ThrowIfFailed(m_d3d12CommandList->Close());
+
+	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+
+	FlushCommandQueue();
+	ResetCommandList();
+}
+
+void Renderer::CreateDSVDescriptorHeap()
+{
+	D3D12_DESCRIPTOR_HEAP_DESC desc;
+	desc.NumDescriptors = 1;
+	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+	desc.NodeMask = 0;
+
+	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(
+		&desc,
+		IID_PPV_ARGS(&m_d3d12DSVDescriptorHeap)));
+}
+
+void Renderer::SetViewport()
+{
+	D3D12_VIEWPORT viewport;
+	viewport.TopLeftX = 0;
+	viewport.TopLeftY = 0;
+	viewport.Height = Window::Get().GetHeight();
+	viewport.Width = Window::Get().GetWidth();
+	viewport.MinDepth = 0.0f;
+	viewport.MaxDepth = 1.0f;
+
+	m_d3d12CommandList->RSSetViewports(1, &viewport);
+}
+
+void Renderer::FlushCommandQueue()
 {
 	ThrowIfFailed(m_d3d12CommandQueue->Signal(m_d3d12Fence.Get(), m_fenceValues[m_frameIndex]));
 	ThrowIfFailed(m_d3d12Fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
 
-	::WaitForSingleObject(m_fenceEvent, INFINITE);
+	WaitForSingleObject(m_fenceEvent, INFINITE);
 
 	m_fenceValues[m_frameIndex]++;
 }

@@ -9,7 +9,7 @@ Application::Application(HINSTANCE hInstance) : m_hInstance(hInstance) {}
 void Application::Run()
 {
 	Window::Create(m_hInstance, { 0, 0, 800, 600 });
-
+	
 	m_renderer.Initialize();
 
 	GameLoop();
