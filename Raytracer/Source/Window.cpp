@@ -1,15 +1,17 @@
 #include "pch.h"
 #include "Window.h"
+
+#include "Application.h"
 #include "Constants.h"
 
-static LRESULT CALLBACK WndProc(
-	HWND hWnd,
-	UINT message,
-	WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	return Window::Get().MsgProc(hWnd, message, wParam, lParam);
+}
 
 Window* Window::instance = nullptr;
 
-HRESULT Window::Create(HINSTANCE hInstance, RECT windowRect)
+HRESULT Window::Create(HINSTANCE hInstance, RECT windowRect, Application* app)
 {
 	if (instance != nullptr)
 	{
@@ -18,6 +20,7 @@ HRESULT Window::Create(HINSTANCE hInstance, RECT windowRect)
 
 	instance = new Window();
 
+	instance->application = app;
 	instance->m_hInstance = hInstance;
 	instance->m_windowRect = windowRect;
 
@@ -94,13 +97,15 @@ HRESULT Window::Initialize()
 	return S_OK;
 }
 
-LRESULT WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT Window::MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	switch (message)
 	{
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		break;
+	case WM_MOUSEMOVE:
+		application->OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 	default:
 		return DefWindowProc(hWnd, message, wParam, lParam);
 	}

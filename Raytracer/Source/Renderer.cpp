@@ -2,15 +2,51 @@
 
 #include "Renderer.h"
 
+#include <algorithm>
 #include <chrono>
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
 #include "backends/imgui_impl_win32.h"
 
 #include "Helpers.h"
+#include "InputElements.h"
 #include "Window.h"
 
 using namespace Microsoft::WRL;
+
+Vertex vertices[] = {
+	{ DirectX::XMFLOAT3(-1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4(0, 0, 0, 1) },
+	{ DirectX::XMFLOAT3(-1.0f, +1.0f, -1.0f), DirectX::XMFLOAT4(0, 1, 0, 1) },
+	{ DirectX::XMFLOAT3(+1.0f, +1.0f, -1.0f), DirectX::XMFLOAT4(1, 1, 0, 1) },
+	{ DirectX::XMFLOAT3(+1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4(1, 0, 0, 1) },
+	{ DirectX::XMFLOAT3(-1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4(0, 0, 1, 1) },
+	{ DirectX::XMFLOAT3(-1.0f, +1.0f, +1.0f), DirectX::XMFLOAT4(0, 1, 1, 1) },
+	{ DirectX::XMFLOAT3(+1.0f, +1.0f, +1.0f), DirectX::XMFLOAT4(1, 1, 1, 1) },
+	{ DirectX::XMFLOAT3(+1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4(1, 0, 1, 1) }
+};
+
+std::uint16_t indices[] = {
+	// front face
+	0, 1, 2,
+	0, 2, 3,
+	// back face
+	4, 6, 5,
+	4, 7, 6,
+	// left face
+	4, 5, 1,
+	4, 1, 0,
+	// right face
+	3, 2, 6,
+	3, 6, 7,
+	// top face
+	1, 5, 6,
+	1, 6, 2,
+	// bottom face
+	4, 0, 3,
+	4, 3, 7
+};
+
+constexpr UINT64 vbByteSize = 8 * sizeof(Vertex);
 
 void Renderer::Initialize()
 {
@@ -29,10 +65,43 @@ void Renderer::Initialize()
 
 	CreateDSVDescriptorHeap();
 	CreateDepthStencilView();
+
+	CreateVertexAndIndexBuffer();
+	CreateConstantBufferView();
+	CreateRootSignature();
+	LoadShaders();
+
+	CreatePipelineState();
+
+	m_d3d12CommandList->Close();
+	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+
+	FlushCommandQueue();
+	ResetCommandList();
+	
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)
 {
+	using namespace DirectX;
+	
+	float x = m_radius*sinf(m_phi)*cosf(m_theta);
+	float z = m_radius*sinf(m_phi)*sinf(m_theta);
+	float y = m_radius*cosf(m_phi);
+
+	XMVECTOR pos = XMVectorSet(x, y, z, 1.0f);
+	XMVECTOR target = XMVectorZero();
+	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
+	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
+	XMStoreFloat4x4(&m_view, view);
+	XMMATRIX world = XMLoadFloat4x4(&m_world);
+	XMMATRIX proj = XMLoadFloat4x4(&m_proj);
+
+	XMMATRIX worldViewProj = world*view*proj;
+
+	memcpy(m_mappedData, &worldViewProj, sizeof(worldViewProj));
 }
 
 void Renderer::Render(double elapsedTime, double totalTime)
@@ -58,9 +127,28 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
 			m_frameIndex,
 			m_rtvDescriptorSize);
-
+		
 		m_d3d12CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+		m_d3d12CommandList->ClearDepthStencilView(
+			m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+			D3D12_CLEAR_FLAG_DEPTH,
+			1.0f,
+			0,
+			0,
+			nullptr);
 	}
+
+	ID3D12DescriptorHeap* descriptorHeaps[] = {m_CBVDescriptorHeap.Get()};
+	m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	m_d3d12CommandList->SetGraphicsRootSignature(m_rootSignature.Get());
+
+	m_d3d12CommandList->IASetVertexBuffers(0, 1, m_vertexBuffers);
+	m_d3d12CommandList->IASetIndexBuffer(&m_indexBufferView);
+	m_d3d12CommandList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_CBVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+	m_d3d12CommandList->DrawIndexedInstanced(_countof(indices), 1, 0, 0, 0);
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -83,7 +171,39 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	FlushCommandQueue();
 	
 	ResetCommandList();
-}	
+}
+
+void Renderer::CleanUp()
+{
+	m_constantBuffer->Unmap(0, nullptr);
+}
+
+void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
+{
+	if((btnState & MK_LBUTTON) != 0)
+	{
+		// Make each pixel correspond to a quarter of a degree.
+		float dx = DirectX::XMConvertToRadians(0.25f*static_cast<float> (x - m_lastMousePosX));
+		float dy = DirectX::XMConvertToRadians(0.25f*static_cast<float> (y - m_lastMousePosY));
+		// Update angles based on input to orbit camera around box.
+		m_theta += dx;
+		m_phi += dy;
+		// Restrict the angle mPhi.
+		m_phi = std::clamp(m_phi, 0.1f,  3.1415f - 0.1f);
+	}
+	else if((btnState & MK_RBUTTON) != 0)
+	{
+		// Make each pixel correspond to 0.005 unit in the scene.
+		float dx = 0.005f*static_cast<float>(x - m_lastMousePosX);
+		float dy = 0.005f*static_cast<float>(y - m_lastMousePosY);
+		// Update the camera radius based on input.
+		m_radius += dx - dy;
+		// Restrict the radius.
+		m_radius = std::clamp(m_radius, 3.0f, 15.0f);
+	}
+	m_lastMousePosX = x;
+	m_lastMousePosY = y;
+}
 
 void Renderer::SetupDevice()
 {
@@ -148,7 +268,7 @@ void Renderer::CreateSwapChain()
 	swapChainDesc.BufferCount = NUM_FRAMES;
 	swapChainDesc.Width = Window::Get().GetWidth();
 	swapChainDesc.Height = Window::Get().GetHeight();
-	swapChainDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	swapChainDesc.Format = m_backBufferFormat;
 	swapChainDesc.SampleDesc.Count = 1;
 	swapChainDesc.SampleDesc.Quality = 0;
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
@@ -187,7 +307,7 @@ void Renderer::CreateCommandList()
 void Renderer::ResetCommandList()
 {
 	ThrowIfFailed(m_d3d12CommandAllocators[m_frameIndex]->Reset());
-	ThrowIfFailed(m_d3d12CommandList->Reset(m_d3d12CommandAllocators[m_frameIndex].Get(), nullptr));
+	ThrowIfFailed(m_d3d12CommandList->Reset(m_d3d12CommandAllocators[m_frameIndex].Get(), m_pipelineStateObject.Get()));
 }
 
 void Renderer::CreateRTVDescriptorHeap()
@@ -217,15 +337,13 @@ void Renderer::CreateRenderTargetViews()
 
 void Renderer::CreateDepthStencilView()
 {
-	DXGI_FORMAT depthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
-	
 	D3D12_RESOURCE_DESC desc;
 	desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
 	desc.Alignment = 0;
 	desc.Width = Window::Get().GetWidth();
 	desc.Height = Window::Get().GetHeight();
 	desc.MipLevels = 1;
-	desc.Format = depthStencilFormat;
+	desc.Format = m_depthStencilFormat;
 	desc.SampleDesc.Count = 1;
 	desc.SampleDesc.Quality = 0;
 	desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -233,7 +351,7 @@ void Renderer::CreateDepthStencilView()
 	desc.DepthOrArraySize = 1;
 
 	D3D12_CLEAR_VALUE clearValue;
-	clearValue.Format = depthStencilFormat;
+	clearValue.Format = m_depthStencilFormat;
 	clearValue.DepthStencil.Depth = 1.0f;
 	clearValue.DepthStencil.Stencil = 0.0f;
 	
@@ -247,9 +365,15 @@ void Renderer::CreateDepthStencilView()
 		&clearValue,
 		IID_PPV_ARGS(&m_depthStencilBuffer)));
 
+	D3D12_DEPTH_STENCIL_VIEW_DESC viewDesc;
+	viewDesc.Flags = D3D12_DSV_FLAG_NONE;
+	viewDesc.Format = m_depthStencilFormat;
+	viewDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+	viewDesc.Texture2D.MipSlice = 0;
+	
 	m_d3d12Device->CreateDepthStencilView(
 		m_depthStencilBuffer.Get(),
-		nullptr,
+		&viewDesc,
 		m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 	
 	m_d3d12CommandList->ResourceBarrier(
@@ -260,12 +384,11 @@ void Renderer::CreateDepthStencilView()
 			D3D12_RESOURCE_STATE_DEPTH_WRITE));
 
 	ThrowIfFailed(m_d3d12CommandList->Close());
-
+	
 	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-
+	
 	FlushCommandQueue();
-	ResetCommandList();
 }
 
 void Renderer::CreateDSVDescriptorHeap()
@@ -279,6 +402,118 @@ void Renderer::CreateDSVDescriptorHeap()
 	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(
 		&desc,
 		IID_PPV_ARGS(&m_d3d12DSVDescriptorHeap)));
+}
+
+void Renderer::CreateVertexAndIndexBuffer()
+{
+	m_vertexBuffer = CreateDefaultBuffer(vertices, vbByteSize, m_vertexBufferUploader);
+	m_vertexBuffer->SetName(L"VertexBuffer");
+
+	m_vertexBufferView = {};
+	m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
+	m_vertexBufferView.SizeInBytes = vbByteSize;
+	m_vertexBufferView.StrideInBytes = sizeof(Vertex);
+	
+	m_vertexBuffers[0] = m_vertexBufferView;
+
+	m_indexBuffer = CreateDefaultBuffer(indices, 36 * sizeof(uint16_t), m_indexBufferUploader);
+	m_indexBuffer->SetName(L"IndexBuffer");
+
+	m_indexBufferView = {};
+	m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
+	m_indexBufferView.SizeInBytes = 36 * sizeof(uint16_t);
+	m_indexBufferView.Format = DXGI_FORMAT_R16_UINT;
+}
+
+void Renderer::CreateConstantBufferView()
+{
+	m_d3d12Device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(256),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&m_constantBuffer));
+
+	D3D12_DESCRIPTOR_HEAP_DESC desc;
+	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	desc.NumDescriptors = 1;
+	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	desc.NodeMask = 0;
+
+	m_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_CBVDescriptorHeap));
+	
+	m_constantBuffer->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData));
+}
+
+void Renderer::CreateRootSignature()
+{
+	CD3DX12_ROOT_PARAMETER rootParameters[1];
+	CD3DX12_DESCRIPTOR_RANGE cbvTable;
+
+	cbvTable.Init(
+		D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
+		1,
+		0);
+
+	rootParameters[0].InitAsDescriptorTable(1, &cbvTable);
+
+	CD3DX12_ROOT_SIGNATURE_DESC desc = {};
+	desc.NumParameters = 1;
+	desc.pParameters = rootParameters;
+	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+	ComPtr<ID3DBlob> serializedRootSignature = nullptr;
+	ComPtr<ID3DBlob> errorBlob = nullptr;
+
+	HRESULT hr = D3D12SerializeRootSignature(
+		&desc,
+		D3D_ROOT_SIGNATURE_VERSION_1,
+		&serializedRootSignature,
+		&errorBlob);
+
+	if(errorBlob != nullptr)
+	{
+		OutputDebugStringA(static_cast<char*>(errorBlob->GetBufferPointer()));
+	}
+	ThrowIfFailed(hr);
+	
+	ThrowIfFailed(m_d3d12Device->CreateRootSignature(
+		0,
+		serializedRootSignature->GetBufferPointer(),
+		serializedRootSignature->GetBufferSize(),
+		IID_PPV_ARGS(&m_rootSignature)));
+}
+
+void Renderer::CreatePipelineState()
+{
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
+	desc.VS = {static_cast<BYTE*>(m_vertexShader->GetBufferPointer()), m_vertexShader->GetBufferSize()};
+	desc.PS = {static_cast<BYTE*>(m_pixelShader->GetBufferPointer()), m_pixelShader->GetBufferSize()};
+	desc.InputLayout = {inputLayout, _countof(inputLayout)};
+	desc.pRootSignature = m_rootSignature.Get();
+
+	desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	
+	desc.SampleMask = UINT_MAX;
+
+	desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	
+	desc.NumRenderTargets = 1;
+	desc.RTVFormats[0] = m_backBufferFormat;
+	desc.SampleDesc.Count = 1;
+	desc.SampleDesc.Quality = 0;
+	desc.DSVFormat = m_depthStencilFormat;
+
+	ThrowIfFailed(m_d3d12Device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_pipelineStateObject)));
+}
+
+void Renderer::LoadShaders()
+{
+	ThrowIfFailed(D3DReadFileToBlob(L"PixelColorShader.cso", &m_pixelShader));
+	ThrowIfFailed(D3DReadFileToBlob(L"VertexColorShader.cso", &m_vertexShader));
 }
 
 void Renderer::SetViewport()
@@ -391,4 +626,59 @@ ComPtr<ID3D12Device2> Renderer::GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGI
 #endif
 
 	return device;
+}
+
+ComPtr<ID3D12Resource> Renderer::CreateDefaultBuffer(const void* initData, UINT64 byteSize, ComPtr<ID3D12Resource> uploadBuffer)
+{
+	ThrowIfFailed(m_d3d12Device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(byteSize),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&uploadBuffer)));
+
+	ComPtr<ID3D12Resource> defaultBuffer;
+
+	ThrowIfFailed(m_d3d12Device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(byteSize),
+		D3D12_RESOURCE_STATE_COMMON,
+		nullptr,
+		IID_PPV_ARGS(&defaultBuffer)));
+
+	D3D12_SUBRESOURCE_DATA subResourceData;
+	subResourceData.pData = initData;
+	subResourceData.RowPitch = byteSize;
+	subResourceData.SlicePitch = byteSize;
+
+	m_d3d12CommandList->ResourceBarrier(
+		1,
+		&CD3DX12_RESOURCE_BARRIER::Transition(
+			defaultBuffer.Get(),
+			D3D12_RESOURCE_STATE_COMMON,
+			D3D12_RESOURCE_STATE_COPY_DEST));
+
+	UpdateSubresources<1>(
+		m_d3d12CommandList.Get(),
+		defaultBuffer.Get(),
+		uploadBuffer.Get(),
+		0,
+		0,
+		1,
+		&subResourceData);
+
+	m_d3d12CommandList->ResourceBarrier(
+		1,
+		&CD3DX12_RESOURCE_BARRIER::Transition(
+			defaultBuffer.Get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			D3D12_RESOURCE_STATE_GENERIC_READ));
+
+	m_d3d12CommandList->Close();
+	FlushCommandQueue();
+	ResetCommandList();
+	
+	return defaultBuffer;
 }

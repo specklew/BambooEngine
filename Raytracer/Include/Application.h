@@ -1,5 +1,4 @@
 #pragma once
-#include <chrono>
 
 #include "HighResolutionClock.h"
 #include "Renderer.h"
@@ -12,9 +11,12 @@ public:
 	void Run();
 
 private:
+	friend class Window;
+	
 	void GameLoop();
+	void OnMouseMove(WPARAM btnState, int x, int y);
 
-	Renderer m_renderer;
+	std::shared_ptr<Renderer> m_renderer;
 
 	HINSTANCE m_hInstance;
 	HighResolutionClock m_clock;
