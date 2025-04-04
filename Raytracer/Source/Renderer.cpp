@@ -12,6 +12,8 @@
 #include "InputElements.h"
 #include "Window.h"
 
+#define ENABLE_GPU_BASED_VALIDATION 1
+
 using namespace Microsoft::WRL;
 
 Vertex vertices[] = {
@@ -50,7 +52,7 @@ constexpr UINT64 vbByteSize = 8 * sizeof(Vertex);
 
 void Renderer::Initialize()
 {
-	SetupDevice();
+	SetupDeviceAndDebug();
 	
 	CreateCommandQueue();
 	CreateCommandAllocators();
@@ -65,7 +67,8 @@ void Renderer::Initialize()
 
 	CreateDSVDescriptorHeap();
 	CreateDepthStencilView();
-
+	ResetCommandList();
+	
 	CreateVertexAndIndexBuffer();
 	CreateConstantBufferView();
 	CreateRootSignature();
@@ -205,7 +208,7 @@ void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
 	m_lastMousePosY = y;
 }
 
-void Renderer::SetupDevice()
+void Renderer::SetupDeviceAndDebug()
 {
 
 #ifdef _DEBUG
@@ -221,6 +224,12 @@ void Renderer::SetupDevice()
 #endif
 
 	ThrowIfFailed(::CreateDXGIFactory2(createFactoryFlags, IID_PPV_ARGS(&m_dxgiFactory)));
+
+#ifdef _DEBUG
+	Verify(debugController.As(&m_spDebugController));
+
+	m_spDebugController->SetEnableGPUBasedValidation(ENABLE_GPU_BASED_VALIDATION);
+#endif
 	
 	m_dxgiAdapter = GetHardwareAdapter();
 

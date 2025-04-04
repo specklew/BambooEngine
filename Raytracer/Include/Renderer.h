@@ -15,7 +15,7 @@ public:
 private:
 
 	
-	void SetupDevice();
+	void SetupDeviceAndDebug();
 	void CreateCommandQueue();
 	void CreateCommandAllocators();
 	void CreateFence();
@@ -50,6 +50,8 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Device2> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBuffer(const void* initData, UINT64 byteSize, Microsoft::WRL::ComPtr<ID3D12Resource> uploadBuffer);
+
+	Microsoft::WRL::ComPtr<ID3D12Debug1> m_spDebugController;
 	
 	Microsoft::WRL::ComPtr<IDXGIAdapter4> m_dxgiAdapter;
 	Microsoft::WRL::ComPtr<ID3D12Device2> m_d3d12Device;
