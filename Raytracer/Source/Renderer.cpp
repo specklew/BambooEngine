@@ -10,6 +10,8 @@
 
 #include "Helpers.h"
 #include "InputElements.h"
+#include "ResourceManager.h"
+#include "Shader.h"
 #include "Window.h"
 
 #define ENABLE_GPU_BASED_VALIDATION 1
@@ -48,11 +50,27 @@ std::uint16_t indices[] = {
 	4, 3, 7
 };
 
+struct ObjectConstants
+{
+	DirectX::XMFLOAT4X4 WorldViewProj = Math::Identity4x4();
+};
+
 constexpr UINT64 vbByteSize = 8 * sizeof(Vertex);
+
+auto& resourceManager = ResourceManager::Get();
 
 void Renderer::Initialize()
 {
+
+	auto psh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.ps.shader"));
+	m_pixelShader = resourceManager.shaders.GetResource(psh).bytecode;
+	auto vsh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.vs.shader"));
+	m_vertexShader = resourceManager.shaders.GetResource(vsh).bytecode;
+
+	
 	SetupDeviceAndDebug();
+	CheckTearingSupport();
+	CheckRayTracingSupport();
 	
 	CreateCommandQueue();
 	CreateCommandAllocators();
@@ -72,7 +90,6 @@ void Renderer::Initialize()
 	CreateVertexAndIndexBuffer();
 	CreateConstantBufferView();
 	CreateRootSignature();
-	LoadShaders();
 
 	CreatePipelineState();
 
@@ -81,35 +98,43 @@ void Renderer::Initialize()
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
 
 	FlushCommandQueue();
-	ResetCommandList();
-	
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)
 {
 	using namespace DirectX;
+
+	XMMATRIX P = XMMatrixPerspectiveFovLH(0.25* 3.14159265358979323846f, static_cast<float>(Window::Get().GetWidth()) / static_cast<float>(Window::Get().GetHeight()), 0.1f, 100.0f);
+	XMStoreFloat4x4(&m_proj, P);
 	
-	float x = m_radius*sinf(m_phi)*cosf(m_theta);
-	float z = m_radius*sinf(m_phi)*sinf(m_theta);
-	float y = m_radius*cosf(m_phi);
+    // Convert Spherical to Cartesian coordinates.
+    float x = m_radius*sinf(m_phi)*cosf(m_theta);
+    float z = m_radius*sinf(m_phi)*sinf(m_theta);
+    float y = m_radius*cosf(m_phi);
 
-	XMVECTOR pos = XMVectorSet(x, y, z, 1.0f);
-	XMVECTOR target = XMVectorZero();
-	XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    // Build the view matrix.
+    XMVECTOR pos = XMVectorSet(x, y, z, 1.0f);
+    XMVECTOR target = XMVectorZero();
+    XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
-	XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
-	XMStoreFloat4x4(&m_view, view);
-	XMMATRIX world = XMLoadFloat4x4(&m_world);
-	XMMATRIX proj = XMLoadFloat4x4(&m_proj);
+    XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
+    XMStoreFloat4x4(&m_view, view);
 
-	XMMATRIX worldViewProj = world*view*proj;
+    XMMATRIX world = XMLoadFloat4x4(&m_world);
+    XMMATRIX proj = XMLoadFloat4x4(&m_proj);
+    XMMATRIX worldViewProj = world*view*proj;
 
-	memcpy(m_mappedData, &worldViewProj, sizeof(worldViewProj));
+	ObjectConstants constants;
+	XMStoreFloat4x4(&constants.WorldViewProj, XMMatrixTranspose(worldViewProj));
+
+	memcpy(&m_mappedData[0], &constants, sizeof(constants));
 }
 
 void Renderer::Render(double elapsedTime, double totalTime)
 {
+	ResetCommandList();
 	SetViewport();
+	SetScissorRect();
 	
 	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
 	
@@ -139,18 +164,25 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			0,
 			0,
 			nullptr);
+		
+		m_d3d12CommandList->OMSetRenderTargets(1,
+		&rtvHandle,
+		true,
+		&m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 	}
 
 	ID3D12DescriptorHeap* descriptorHeaps[] = {m_CBVDescriptorHeap.Get()};
+
+	m_d3d12CommandList->SetPipelineState(m_pipelineStateObject.Get());
 	m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 	m_d3d12CommandList->SetGraphicsRootSignature(m_rootSignature.Get());
 
 	m_d3d12CommandList->IASetVertexBuffers(0, 1, m_vertexBuffers);
 	m_d3d12CommandList->IASetIndexBuffer(&m_indexBufferView);
-	m_d3d12CommandList->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_CBVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-
+	
 	m_d3d12CommandList->DrawIndexedInstanced(_countof(indices), 1, 0, 0, 0);
 
 	{
@@ -167,17 +199,17 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
 	
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-	UINT presentFlags = CheckTearingSupport() ? DXGI_PRESENT_ALLOW_TEARING : 0;
+	UINT presentFlags = m_tearingSupport ? DXGI_PRESENT_ALLOW_TEARING : 0; // TODO: do not check every time
 
 	ThrowIfFailed(m_dxgiSwapChain->Present(0, presentFlags));
 
 	FlushCommandQueue();
-	
-	ResetCommandList();
 }
 
 void Renderer::CleanUp()
 {
+	FlushCommandQueue();
+	
 	m_constantBuffer->Unmap(0, nullptr);
 }
 
@@ -226,16 +258,15 @@ void Renderer::SetupDeviceAndDebug()
 	ThrowIfFailed(::CreateDXGIFactory2(createFactoryFlags, IID_PPV_ARGS(&m_dxgiFactory)));
 
 #ifdef _DEBUG
-	Verify(debugController.As(&m_spDebugController));
+	ComPtr<ID3D12Debug1> debugController1;
+	ThrowIfFailed(debugController.As(&debugController1));
 
-	m_spDebugController->SetEnableGPUBasedValidation(ENABLE_GPU_BASED_VALIDATION);
+	debugController1->SetEnableGPUBasedValidation(ENABLE_GPU_BASED_VALIDATION);
 #endif
-	
-	m_dxgiAdapter = GetHardwareAdapter();
 
-	if (m_dxgiAdapter)
+	if (ComPtr<IDXGIAdapter4> dxgiAdapter = GetHardwareAdapter())
 	{
-		m_d3d12Device = GetDeviceForAdapter(m_dxgiAdapter);
+		m_d3d12Device = GetDeviceForAdapter(dxgiAdapter);
 	}
 }
 
@@ -251,7 +282,7 @@ void Renderer::CreateCommandQueue()
 
 void Renderer::CreateCommandAllocators()
 {
-	for (UINT i = 0; i < NUM_FRAMES; ++i)
+	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
 	{
 		ThrowIfFailed(m_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_d3d12CommandAllocators[i])));
 	}
@@ -274,7 +305,7 @@ void Renderer::CreateFence()
 void Renderer::CreateSwapChain()
 {
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-	swapChainDesc.BufferCount = NUM_FRAMES;
+	swapChainDesc.BufferCount = Constants::Graphics::NUM_FRAMES;
 	swapChainDesc.Width = Window::Get().GetWidth();
 	swapChainDesc.Height = Window::Get().GetHeight();
 	swapChainDesc.Format = m_backBufferFormat;
@@ -283,6 +314,8 @@ void Renderer::CreateSwapChain()
 	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 	swapChainDesc.Flags = CheckTearingSupport() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+	swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
+	swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
 	
 	IDXGISwapChain1* swapChain1;
 	
@@ -322,7 +355,7 @@ void Renderer::ResetCommandList()
 void Renderer::CreateRTVDescriptorHeap()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC desc = {};
-	desc.NumDescriptors = NUM_FRAMES;
+	desc.NumDescriptors = Constants::Graphics::NUM_FRAMES;
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 
@@ -335,7 +368,7 @@ void Renderer::CreateRenderTargetViews()
 {
 	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 
-	for (UINT i = 0; i < NUM_FRAMES; ++i)
+	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
 	{
 		ThrowIfFailed(m_dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
 		m_d3d12Device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
@@ -425,17 +458,26 @@ void Renderer::CreateVertexAndIndexBuffer()
 	
 	m_vertexBuffers[0] = m_vertexBufferView;
 
-	m_indexBuffer = CreateDefaultBuffer(indices, 36 * sizeof(uint16_t), m_indexBufferUploader);
+	m_indexBuffer = CreateDefaultBuffer(indices, sizeof(indices), m_indexBufferUploader);
 	m_indexBuffer->SetName(L"IndexBuffer");
 
 	m_indexBufferView = {};
 	m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
-	m_indexBufferView.SizeInBytes = 36 * sizeof(uint16_t);
+	m_indexBufferView.SizeInBytes = sizeof(indices);
 	m_indexBufferView.Format = DXGI_FORMAT_R16_UINT;
 }
 
 void Renderer::CreateConstantBufferView()
 {
+
+	D3D12_DESCRIPTOR_HEAP_DESC desc;
+	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	desc.NumDescriptors = 1;
+	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	desc.NodeMask = 0;
+
+	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_CBVDescriptorHeap)));
+	
 	m_d3d12Device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,
@@ -444,15 +486,14 @@ void Renderer::CreateConstantBufferView()
 		nullptr,
 		IID_PPV_ARGS(&m_constantBuffer));
 
-	D3D12_DESCRIPTOR_HEAP_DESC desc;
-	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = 1;
-	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	desc.NodeMask = 0;
-
-	m_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_CBVDescriptorHeap));
+	m_constantBuffer->SetName(L"WorldProjectionBuffer");
+	ThrowIfFailed(m_constantBuffer->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData)));
 	
-	m_constantBuffer->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData));
+	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+	cbvDesc.BufferLocation = m_constantBuffer->GetGPUVirtualAddress();
+	cbvDesc.SizeInBytes = static_cast<UINT>(sizeof(DirectX::XMFLOAT4X4) + 255) & ~255;
+
+	m_d3d12Device->CreateConstantBufferView(&cbvDesc, m_CBVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 }
 
 void Renderer::CreateRootSignature()
@@ -496,6 +537,7 @@ void Renderer::CreateRootSignature()
 
 void Renderer::CreatePipelineState()
 {
+	
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
 	desc.VS = {static_cast<BYTE*>(m_vertexShader->GetBufferPointer()), m_vertexShader->GetBufferSize()};
 	desc.PS = {static_cast<BYTE*>(m_pixelShader->GetBufferPointer()), m_pixelShader->GetBufferSize()};
@@ -517,12 +559,7 @@ void Renderer::CreatePipelineState()
 	desc.DSVFormat = m_depthStencilFormat;
 
 	ThrowIfFailed(m_d3d12Device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_pipelineStateObject)));
-}
-
-void Renderer::LoadShaders()
-{
-	ThrowIfFailed(D3DReadFileToBlob(L"PixelColorShader.cso", &m_pixelShader));
-	ThrowIfFailed(D3DReadFileToBlob(L"VertexColorShader.cso", &m_vertexShader));
+	m_pipelineStateObject->SetName(L"Default Pipeline State");
 }
 
 void Renderer::SetViewport()
@@ -536,6 +573,17 @@ void Renderer::SetViewport()
 	viewport.MaxDepth = 1.0f;
 
 	m_d3d12CommandList->RSSetViewports(1, &viewport);
+}
+
+void Renderer::SetScissorRect()
+{
+	D3D12_RECT scissorRect;
+	scissorRect.left = 0;
+	scissorRect.top = 0;
+	scissorRect.right = Window::Get().GetWidth();
+	scissorRect.bottom = Window::Get().GetHeight();
+
+	m_d3d12CommandList->RSSetScissorRects(1, &scissorRect);
 }
 
 void Renderer::FlushCommandQueue()
@@ -560,8 +608,18 @@ bool Renderer::CheckTearingSupport()
 		tearingAllowed = false;
 	}
 	
-
+	m_tearingSupport = tearingAllowed;
 	return tearingAllowed;
+}
+
+bool Renderer::CheckRayTracingSupport()
+{
+	D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
+	ThrowIfFailed(m_d3d12Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
+	if (options5.RaytracingTier < D3D12_RAYTRACING_TIER_1_0)
+	{
+		throw std::runtime_error("Raytracing is not supported on this device.");
+	}	
 }
 
 ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
@@ -598,47 +656,25 @@ ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
 	return adapter;
 }
 
-ComPtr<ID3D12Device2> Renderer::GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter)
+ComPtr<ID3D12Device4> Renderer::GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter)
 {
-	ComPtr<ID3D12Device2> device;
+	ComPtr<ID3D12Device4> device;
 	ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)));
 
 #ifdef _DEBUG
-
-	ComPtr<ID3D12InfoQueue> pInfoQueue;
-
-	if (SUCCEEDED(device.As(&pInfoQueue)))
-	{
-		pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
-		pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
-		pInfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
-
-		D3D12_MESSAGE_SEVERITY severities[] = {
-			D3D12_MESSAGE_SEVERITY_INFO
-		};
-
-		D3D12_MESSAGE_ID denyIds[] = {
-			D3D12_MESSAGE_ID_CLEARRENDERTARGETVIEW_MISMATCHINGCLEARVALUE,
-			D3D12_MESSAGE_ID_MAP_INVALID_NULLRANGE,
-			D3D12_MESSAGE_ID_UNMAP_INVALID_NULLRANGE
-		};
-
-		D3D12_INFO_QUEUE_FILTER newFilter = {};
-		newFilter.DenyList.NumSeverities = _countof(severities);
-		newFilter.DenyList.pSeverityList = severities;
-		newFilter.DenyList.NumIDs = _countof(denyIds);
-		newFilter.DenyList.pIDList = denyIds;
-
-		ThrowIfFailed(pInfoQueue->PushStorageFilter(&newFilter));
-	}
-
+	ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&m_infoQueue)));
+	ThrowIfFailed(m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true));
+	ThrowIfFailed(m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true));
+	ThrowIfFailed(m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true));
 #endif
+
 
 	return device;
 }
 
-ComPtr<ID3D12Resource> Renderer::CreateDefaultBuffer(const void* initData, UINT64 byteSize, ComPtr<ID3D12Resource> uploadBuffer)
+ComPtr<ID3D12Resource> Renderer::CreateDefaultBuffer(const void* initData, UINT64 byteSize, ComPtr<ID3D12Resource> &uploadBuffer)
 {
+	
 	ThrowIfFailed(m_d3d12Device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,
@@ -647,6 +683,7 @@ ComPtr<ID3D12Resource> Renderer::CreateDefaultBuffer(const void* initData, UINT6
 		nullptr,
 		IID_PPV_ARGS(&uploadBuffer)));
 
+	uploadBuffer->SetName(L"IntermediateUploadBuffer");
 	ComPtr<ID3D12Resource> defaultBuffer;
 
 	ThrowIfFailed(m_d3d12Device->CreateCommittedResource(
@@ -669,13 +706,9 @@ ComPtr<ID3D12Resource> Renderer::CreateDefaultBuffer(const void* initData, UINT6
 			D3D12_RESOURCE_STATE_COMMON,
 			D3D12_RESOURCE_STATE_COPY_DEST));
 
-	UpdateSubresources<1>(
-		m_d3d12CommandList.Get(),
-		defaultBuffer.Get(),
-		uploadBuffer.Get(),
-		0,
-		0,
-		1,
+	UpdateSubresources(m_d3d12CommandList.Get(),
+		defaultBuffer.Get(), uploadBuffer.Get(),
+		0, 0, 1,
 		&subResourceData);
 
 	m_d3d12CommandList->ResourceBarrier(
@@ -684,10 +717,6 @@ ComPtr<ID3D12Resource> Renderer::CreateDefaultBuffer(const void* initData, UINT6
 			defaultBuffer.Get(),
 			D3D12_RESOURCE_STATE_COPY_DEST,
 			D3D12_RESOURCE_STATE_GENERIC_READ));
-
-	m_d3d12CommandList->Close();
-	FlushCommandQueue();
-	ResetCommandList();
 	
 	return defaultBuffer;
 }

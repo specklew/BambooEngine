@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.614.1\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.614.1\build\native\Microsoft.Direct3D.D3D12.props')" />
+  <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\Microsoft.Direct3D.D3D12.props')" />
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
@@ -61,10 +61,12 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>d3d12.lib;dxgi.lib;dxguid.lib;d3dcompiler.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;dxguid.lib;d3dcompiler.lib;dxcompiler.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)Vendor\DXC\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <FxCompile>
-      <ShaderModel>5.0</ShaderModel>
+      <ShaderModel>6.0</ShaderModel>
+      <EntryPointName />
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -87,8 +89,13 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>d3d12.lib;dxgi.lib;dxguid.lib;d3dcompiler.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;dxguid.lib;d3dcompiler.lib;dxcompiler.lib;$(CoreLibraryDependencies);%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)Vendor\DXC\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
+    <FxCompile>
+      <ShaderModel>6.0</ShaderModel>
+      <EntryPointName />
+    </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Include\Application.h" />
@@ -97,8 +104,19 @@
     <ClInclude Include="Include\HighResolutionClock.h" />
     <ClInclude Include="Include\InputElements.h" />
     <ClInclude Include="Include\pch.h" />
+    <ClInclude Include="Include\Random.h" />
     <ClInclude Include="Include\Renderer.h" />
+    <ClInclude Include="Include\ResourceManager.h" />
+    <ClInclude Include="Include\ResourceManagerTypes.h" />
+    <ClInclude Include="Include\Shader.h" />
+    <ClInclude Include="Include\ShaderCompilation.h" />
+    <ClInclude Include="Include\StringHash.h" />
+    <ClInclude Include="Include\StringId.h" />
     <ClInclude Include="Include\Window.h" />
+    <ClInclude Include="Vendor\DXC\inc\d3d12shader.h" />
+    <ClInclude Include="Vendor\DXC\inc\dxcapi.h" />
+    <ClInclude Include="Vendor\DXC\inc\dxcerrors.h" />
+    <ClInclude Include="Vendor\DXC\inc\dxcisense.h" />
     <ClInclude Include="Vendor\imgui\backends\imgui_impl_allegro5.h" />
     <ClInclude Include="Vendor\imgui\backends\imgui_impl_android.h" />
     <ClInclude Include="Vendor\imgui\backends\imgui_impl_dx10.h" />
@@ -137,85 +155,18 @@
     <ClInclude Include="Vendor\imgui\misc\single_file\imgui_single_file.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Resources\Shaders\colorShader.hlsl" />
     <ClCompile Include="Source\Application.cpp" />
     <ClCompile Include="Source\Helpers.cpp" />
     <ClCompile Include="Source\HIghResolutionClock.cpp" />
-    <ClCompile Include="Source\InputElements.cpp">
-      <RuntimeLibrary>MultiThreadedDebugDll</RuntimeLibrary>
-      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
-      <Optimization>Disabled</Optimization>
-      <SupportJustMyCode>true</SupportJustMyCode>
-      <AssemblerOutput>NoListing</AssemblerOutput>
-      <AssemblerListingLocation>x64\Debug\</AssemblerListingLocation>
-      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
-      <BrowseInformation>false</BrowseInformation>
-      <BrowseInformationFile>x64\Debug\</BrowseInformationFile>
-      <CompileAs>Default</CompileAs>
-      <ConformanceMode>false</ConformanceMode>
-      <DiagnosticsFormat>Column</DiagnosticsFormat>
-      <DisableLanguageExtensions>false</DisableLanguageExtensions>
-      <ErrorReporting>Prompt</ErrorReporting>
-      <ExpandAttributedSource>false</ExpandAttributedSource>
-      <ExceptionHandling>Sync</ExceptionHandling>
-      <EnableASAN>false</EnableASAN>
-      <EnableFuzzer>false</EnableFuzzer>
-      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
-      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
-      <EnableVectorLength>NotSet</EnableVectorLength>
-      <FloatingPointModel>Precise</FloatingPointModel>
-      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
-      <GenerateModuleDependencies>false</GenerateModuleDependencies>
-      <GenerateSourceDependencies>false</GenerateSourceDependencies>
-      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
-      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
-      <IntrinsicFunctions>false</IntrinsicFunctions>
-      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <MinimalRebuild>false</MinimalRebuild>
-      <ModuleDependenciesFile>x64\Debug\</ModuleDependenciesFile>
-      <ModuleOutputFile>x64\Debug\</ModuleOutputFile>
-      <OmitDefaultLibName>false</OmitDefaultLibName>
-      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
-      <WholeProgramOptimization>false</WholeProgramOptimization>
-      <ObjectFileName>x64\Debug\</ObjectFileName>
-      <CallingConvention>Cdecl</CallingConvention>
-      <ProgramDataBaseFileName>x64\Debug\vc143.pdb</ProgramDataBaseFileName>
-      <PrecompiledHeader>Create</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderOutputFile>x64\Debug\Raytracer.pch</PrecompiledHeaderOutputFile>
-      <PreprocessToFile>false</PreprocessToFile>
-      <PreprocessKeepComments>false</PreprocessKeepComments>
-      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
-      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
-      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
-      <ShowIncludes>false</ShowIncludes>
-      <SourceDependenciesFile>x64\Debug\</SourceDependenciesFile>
-      <SuppressStartupBanner>true</SuppressStartupBanner>
-      <BufferSecurityCheck>true</BufferSecurityCheck>
-      <SmallerTypeCheck>false</SmallerTypeCheck>
-      <SpectreMitigation>false</SpectreMitigation>
-      <StructMemberAlignment>Default</StructMemberAlignment>
-      <TrackerLogDirectory>x64\Debug\Raytracer.tlog\</TrackerLogDirectory>
-      <TranslateIncludes>false</TranslateIncludes>
-      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
-      <TreatWarningAsError>false</TreatWarningAsError>
-      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
-      <UseFullPaths>true</UseFullPaths>
-      <WarningLevel>Level3</WarningLevel>
-      <XMLDocumentationFileName>x64\Debug\</XMLDocumentationFileName>
-      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
-      <IntelJCCErratum>false</IntelJCCErratum>
-      <BuildStlModules>false</BuildStlModules>
-      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
-      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
-      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
-      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_UNICODE;UNICODE;</PreprocessorDefinitions>
-      <SDLCheck>true</SDLCheck>
-      <LinkCompiled>true</LinkCompiled>
-    </ClCompile>
+    <ClCompile Include="Source\InputElements.cpp" />
+    <ClCompile Include="Source\Random.cpp" />
     <ClCompile Include="Source\Renderer.cpp" />
+    <ClCompile Include="Source\ResourceManager.cpp" />
+    <ClCompile Include="Source\ResourceManagerTypes.cpp" />
+    <ClCompile Include="Source\Shader.cpp" />
+    <ClCompile Include="Source\ShaderCompilation.cpp" />
+    <ClCompile Include="Source\StringId.cpp" />
     <ClCompile Include="Source\Window.cpp" />
     <ClCompile Include="Source\WinMain.cpp" />
     <ClCompile Include="Vendor\imgui\backends\imgui_impl_dx12.cpp">
@@ -252,197 +203,44 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
-  </ItemGroup>
-  <ItemGroup>
-    <FxCompile Include="Resources\Shaders\PixelColorShader.hlsl">
-      <ObjectFileOutput>D:\_Projects\2025\DirectX\ModularRaytracer\x64\Debug\%(Filename).cso</ObjectFileOutput>
-      <TrackerLogDirectory>x64\Debug\Raytracer.tlog\</TrackerLogDirectory>
-      <EntryPointName>main</EntryPointName>
-      <SuppressStartupBanner>true</SuppressStartupBanner>
-      <ShaderModel>5.0</ShaderModel>
-      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
-      <DisableOptimizations>true</DisableOptimizations>
-      <EnableDebuggingInformation>true</EnableDebuggingInformation>
-      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">main</EntryPointName>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
-    </FxCompile>
-    <FxCompile Include="Resources\Shaders\VertexColorShader.hlsl">
-      <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">5.0</ShaderModel>
-      <EntryPointName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">main</EntryPointName>
-      <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
-    </FxCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="Vendor\imgui\.editorconfig" />
-    <Content Include="Vendor\imgui\.gitattributes" />
-    <Content Include="Vendor\imgui\.github\FUNDING.yml" />
-    <Content Include="Vendor\imgui\.github\ISSUE_TEMPLATE\config.yml" />
-    <Content Include="Vendor\imgui\.github\ISSUE_TEMPLATE\issue_template.yml" />
-    <Content Include="Vendor\imgui\.github\pull_request_template.md" />
-    <Content Include="Vendor\imgui\.github\workflows\build.yml" />
-    <Content Include="Vendor\imgui\.github\workflows\manual.yml" />
-    <Content Include="Vendor\imgui\.github\workflows\scheduled.yml" />
-    <Content Include="Vendor\imgui\.github\workflows\static-analysis.yml" />
-    <Content Include="Vendor\imgui\.gitignore" />
-    <Content Include="Vendor\imgui\backends\imgui_impl_metal.mm" />
-    <Content Include="Vendor\imgui\backends\imgui_impl_osx.mm" />
-    <Content Include="Vendor\imgui\backends\sdlgpu3\build_instructions.txt" />
-    <Content Include="Vendor\imgui\backends\sdlgpu3\shader.frag" />
-    <Content Include="Vendor\imgui\backends\sdlgpu3\shader.vert" />
-    <Content Include="Vendor\imgui\backends\vulkan\build_instructions.txt" />
-    <Content Include="Vendor\imgui\backends\vulkan\generate_spv.sh" />
-    <Content Include="Vendor\imgui\backends\vulkan\glsl_shader.frag" />
-    <Content Include="Vendor\imgui\backends\vulkan\glsl_shader.vert" />
-    <Content Include="Vendor\imgui\docs\BACKENDS.md" />
-    <Content Include="Vendor\imgui\docs\CHANGELOG.txt" />
-    <Content Include="Vendor\imgui\docs\CONTRIBUTING.md" />
-    <Content Include="Vendor\imgui\docs\EXAMPLES.md" />
-    <Content Include="Vendor\imgui\docs\FAQ.md" />
-    <Content Include="Vendor\imgui\docs\FONTS.md" />
-    <Content Include="Vendor\imgui\docs\README.md" />
-    <Content Include="Vendor\imgui\docs\TODO.txt" />
-    <Content Include="Vendor\imgui\examples\example_allegro5\example_allegro5.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_allegro5\example_allegro5.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_allegro5\README.md" />
-    <Content Include="Vendor\imgui\examples\example_android_opengl3\android\.gitignore" />
-    <Content Include="Vendor\imgui\examples\example_android_opengl3\android\app\build.gradle" />
-    <Content Include="Vendor\imgui\examples\example_android_opengl3\android\app\src\main\AndroidManifest.xml" />
-    <Content Include="Vendor\imgui\examples\example_android_opengl3\android\app\src\main\java\MainActivity.kt" />
-    <Content Include="Vendor\imgui\examples\example_android_opengl3\android\build.gradle" />
-    <Content Include="Vendor\imgui\examples\example_android_opengl3\android\settings.gradle" />
-    <Content Include="Vendor\imgui\examples\example_android_opengl3\CMakeLists.txt" />
-    <Content Include="Vendor\imgui\examples\example_apple_metal\example_apple_metal.xcodeproj\project.pbxproj" />
-    <Content Include="Vendor\imgui\examples\example_apple_metal\iOS\Info-iOS.plist" />
-    <Content Include="Vendor\imgui\examples\example_apple_metal\iOS\LaunchScreen.storyboard" />
-    <Content Include="Vendor\imgui\examples\example_apple_metal\macOS\Info-macOS.plist" />
-    <Content Include="Vendor\imgui\examples\example_apple_metal\macOS\MainMenu.storyboard" />
-    <Content Include="Vendor\imgui\examples\example_apple_metal\main.mm" />
-    <Content Include="Vendor\imgui\examples\example_apple_metal\README.md" />
-    <Content Include="Vendor\imgui\examples\example_apple_opengl2\example_apple_opengl2.xcodeproj\project.pbxproj" />
-    <Content Include="Vendor\imgui\examples\example_apple_opengl2\main.mm" />
-    <Content Include="Vendor\imgui\examples\example_glfw_metal\main.mm" />
-    <Content Include="Vendor\imgui\examples\example_glfw_metal\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_glfw_opengl2\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_glfw_opengl2\example_glfw_opengl2.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_glfw_opengl2\example_glfw_opengl2.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_glfw_opengl2\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_glfw_opengl3\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_glfw_opengl3\example_glfw_opengl3.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_glfw_opengl3\example_glfw_opengl3.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_glfw_opengl3\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_glfw_opengl3\Makefile.emscripten" />
-    <Content Include="Vendor\imgui\examples\example_glfw_vulkan\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_glfw_vulkan\build_win64.bat" />
-    <Content Include="Vendor\imgui\examples\example_glfw_vulkan\CMakeLists.txt" />
-    <Content Include="Vendor\imgui\examples\example_glfw_vulkan\example_glfw_vulkan.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_glfw_vulkan\example_glfw_vulkan.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_glfw_wgpu\CMakeLists.txt" />
-    <Content Include="Vendor\imgui\examples\example_glfw_wgpu\Makefile.emscripten" />
-    <Content Include="Vendor\imgui\examples\example_glfw_wgpu\README.md" />
-    <Content Include="Vendor\imgui\examples\example_glfw_wgpu\web\index.html" />
-    <Content Include="Vendor\imgui\examples\example_glut_opengl2\example_glut_opengl2.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_glut_opengl2\example_glut_opengl2.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_glut_opengl2\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_null\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_null\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_directx11\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_directx11\example_sdl2_directx11.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_directx11\example_sdl2_directx11.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_metal\main.mm" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_metal\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl2\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl2\example_sdl2_opengl2.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl2\example_sdl2_opengl2.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl2\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl2\README.md" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl3\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl3\example_sdl2_opengl3.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl3\example_sdl2_opengl3.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl3\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl3\Makefile.emscripten" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_opengl3\README.md" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_sdlrenderer2\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_sdlrenderer2\example_sdl2_sdlrenderer2.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_sdlrenderer2\example_sdl2_sdlrenderer2.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_sdlrenderer2\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_sdlrenderer2\README.md" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_vulkan\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_vulkan\build_win64.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_vulkan\example_sdl2_vulkan.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_sdl2_vulkan\example_sdl2_vulkan.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_opengl3\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_opengl3\build_win64.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_opengl3\example_sdl3_opengl3.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_opengl3\example_sdl3_opengl3.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_opengl3\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_opengl3\Makefile.emscripten" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_opengl3\README.md" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_sdlgpu3\build_win64.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_sdlgpu3\example_sdl3_sdlgpu3.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_sdlgpu3\example_sdl3_sdlgpu3.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_sdlgpu3\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_sdlrenderer3\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_sdlrenderer3\example_sdl3_sdlrenderer3.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_sdlrenderer3\example_sdl3_sdlrenderer3.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_sdlrenderer3\Makefile" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_vulkan\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_vulkan\build_win64.bat" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_vulkan\example_sdl3_vulkan.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_sdl3_vulkan\example_sdl3_vulkan.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx10\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx10\example_win32_directx10.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx10\example_win32_directx10.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx11\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx11\example_win32_directx11.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx11\example_win32_directx11.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx12\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx12\example_win32_directx12.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx12\example_win32_directx12.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx9\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx9\example_win32_directx9.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_win32_directx9\example_win32_directx9.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_win32_opengl3\build_mingw.bat" />
-    <Content Include="Vendor\imgui\examples\example_win32_opengl3\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_win32_opengl3\example_win32_opengl3.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_win32_opengl3\example_win32_opengl3.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\example_win32_vulkan\build_win32.bat" />
-    <Content Include="Vendor\imgui\examples\example_win32_vulkan\build_win64.bat" />
-    <Content Include="Vendor\imgui\examples\example_win32_vulkan\example_win32_vulkan.vcxproj" />
-    <Content Include="Vendor\imgui\examples\example_win32_vulkan\example_win32_vulkan.vcxproj.filters" />
-    <Content Include="Vendor\imgui\examples\imgui_examples.sln" />
-    <Content Include="Vendor\imgui\examples\libs\emscripten\shell_minimal.html" />
-    <Content Include="Vendor\imgui\examples\libs\glfw\COPYING.txt" />
-    <Content Include="Vendor\imgui\examples\libs\glfw\lib-vc2010-32\glfw3.lib" />
-    <Content Include="Vendor\imgui\examples\libs\glfw\lib-vc2010-64\glfw3.lib" />
-    <Content Include="Vendor\imgui\examples\libs\usynergy\README.txt" />
-    <Content Include="Vendor\imgui\examples\README.txt" />
-    <Content Include="Vendor\imgui\LICENSE.txt" />
-    <Content Include="Vendor\imgui\misc\cpp\README.txt" />
-    <Content Include="Vendor\imgui\misc\debuggers\imgui.gdb" />
-    <Content Include="Vendor\imgui\misc\debuggers\imgui.natstepfilter" />
-    <Content Include="Vendor\imgui\misc\debuggers\README.txt" />
-    <Content Include="Vendor\imgui\misc\fonts\Cousine-Regular.ttf" />
-    <Content Include="Vendor\imgui\misc\fonts\DroidSans.ttf" />
-    <Content Include="Vendor\imgui\misc\fonts\Karla-Regular.ttf" />
-    <Content Include="Vendor\imgui\misc\fonts\ProggyClean.ttf" />
-    <Content Include="Vendor\imgui\misc\fonts\ProggyTiny.ttf" />
-    <Content Include="Vendor\imgui\misc\fonts\Roboto-Medium.ttf" />
-    <Content Include="Vendor\imgui\misc\freetype\README.md" />
-    <Content Include="Vendor\imgui\misc\README.txt" />
-  </ItemGroup>
-  <ItemGroup>
     <Natvis Include="Vendor\imgui\misc\debuggers\imgui.natvis" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="Resources\Shaders\colorShader.ps.shader" />
+    <Content Include="Resources\Shaders\colorShader.vs.shader" />
+    <Content Include="Vendor\DXC\bin\dxcompiler.dll" />
+    <Content Include="Vendor\DXC\bin\dxil.dll" />
+    <Content Include="Vendor\DXC\lib\dxcompiler.lib" />
+    <Content Include="Vendor\DXC\LICENSE-LLVM.txt" />
+    <Content Include="Vendor\DXC\LICENSE-MIT.txt" />
+    <Content Include="Vendor\DXC\LICENSE-MS.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <CopyFileToFolders Include="Resources\Shaders\Compiler\dxcompiler.dll">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</DeploymentContent>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="Resources\Shaders\Compiler\dxil.dll">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</DeploymentContent>
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
+      <DeploymentContent Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</DeploymentContent>
+    </CopyFileToFolders>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.614.1\build\native\Microsoft.Direct3D.D3D12.targets" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.614.1\build\native\Microsoft.Direct3D.D3D12.targets')" />
+    <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\Microsoft.Direct3D.D3D12.targets" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\Microsoft.Direct3D.D3D12.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.614.1\build\native\Microsoft.Direct3D.D3D12.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.614.1\build\native\Microsoft.Direct3D.D3D12.props'))" />
-    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.614.1\build\native\Microsoft.Direct3D.D3D12.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.614.1\build\native\Microsoft.Direct3D.D3D12.targets'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\Microsoft.Direct3D.D3D12.props')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\Microsoft.Direct3D.D3D12.props'))" />
+    <Error Condition="!Exists('..\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\Microsoft.Direct3D.D3D12.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\Microsoft.Direct3D.D3D12.targets'))" />
   </Target>
 </Project>

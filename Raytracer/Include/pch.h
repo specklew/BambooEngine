@@ -19,5 +19,7 @@
 #include <DirectXMath.h>
 #include <d3dx12.h>
 #include <d3dcompiler.h>
+#include <DXC/inc/dxcapi.h>
+#include <dxgidebug.h>
 
 #include <spdlog/spdlog.h>

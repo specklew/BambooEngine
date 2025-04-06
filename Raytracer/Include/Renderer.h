@@ -1,5 +1,6 @@
 #pragma once
 #include "Constants.h"
+#include "Helpers.h"
 
 class Renderer
 {
@@ -13,8 +14,6 @@ public:
 	void OnMouseMove(unsigned long long btnState, int x, int y);
 
 private:
-
-	
 	void SetupDeviceAndDebug();
 	void CreateCommandQueue();
 	void CreateCommandAllocators();
@@ -38,26 +37,27 @@ private:
 
 	void CreatePipelineState();
 
-	void LoadShaders();
-
 	void SetViewport();
+	void SetScissorRect();
 
 	void FlushCommandQueue();
 	
 	bool CheckTearingSupport();
+	bool CheckRayTracingSupport();
+
+	bool m_tearingSupport = false;
 	
 	Microsoft::WRL::ComPtr<IDXGIAdapter4> GetHardwareAdapter(bool useWarp = false);
-	Microsoft::WRL::ComPtr<ID3D12Device2> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);
+	Microsoft::WRL::ComPtr<ID3D12Device4> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);
 
-	Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBuffer(const void* initData, UINT64 byteSize, Microsoft::WRL::ComPtr<ID3D12Resource> uploadBuffer);
+	Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBuffer(const void* initData, UINT64 byteSize, Microsoft::WRL::ComPtr<ID3D12Resource> &uploadBuffer);
 
-	Microsoft::WRL::ComPtr<ID3D12Debug1> m_spDebugController;
+	Microsoft::WRL::ComPtr<ID3D12InfoQueue> m_infoQueue;
 	
-	Microsoft::WRL::ComPtr<IDXGIAdapter4> m_dxgiAdapter;
-	Microsoft::WRL::ComPtr<ID3D12Device2> m_d3d12Device;
+	Microsoft::WRL::ComPtr<ID3D12Device4> m_d3d12Device;
 	Microsoft::WRL::ComPtr<IDXGIFactory6> m_dxgiFactory;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue;
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_d3d12CommandAllocators[NUM_FRAMES];
+	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_d3d12CommandAllocators[Constants::Graphics::NUM_FRAMES];
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_d3d12Fence;
 	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_dxgiSwapChain;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_d3d12CommandList;
@@ -66,7 +66,7 @@ private:
 	DXGI_FORMAT m_depthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 	
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_d3d12RTVDescriptorHeap;
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_d3d12RenderTargets[NUM_FRAMES];
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_d3d12RenderTargets[Constants::Graphics::NUM_FRAMES];
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_d3d12DSVDescriptorHeap;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_depthStencilBuffer;
 
@@ -85,24 +85,24 @@ private:
 
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
 
-	Microsoft::WRL::ComPtr<ID3DBlob> m_pixelShader;
-	Microsoft::WRL::ComPtr<ID3DBlob> m_vertexShader;
+	Microsoft::WRL::ComPtr<IDxcBlob> m_pixelShader;
+	Microsoft::WRL::ComPtr<IDxcBlob> m_vertexShader;
 
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipelineStateObject;
 
 	UINT m_frameIndex = 0;
-	UINT64 m_fenceValues[NUM_FRAMES] = {};
+	UINT64 m_fenceValues[Constants::Graphics::NUM_FRAMES] = {};
 	HANDLE m_fenceEvent = nullptr;
 
 	UINT m_rtvDescriptorSize = 0;
 
 	int m_lastMousePosX = 0;
 	int m_lastMousePosY = 0;
-	float m_theta = 0;
-	float m_phi = 0;
-	float m_radius = 10;
+	float m_theta = 1.5f * DirectX::XM_PI;
+	float m_phi = DirectX::XM_PIDIV4;
+	float m_radius = 5.0f;
 
-	DirectX::XMFLOAT4X4 m_view = {};
-	DirectX::XMFLOAT4X4 m_world = {};
-	DirectX::XMFLOAT4X4 m_proj = {};
+	DirectX::XMFLOAT4X4 m_view = Math::Identity4x4();
+	DirectX::XMFLOAT4X4 m_world = Math::Identity4x4();
+	DirectX::XMFLOAT4X4 m_proj = Math::Identity4x4();
 };

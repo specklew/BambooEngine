@@ -1,22 +1,21 @@
 #pragma once
-#include <comdef.h>
-
-inline void Verify(HRESULT hr)
-{
-   if (!SUCCEEDED(hr))
-   {
-      spdlog::dump_backtrace();
-      
-      _com_error error(hr);
-      LPCTSTR errMsg = error.ErrorMessage();
-      std::wstring w;
-      w = errMsg;
-      std::string errorMessage = std::string(w.begin(), w.end()); // magic here
-      spdlog::error("Verification of HR failed with code: {}", hr);
-      spdlog::error("Error message: {}", errorMessage);
-      
-      assert(false);
-   }
-}
 
 void ThrowIfFailed(HRESULT hr);
+char* FormatTempString(const char* format, ...);
+void ReadTextFromFile(const char* szFilepath, char* buffer, int bufferSize);
+void ReadDataFromFile(const char* szFilepath, void* buffer, int bufferSize, bool text);
+void WriteTextToFile(const char* szFilepath, const char* buffer, int bufferSize);
+void WriteDataToFile(const char* szFilepath, const char* buffer, int bufferSize, const char* fileMode);
+
+template <typename T>
+__forceinline void AssertFreeClear(T** ptr)
+{
+    assert(*ptr != nullptr);
+    free(*ptr);
+    *ptr = nullptr;
+}
+
+namespace Math
+{
+    DirectX::XMFLOAT4X4 Identity4x4();
+}

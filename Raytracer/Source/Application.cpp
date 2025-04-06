@@ -2,6 +2,7 @@
 
 #include "Application.h"
 
+#include "ResourceManager.h"
 #include "Window.h"
 
 Application::Application(HINSTANCE hInstance) : m_hInstance(hInstance)
@@ -18,6 +19,10 @@ void Application::Run()
 	GameLoop();
 
 	m_renderer->CleanUp();
+	m_renderer.reset();
+
+	ResourceManager::Get().ReleaseResources();
+	//ReportLiveObjects();
 }
 
 void Application::GameLoop()
@@ -41,4 +46,18 @@ void Application::GameLoop()
 void Application::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	m_renderer->OnMouseMove(btnState, x, y);
+}
+
+void Application::ReportLiveObjects()
+{
+#ifdef _DEBUG
+	spdlog::info("***** Reporting live objects *****");
+	Microsoft::WRL::ComPtr<IDXGIDebug1> dxgiDebug;
+	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
+	{
+		ThrowIfFailed(dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_FLAGS(DXGI_DEBUG_RLO_SUMMARY | DXGI_DEBUG_RLO_IGNORE_INTERNAL)));
+	}
+
+	SPDLOG_INFO("***** Done Reporting Live Objects *****");
+#endif
 }

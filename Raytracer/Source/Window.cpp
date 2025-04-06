@@ -60,7 +60,7 @@ HRESULT Window::Initialize()
 	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 	//ParseCommandLineArgs(argv, argc); TODO: Parse
 
-	WCHAR windowClassName[MAX_STRING_LEN];
+	WCHAR windowClassName[Constants::MAX_STRING_LEN];
 	wcscpy_s(windowClassName, windowTitle.c_str());
 
 	WNDCLASSEX windowClass = { 0 };
