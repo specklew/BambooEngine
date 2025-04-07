@@ -12,12 +12,16 @@
 
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
-                              std::shared_ptr<AccelerationStructures> accelerationStructures)
+                              std::shared_ptr<AccelerationStructures> accelerationStructures,
+                              Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
+                              Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer)
 {
     m_device = device;
     m_commandList = commandList;
     m_accelerationStructures = accelerationStructures;
     m_shaderBindingTableGenerator = std::make_shared<nv_helpers_dx12::ShaderBindingTableGenerator>();
+    m_vertexBuffer = vertexBuffer;
+    m_indexBuffer = indexBuffer;
 
     InitializeRaytracingPipeline();
     CreateRaytracingOutputBuffer();
@@ -207,6 +211,9 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateHitSignature()
     spdlog::debug("Creating hit root signature");
     nv_helpers_dx12::RootSignatureGenerator rsGenerator;
 
+    rsGenerator.AddRootParameter(D3D12_ROOT_PARAMETER_TYPE_SRV);
+    rsGenerator.AddRootParameter(D3D12_ROOT_PARAMETER_TYPE_SRV, 1);
+    
     spdlog::debug("Generating hit root signature");
     return rsGenerator.Generate(m_device.Get(), true);
 }
@@ -280,7 +287,7 @@ void RaytracePass::CreateShaderBindingTable()
     spdlog::debug("Adding shaders to shader binding table");
     m_shaderBindingTableGenerator->AddRayGenerationProgram(m_rayGenShaderName, {heapPtr});
     m_shaderBindingTableGenerator->AddMissProgram(m_missShaderName, {});
-    m_shaderBindingTableGenerator->AddHitGroup(L"HitGroup", {});
+    m_shaderBindingTableGenerator->AddHitGroup(L"HitGroup", {(void*)m_vertexBuffer->GetGPUVirtualAddress(), (void*)m_indexBuffer->GetGPUVirtualAddress()});
 
     uint32_t sbtSize = m_shaderBindingTableGenerator->ComputeSBTSize();
 

@@ -106,7 +106,7 @@ void Renderer::Initialize()
 	SetupAccelerationStructures();
 
 	m_raytracePass = std::make_shared<RaytracePass>();
-	m_raytracePass->Initialize(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures);
+	m_raytracePass->Initialize(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures, m_vertexBuffer, m_indexBuffer);
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)

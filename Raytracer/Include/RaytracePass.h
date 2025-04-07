@@ -13,7 +13,9 @@ public:
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList, 
-        std::shared_ptr<AccelerationStructures> accelerationStructures);
+        std::shared_ptr<AccelerationStructures> accelerationStructures,
+        Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
+        Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer);
     
     void Render(Microsoft::WRL::ComPtr<ID3D12Resource> renderTarget);
     void Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj);
@@ -59,4 +61,7 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbDescriptorHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_cbCamera;
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBuffer;
 };
