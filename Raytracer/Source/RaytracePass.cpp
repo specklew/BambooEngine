@@ -1,6 +1,8 @@
 ﻿#include "pch.h"
 #include "RaytracePass.h"
 
+#include <wrl/client.h>
+
 #include "AccelerationStructures.h"
 #include "DXRHelper.h"
 #include "RaytracingPipelineGenerator.h"
