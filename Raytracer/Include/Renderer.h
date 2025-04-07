@@ -2,6 +2,9 @@
 #include "Constants.h"
 #include "Helpers.h"
 
+class RaytracePass;
+class AccelerationStructures;
+
 class Renderer
 {
 public:
@@ -12,6 +15,7 @@ public:
 	void Render(double elapsedTime, double totalTime);
 	void CleanUp();
 	void OnMouseMove(unsigned long long btnState, int x, int y);
+	void ToggleRasterization();
 
 private:
 	void SetupDeviceAndDebug();
@@ -45,16 +49,22 @@ private:
 	bool CheckTearingSupport();
 	bool CheckRayTracingSupport();
 
+	void SetupAccelerationStructures();
+
+	std::shared_ptr<RaytracePass> m_raytracePass;
+	std::shared_ptr<AccelerationStructures> m_accelerationStructures;
+	
 	bool m_tearingSupport = false;
+	bool m_rasterize = true;
 	
 	Microsoft::WRL::ComPtr<IDXGIAdapter4> GetHardwareAdapter(bool useWarp = false);
-	Microsoft::WRL::ComPtr<ID3D12Device4> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);
+	Microsoft::WRL::ComPtr<ID3D12Device5> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBuffer(const void* initData, UINT64 byteSize, Microsoft::WRL::ComPtr<ID3D12Resource> &uploadBuffer);
 
 	Microsoft::WRL::ComPtr<ID3D12InfoQueue> m_infoQueue;
 	
-	Microsoft::WRL::ComPtr<ID3D12Device4> m_d3d12Device;
+	Microsoft::WRL::ComPtr<ID3D12Device5> m_d3d12Device;
 	Microsoft::WRL::ComPtr<IDXGIFactory6> m_dxgiFactory;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue;
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_d3d12CommandAllocators[Constants::Graphics::NUM_FRAMES];
@@ -90,6 +100,8 @@ private:
 
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipelineStateObject;
 
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS;
+	
 	UINT m_frameIndex = 0;
 	UINT64 m_fenceValues[Constants::Graphics::NUM_FRAMES] = {};
 	HANDLE m_fenceEvent = nullptr;
@@ -105,4 +117,5 @@ private:
 	DirectX::XMFLOAT4X4 m_view = Math::Identity4x4();
 	DirectX::XMFLOAT4X4 m_world = Math::Identity4x4();
 	DirectX::XMFLOAT4X4 m_proj = Math::Identity4x4();
+	DirectX::XMMATRIX m_worldViewProj = DirectX::XMMatrixIdentity();
 };

@@ -15,7 +15,9 @@ private:
 	
 	void GameLoop();
 	void OnMouseMove(WPARAM btnState, int x, int y);
+	void OnKeyDown(WPARAM btnState);
 	void ReportLiveObjects();
+	void SetupLoggingLevel();
 	
 	std::shared_ptr<Renderer> m_renderer;
 

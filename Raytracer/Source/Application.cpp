@@ -12,6 +12,8 @@ Application::Application(HINSTANCE hInstance) : m_hInstance(hInstance)
 
 void Application::Run()
 {
+	SetupLoggingLevel();
+	
 	Window::Create(m_hInstance, { 0, 0, 800, 600 }, this);
 	
 	m_renderer->Initialize();
@@ -48,6 +50,14 @@ void Application::OnMouseMove(WPARAM btnState, int x, int y)
 	m_renderer->OnMouseMove(btnState, x, y);
 }
 
+void Application::OnKeyDown(WPARAM btnState)
+{
+	if (btnState == VK_SPACE)
+	{
+		m_renderer->ToggleRasterization();
+	}
+}
+
 void Application::ReportLiveObjects()
 {
 #ifdef _DEBUG
@@ -59,5 +69,12 @@ void Application::ReportLiveObjects()
 	}
 
 	SPDLOG_INFO("***** Done Reporting Live Objects *****");
+#endif
+}
+
+void Application::SetupLoggingLevel()
+{
+#ifdef _DEBUG
+	spdlog::set_level(spdlog::level::debug);
 #endif
 }

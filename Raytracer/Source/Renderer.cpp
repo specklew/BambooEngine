@@ -4,12 +4,15 @@
 
 #include <algorithm>
 #include <chrono>
+
+#include "AccelerationStructures.h"
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
 #include "backends/imgui_impl_win32.h"
 
 #include "Helpers.h"
 #include "InputElements.h"
+#include "RaytracePass.h"
 #include "ResourceManager.h"
 #include "Shader.h"
 #include "Window.h"
@@ -29,7 +32,7 @@ Vertex vertices[] = {
 	{ DirectX::XMFLOAT3(+1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4(1, 0, 1, 1) }
 };
 
-std::uint16_t indices[] = {
+std::uint32_t indices[] = {
 	// front face
 	0, 1, 2,
 	0, 2, 3,
@@ -96,8 +99,14 @@ void Renderer::Initialize()
 	m_d3d12CommandList->Close();
 	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-
+	
 	FlushCommandQueue();
+	ResetCommandList();
+	
+	SetupAccelerationStructures();
+
+	m_raytracePass = std::make_shared<RaytracePass>();
+	m_raytracePass->Initialize(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures);
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)
@@ -127,7 +136,11 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	ObjectConstants constants;
 	XMStoreFloat4x4(&constants.WorldViewProj, XMMatrixTranspose(worldViewProj));
 
+	m_worldViewProj = XMMatrixTranspose(worldViewProj);
+	
 	memcpy(&m_mappedData[0], &constants, sizeof(constants));
+
+	m_raytracePass->Update(view, proj);
 }
 
 void Renderer::Render(double elapsedTime, double totalTime)
@@ -177,13 +190,21 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 	m_d3d12CommandList->SetGraphicsRootSignature(m_rootSignature.Get());
 
-	m_d3d12CommandList->IASetVertexBuffers(0, 1, m_vertexBuffers);
-	m_d3d12CommandList->IASetIndexBuffer(&m_indexBufferView);
-	m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-	m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_CBVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-	
-	m_d3d12CommandList->DrawIndexedInstanced(_countof(indices), 1, 0, 0, 0);
+	if (m_rasterize)
+	{
+		m_d3d12CommandList->IASetVertexBuffers(0, 1, m_vertexBuffers);
+    	m_d3d12CommandList->IASetIndexBuffer(&m_indexBufferView);
+    	m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    
+    	m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_CBVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    	
+    	m_d3d12CommandList->DrawIndexedInstanced(_countof(indices), 1, 0, 0, 0);
+	}
+	else
+	{
+		m_accelerationStructures->CreateTopLevelAS(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures->GetInstances(), true);
+		m_raytracePass->Render(backBuffer);
+	}
 
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -464,7 +485,7 @@ void Renderer::CreateVertexAndIndexBuffer()
 	m_indexBufferView = {};
 	m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
 	m_indexBufferView.SizeInBytes = sizeof(indices);
-	m_indexBufferView.Format = DXGI_FORMAT_R16_UINT;
+	m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 }
 
 void Renderer::CreateConstantBufferView()
@@ -622,6 +643,33 @@ bool Renderer::CheckRayTracingSupport()
 	}	
 }
 
+void Renderer::SetupAccelerationStructures()
+{
+	spdlog::debug("Setting up acceleration structures");
+	m_accelerationStructures = std::make_shared<AccelerationStructures>();
+
+	AccelerationStructureBuffers bottomLevelBuffers = m_accelerationStructures->CreateBottomLevelAS(
+		m_d3d12Device.Get(), m_d3d12CommandList.Get(), {{m_vertexBuffer, std::size(vertices)}}, {{m_indexBuffer, std::size(indices)}});
+
+	auto instance = std::pair(bottomLevelBuffers.p_result, DirectX::XMMatrixIdentity());
+	m_accelerationStructures->GetInstances().push_back(instance);
+	m_accelerationStructures->CreateTopLevelAS(
+		m_d3d12Device.Get(), m_d3d12CommandList.Get(), m_accelerationStructures->GetInstances(), false); // TODO: handle the instances properly
+
+	spdlog::debug("Executing command list with BLAS generation");
+	m_d3d12CommandList->Close();
+	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	FlushCommandQueue();
+
+	m_bottomLevelAS = bottomLevelBuffers.p_result;	// TODO: Store BLAS in the acceleration structure
+}
+
+void Renderer::ToggleRasterization()
+{
+	m_rasterize = !m_rasterize;
+}
+
 ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
 {
 	ComPtr<IDXGIAdapter1> adapter1;
@@ -656,9 +704,9 @@ ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
 	return adapter;
 }
 
-ComPtr<ID3D12Device4> Renderer::GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter)
+ComPtr<ID3D12Device5> Renderer::GetDeviceForAdapter(ComPtr<IDXGIAdapter1> adapter)
 {
-	ComPtr<ID3D12Device4> device;
+	ComPtr<ID3D12Device5> device;
 	ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)));
 
 #ifdef _DEBUG

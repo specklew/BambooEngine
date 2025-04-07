@@ -22,6 +22,13 @@ void ThrowIfFailed(HRESULT hr)
 
 }
 
+std::string ConvertWcharToString(const wchar_t* wstr)
+{
+   std::wstring ws(wstr);
+   std::string str(ws.begin(), ws.end());
+   return str;
+}
+
 char* FormatTempString(const char* format, ...)
 {
    static char buffer[4096];
@@ -87,6 +94,18 @@ void WriteDataToFile(const char* szFilepath, const char* buffer, int bufferSize,
    assert(ret == 0);
    assert(bytesWritten == bufferSize);
    assert(ferror(file) == 0);
+}
+
+std::string GetName(ID3D12Object *d3dObject)
+{
+   wchar_t name[128] = { };
+   uint32_t name_size = sizeof(name);
+   if (SUCCEEDED(d3dObject->GetPrivateData(WKPDID_D3DDebugObjectNameW, &name_size, name)))
+   {
+      return ConvertWcharToString(name);
+   }
+   
+   return "Unnamed D3D12 Object";
 }
 
 DirectX::XMFLOAT4X4 Math::Identity4x4()

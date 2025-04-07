@@ -106,6 +106,8 @@ LRESULT Window::MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		break;
 	case WM_MOUSEMOVE:
 		application->OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+	case WM_KEYDOWN:
+		application->OnKeyDown(wParam);
 	default:
 		return DefWindowProc(hWnd, message, wParam, lParam);
 	}
