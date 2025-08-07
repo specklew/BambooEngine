@@ -20,5 +20,5 @@ void ClosestHit(inout HitInfo payload, Attributes attrib)
                BTriVertex[indices[vertId + 1]].color * barycentrics.y +
                BTriVertex[indices[vertId + 2]].color * barycentrics.z;
 
-    payload.colorAndDistance = float4(hitColor, RayTCurrent()); 
+    payload.colorAndDistance = float4(1,1,1,1); 
 }

@@ -17,7 +17,9 @@
 #include "Shader.h"
 #include "Window.h"
 
+#ifdef _DEBUG
 #define ENABLE_GPU_BASED_VALIDATION 1
+#endif
 
 using namespace Microsoft::WRL;
 

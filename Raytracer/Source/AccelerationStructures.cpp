@@ -79,7 +79,7 @@ void AccelerationStructures::CreateTopLevelAS(
 
         m_topLevelASBuffers.p_scratch = nv_helpers_dx12::CreateBuffer(
             device.Get(), scratchSize,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COMMON,
             nv_helpers_dx12::kDefaultHeapProps);
         m_topLevelASBuffers.p_scratch->SetName(L"Scratch TLAS Buffer");
 
