@@ -24,6 +24,17 @@
 using namespace Microsoft::WRL;
 
 Vertex vertices[] = {
+	{ DirectX::XMFLOAT3(-1.0f, -1.0f, -1.0f) },
+	{ DirectX::XMFLOAT3(-1.0f, +1.0f, -1.0f) },
+	{ DirectX::XMFLOAT3(+1.0f, +1.0f, -1.0f) },
+	{ DirectX::XMFLOAT3(+1.0f, -1.0f, -1.0f) },
+	{ DirectX::XMFLOAT3(-1.0f, -1.0f, +1.0f) },
+	{ DirectX::XMFLOAT3(-1.0f, +1.0f, +1.0f) },
+	{ DirectX::XMFLOAT3(+1.0f, +1.0f, +1.0f) },
+	{ DirectX::XMFLOAT3(+1.0f, -1.0f, +1.0f) }
+};
+
+/*Vertex vertices[] = {
 	{ DirectX::XMFLOAT3(-1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4(0, 0, 0, 1) },
 	{ DirectX::XMFLOAT3(-1.0f, +1.0f, -1.0f), DirectX::XMFLOAT4(0, 1, 0, 1) },
 	{ DirectX::XMFLOAT3(+1.0f, +1.0f, -1.0f), DirectX::XMFLOAT4(1, 1, 0, 1) },
@@ -32,7 +43,7 @@ Vertex vertices[] = {
 	{ DirectX::XMFLOAT3(-1.0f, +1.0f, +1.0f), DirectX::XMFLOAT4(0, 1, 1, 1) },
 	{ DirectX::XMFLOAT3(+1.0f, +1.0f, +1.0f), DirectX::XMFLOAT4(1, 1, 1, 1) },
 	{ DirectX::XMFLOAT3(+1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4(1, 0, 1, 1) }
-};
+};*/
 
 std::uint32_t indices[] = {
 	// front face
@@ -66,7 +77,8 @@ auto& resourceManager = ResourceManager::Get();
 
 void Renderer::Initialize()
 {
-
+	spdlog::info("Initializing renderer...");
+	
 	auto psh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.ps.shader"));
 	m_pixelShader = resourceManager.shaders.GetResource(psh).bytecode;
 	auto vsh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.vs.shader"));
@@ -75,7 +87,8 @@ void Renderer::Initialize()
 	
 	SetupDeviceAndDebug();
 	CheckTearingSupport();
-	CheckRayTracingSupport();
+	
+	if (!CheckRayTracingSupport()) 	throw std::runtime_error("Raytracing is not supported on this device.");;
 	
 	CreateCommandQueue();
 	CreateCommandAllocators();
@@ -109,6 +122,8 @@ void Renderer::Initialize()
 
 	m_raytracePass = std::make_shared<RaytracePass>();
 	m_raytracePass->Initialize(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures, m_vertexBuffer, m_indexBuffer);
+
+	spdlog::info("Renderer initialized successfully.");
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)
@@ -369,7 +384,7 @@ void Renderer::CreateCommandList()
 	ThrowIfFailed(m_d3d12CommandList->Close());
 }
 
-void Renderer::ResetCommandList()
+void Renderer::ResetCommandList() const
 {
 	ThrowIfFailed(m_d3d12CommandAllocators[m_frameIndex]->Reset());
 	ThrowIfFailed(m_d3d12CommandList->Reset(m_d3d12CommandAllocators[m_frameIndex].Get(), m_pipelineStateObject.Get()));
@@ -635,14 +650,20 @@ bool Renderer::CheckTearingSupport()
 	return tearingAllowed;
 }
 
-bool Renderer::CheckRayTracingSupport()
+bool Renderer::CheckRayTracingSupport() const
 {
+	spdlog::info("Checking ray tracing support...");
+	
 	D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
 	ThrowIfFailed(m_d3d12Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
 	if (options5.RaytracingTier < D3D12_RAYTRACING_TIER_1_0)
 	{
-		throw std::runtime_error("Raytracing is not supported on this device.");
-	}	
+		spdlog::error("Ray tracing not supported!");
+		return false;
+	}
+
+	spdlog::info("Ray tracing supported!");
+	return true;
 }
 
 void Renderer::SetupAccelerationStructures()

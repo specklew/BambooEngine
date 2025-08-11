@@ -166,7 +166,7 @@
   <ItemGroup>
     <None Include="Resources\Shaders\colorShader.hlsl" />
     <None Include="Resources\Shaders\Raytracing\Common.hlsl" />
-    <None Include="Resources\Shaders\Raytracing\Hit.hlsl" />
+    <None Include="Resources\Shaders\Raytracing\ClosestHit.hlsl" />
     <None Include="Resources\Shaders\Raytracing\Miss.hlsl" />
     <None Include="Resources\Shaders\Raytracing\RayGen.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />

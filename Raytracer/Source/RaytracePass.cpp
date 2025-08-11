@@ -18,6 +18,8 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
                               Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer)
 {
+    spdlog::info("Initializing raytracer pass...");
+    
     m_device = device;
     m_commandList = commandList;
     m_accelerationStructures = accelerationStructures;
@@ -30,13 +32,15 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
     CreateConstantCameraBuffer();
     CreateShaderResourceHeap();
     CreateShaderBindingTable();
+    
+    spdlog::info("Raytracer pass initialized successfully.");
 }
 
-void RaytracePass::Render(Microsoft::WRL::ComPtr<ID3D12Resource> renderTarget)
+void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget)
 {
     spdlog::debug("Executing raytracing pass");
     
-    std::vector<ID3D12DescriptorHeap*> heaps = {m_srvUavHeap.Get()};
+    std::vector heaps = {m_srvUavHeap.Get()};
     m_commandList->SetDescriptorHeaps(static_cast<uint32_t>(heaps.size()), heaps.data());
 
     {
@@ -53,18 +57,22 @@ void RaytracePass::Render(Microsoft::WRL::ComPtr<ID3D12Resource> renderTarget)
     uint32_t rayGenerationSelectionSizeInBytes = m_shaderBindingTableGenerator->GetRayGenSectionSize();
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTableStorage->GetGPUVirtualAddress();
     desc.RayGenerationShaderRecord.SizeInBytes = rayGenerationSelectionSizeInBytes;
-
+    
     uint32_t missSelectionSizeInBytes = m_shaderBindingTableGenerator->GetMissSectionSize();
-    desc.MissShaderTable.StartAddress = m_shaderBindingTableStorage->GetGPUVirtualAddress() + rayGenerationSelectionSizeInBytes;
+    desc.MissShaderTable.StartAddress = desc.RayGenerationShaderRecord.StartAddress + desc.RayGenerationShaderRecord.SizeInBytes;
     desc.MissShaderTable.StrideInBytes = missSelectionSizeInBytes;
     desc.MissShaderTable.SizeInBytes = m_shaderBindingTableGenerator->GetMissEntrySize();
 
+    // Start addresses must be aligned to D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT
+    // and strides (basically shader record sizes) must be aligned to D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT
+    desc.MissShaderTable.StartAddress = (desc.MissShaderTable.StartAddress + D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1) & ~(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1);
+    desc.MissShaderTable.StrideInBytes = (desc.MissShaderTable.StrideInBytes + D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT - 1) & ~(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT - 1); 
+    
     uint32_t hitGroupsSelectionSize = m_shaderBindingTableGenerator->GetHitGroupSectionSize();
-    desc.HitGroupTable.StartAddress = m_shaderBindingTableStorage->GetGPUVirtualAddress() + rayGenerationSelectionSizeInBytes + missSelectionSizeInBytes;
+    desc.HitGroupTable.StartAddress = desc.MissShaderTable.StartAddress + desc.MissShaderTable.StrideInBytes;
     desc.HitGroupTable.StrideInBytes = hitGroupsSelectionSize;
     desc.HitGroupTable.SizeInBytes = m_shaderBindingTableGenerator->GetHitGroupEntrySize();
-
-    // For some reason this wasn't aligned correctly - ensuring alignment
+    
     desc.HitGroupTable.StartAddress = (desc.HitGroupTable.StartAddress + D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1) & ~(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1);
     desc.HitGroupTable.StrideInBytes = (desc.HitGroupTable.StrideInBytes + D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT - 1) & ~(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT - 1); 
 
@@ -132,7 +140,7 @@ void RaytracePass::InitializeRaytracingPipeline()
 
     m_missShaderBlob = nv_helpers_dx12::CompileShaderLibrary(L"resources/shaders/raytracing/miss.hlsl");
 
-    m_hitShaderBlob = nv_helpers_dx12::CompileShaderLibrary(L"resources/shaders/raytracing/hit.hlsl");
+    m_hitShaderBlob = nv_helpers_dx12::CompileShaderLibrary(L"resources/shaders/raytracing/closesthit.hlsl");
 
     spdlog::debug("Adding raytracing shaders to pipeline");
     m_rayGenShaderName = L"RayGen";
@@ -150,12 +158,14 @@ void RaytracePass::InitializeRaytracingPipeline()
     m_hitSignature = CreateHitSignature();
 
     spdlog::debug("Adding hit group to pipeline");
-    pipeline.AddHitGroup(L"HitGroup", m_hitShaderName);
+
+    m_hitGroupName = L"HitGroup";
+    pipeline.AddHitGroup(m_hitGroupName, m_hitShaderName);
 
     spdlog::debug("Associating root signatures with pipeline");
     pipeline.AddRootSignatureAssociation(m_rayGenSignature.Get(), {m_rayGenShaderName});
     pipeline.AddRootSignatureAssociation(m_missSignature.Get(), {m_missShaderName});
-    pipeline.AddRootSignatureAssociation(m_hitSignature.Get(), {m_hitShaderName});
+    pipeline.AddRootSignatureAssociation(m_hitSignature.Get(), {m_hitGroupName});
 
     spdlog::debug("Setting pipeline payload and attributes");
     pipeline.SetMaxPayloadSize(4 * sizeof(float)); // RGB + distance
@@ -164,6 +174,8 @@ void RaytracePass::InitializeRaytracingPipeline()
 
     spdlog::debug("Generating raytracing pipeline state object");
     m_rtStateObject = pipeline.Generate();
+
+    // Create the state object properties interface to query shader identifiers
     ThrowIfFailed(m_rtStateObject->QueryInterface(IID_PPV_ARGS(&m_rtStateObjectProperties)));
 }
 
@@ -213,8 +225,8 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateHitSignature()
     spdlog::debug("Creating hit root signature");
     nv_helpers_dx12::RootSignatureGenerator rsGenerator;
 
-    rsGenerator.AddRootParameter(D3D12_ROOT_PARAMETER_TYPE_SRV);
-    rsGenerator.AddRootParameter(D3D12_ROOT_PARAMETER_TYPE_SRV, 1);
+    //rsGenerator.AddRootParameter(D3D12_ROOT_PARAMETER_TYPE_SRV);
+    //rsGenerator.AddRootParameter(D3D12_ROOT_PARAMETER_TYPE_SRV, 1);
     
     spdlog::debug("Generating hit root signature");
     return rsGenerator.Generate(m_device.Get(), true);
@@ -259,17 +271,17 @@ void RaytracePass::CreateShaderResourceHeap()
 
     srvHandle.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
+    spdlog::debug("Creating SRV for top level acceleration structure");
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = DXGI_FORMAT_UNKNOWN;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.RaytracingAccelerationStructure.Location = m_accelerationStructures->GetTopLevelAS().p_result->GetGPUVirtualAddress();
-
-    spdlog::debug("Creating SRV for top level acceleration structure");
     m_device->CreateShaderResourceView(nullptr, &srvDesc, srvHandle);
 
     srvHandle.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    
+
+    spdlog::debug("Creating constant buffer view for camera data");
     D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
     cbvDesc.BufferLocation = m_cbCamera->GetGPUVirtualAddress();
     cbvDesc.SizeInBytes = static_cast<UINT>(sizeof(DirectX::XMMATRIX) * 4 + 255) & ~255;
@@ -284,19 +296,23 @@ void RaytracePass::CreateShaderBindingTable()
 
     D3D12_GPU_DESCRIPTOR_HANDLE srvUavHeapHandle = m_srvUavHeap->GetGPUDescriptorHandleForHeapStart();
 
-    uint64_t *heapPtr = reinterpret_cast<uint64_t*>(srvUavHeapHandle.ptr);
+    void* heapPtr = reinterpret_cast<void*>(srvUavHeapHandle.ptr);
 
     spdlog::debug("Adding shaders to shader binding table");
     m_shaderBindingTableGenerator->AddRayGenerationProgram(m_rayGenShaderName, {heapPtr});
     m_shaderBindingTableGenerator->AddMissProgram(m_missShaderName, {});
-    m_shaderBindingTableGenerator->AddHitGroup(L"HitGroup", {(void*)m_vertexBuffer->GetGPUVirtualAddress(), (void*)m_indexBuffer->GetGPUVirtualAddress()});
+    m_shaderBindingTableGenerator->AddHitGroup(m_hitGroupName, {/*reinterpret_cast<void*>(m_vertexBuffer->GetGPUVirtualAddress()), reinterpret_cast<void*>(m_indexBuffer->GetGPUVirtualAddress())*/});
 
     uint32_t sbtSize = m_shaderBindingTableGenerator->ComputeSBTSize();
 
     spdlog::debug("Creating shader binding table resource");
     m_shaderBindingTableStorage = nv_helpers_dx12::CreateBuffer(
-        m_device.Get(), sbtSize, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ,
+        m_device.Get(),
+        sbtSize,
+        D3D12_RESOURCE_FLAG_NONE,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
         nv_helpers_dx12::kUploadHeapProps);
+    
     if (!m_shaderBindingTableStorage)
     {
         throw std::logic_error("Could not allocate shader binding table resource");

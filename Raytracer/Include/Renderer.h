@@ -25,7 +25,7 @@ private:
 	void CreateSwapChain();
 	void CreateCommandList();
 
-	void ResetCommandList();
+	void ResetCommandList() const;
 
 	void CreateRTVDescriptorHeap();
 	void CreateRenderTargetViews();
@@ -47,7 +47,7 @@ private:
 	void FlushCommandQueue();
 	
 	bool CheckTearingSupport();
-	bool CheckRayTracingSupport();
+	bool CheckRayTracingSupport() const;
 
 	void SetupAccelerationStructures();
 

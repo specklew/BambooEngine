@@ -35,7 +35,7 @@ void RayGen() {
   ray.TMin = 0;
   ray.TMax = 100000;
 
-  TraceRay(SceneBVH, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
+  TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, 0xFF, 0, 1, 0, ray, payload);
   
   gOutput[launchIndex] = float4(payload.colorAndDistance.rgb, 1.f);
 }

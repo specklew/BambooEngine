@@ -17,7 +17,7 @@ public:
         Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
         Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer);
     
-    void Render(Microsoft::WRL::ComPtr<ID3D12Resource> renderTarget);
+    void Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget);
     void Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj);
     
 private:
@@ -45,6 +45,7 @@ private:
     std::wstring m_rayGenShaderName;
     std::wstring m_missShaderName;
     std::wstring m_hitShaderName;
+    std::wstring m_hitGroupName;
 
     Microsoft::WRL::ComPtr<ID3D12StateObject> m_rtStateObject;
     Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> m_rtStateObjectProperties;
