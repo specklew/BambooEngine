@@ -32,10 +32,10 @@ void RayGen() {
   ray.Origin = mul(viewI, float4(0, 0, 0, 1));
   float4 target = mul(projectionI, float4(d.x, -d.y, 1, 1));
   ray.Direction = mul(viewI, float4(target.xyz, 0));
-  ray.TMin = 0;
+  ray.TMin = 0.001;
   ray.TMax = 100000;
 
-  TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, 0xFF, 0, 1, 0, ray, payload);
+  TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
   
-  gOutput[launchIndex] = float4(payload.colorAndDistance.rgb, 1.f);
+  gOutput[launchIndex] = payload.colorAndDistance;
 }

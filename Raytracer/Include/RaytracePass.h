@@ -26,6 +26,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateRayGenSignature();
     Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateMissSignature();
     Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateHitSignature();
+    void CreateGloablRootSignature();
 
     void CreateRaytracingOutputBuffer();
     void CreateShaderResourceHeap();
@@ -53,6 +54,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rayGenSignature;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_missSignature;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_hitSignature;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_globalRootSignature;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_outputResource;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvUavHeap;

@@ -37,6 +37,8 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
 void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget)
 {
     spdlog::debug("Executing raytracing pass");
+
+    m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
     
     std::vector heaps = {m_srvUavHeap.Get()};
     m_commandList->SetDescriptorHeaps(static_cast<uint32_t>(heaps.size()), heaps.data());
@@ -193,6 +195,7 @@ void RaytracePass::InitializeRaytracingPipeline()
     m_rayGenSignature = CreateRayGenSignature();
     m_missSignature = CreateMissSignature();
     /*m_hitSignature = */CreateHitSignature();
+    CreateGloablRootSignature();
     
     // 5. Root signature associations
     spdlog::debug("Associating root signatures with pipeline");
@@ -221,6 +224,11 @@ void RaytracePass::InitializeRaytracingPipeline()
         auto rootSignatureAssociation = raytracingPipeline.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
         rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignatureSubObj);
         rootSignatureAssociation->AddExport(m_hitShaderName.c_str());
+    }
+
+    {
+        auto globalRootSignatureSubObj = raytracingPipeline.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+        globalRootSignatureSubObj->SetRootSignature(m_globalRootSignature.Get());
     }
 
     // 6. Shader configuration
@@ -298,6 +306,17 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateHitSignature()
     ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_hitSignature)));
 
     return nullptr;
+}
+
+void RaytracePass::CreateGloablRootSignature()
+{
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(0, nullptr);
+    
+    Microsoft::WRL::ComPtr<ID3DBlob> blob;
+    Microsoft::WRL::ComPtr<ID3DBlob> error;
+    
+    ThrowIfFailed(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
+    ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_globalRootSignature)));
 }
 
 void RaytracePass::CreateRaytracingOutputBuffer()
