@@ -192,7 +192,7 @@ void RaytracePass::InitializeRaytracingPipeline()
     spdlog::debug("Creating raytracing root signatures");
     m_rayGenSignature = CreateRayGenSignature();
     m_missSignature = CreateMissSignature();
-    m_hitSignature = CreateHitSignature();
+    /*m_hitSignature = */CreateHitSignature();
     
     // 5. Root signature associations
     spdlog::debug("Associating root signatures with pipeline");
@@ -287,13 +287,17 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateMissSignature()
 Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateHitSignature()
 {
     spdlog::debug("Creating hit root signature");
-    nv_helpers_dx12::RootSignatureGenerator rsGenerator;
 
-    //rsGenerator.AddRootParameter(D3D12_ROOT_PARAMETER_TYPE_SRV);
-    //rsGenerator.AddRootParameter(D3D12_ROOT_PARAMETER_TYPE_SRV, 1);
-    
-    spdlog::debug("Generating hit root signature");
-    return rsGenerator.Generate(m_device.Get(), true);
+    CD3DX12_ROOT_SIGNATURE_DESC localHitSignatureDesc(0, nullptr);
+    localHitSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+    Microsoft::WRL::ComPtr<ID3DBlob> blob;
+    Microsoft::WRL::ComPtr<ID3DBlob> error;
+
+    ThrowIfFailed(D3D12SerializeRootSignature(&localHitSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
+    ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_hitSignature)));
+
+    return nullptr;
 }
 
 void RaytracePass::CreateRaytracingOutputBuffer()
