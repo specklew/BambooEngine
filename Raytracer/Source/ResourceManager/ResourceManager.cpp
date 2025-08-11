@@ -1,7 +1,6 @@
 ﻿#include "pch.h"
-#include "ResourceManager.h"
+#include "ResourceManager/ResourceManager.h"
 
-#include "Constants.h"
 #include "Helpers.h"
 #include "Shader.h"
 #include "ShaderCompilation.h"

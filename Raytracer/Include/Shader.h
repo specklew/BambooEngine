@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "ResourceManagerTypes.h"
+#include "ResourceManager/ResourceManagerTypes.h"
 
 struct ShaderMetadata
 {

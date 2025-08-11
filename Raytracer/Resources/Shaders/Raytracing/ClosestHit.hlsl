@@ -10,7 +10,7 @@ struct STriVertex
 //StructuredBuffer<int> indices : register(t1);
 
 [shader("closesthit")] 
-void ClosestHit(inout HitInfo payload, Attributes attrib) 
+void Hit(inout HitInfo payload, Attributes attrib) 
 {
     float3 barycentrics = 
     float3(1.f - attrib.bary.x - attrib.bary.y, attrib.bary.x, attrib.bary.y);

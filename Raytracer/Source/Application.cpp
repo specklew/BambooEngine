@@ -2,8 +2,8 @@
 
 #include "Application.h"
 
-#include "ResourceManager.h"
 #include "Window.h"
+#include "ResourceManager/ResourceManager.h"
 
 Application::Application(HINSTANCE hInstance) : m_hInstance(hInstance)
 {

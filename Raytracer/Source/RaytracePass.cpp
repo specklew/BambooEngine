@@ -5,12 +5,10 @@
 
 #include "AccelerationStructures.h"
 #include "DXRHelper.h"
-#include "RaytracingPipelineGenerator.h"
-#include "ResourceManager.h"
 #include "RootSignatureGenerator.h"
-#include "Shader.h"
 #include "ShaderBindingTableGenerator.h"
 #include "Window.h"
+#include "ResourceManager/ResourceManager.h"
 
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
@@ -131,51 +129,117 @@ void RaytracePass::Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj)
 void RaytracePass::InitializeRaytracingPipeline()
 {
     spdlog::debug("Initializing raytracing pipeline");
-    nv_helpers_dx12::RayTracingPipelineGenerator pipeline(m_device.Get());
+    //nv_helpers_dx12::RayTracingPipelineGenerator pipeline(m_device.Get());
+    CD3DX12_STATE_OBJECT_DESC raytracingPipeline{ D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE };
 
     auto rm = ResourceManager::Get();
 
     spdlog::debug("Loading raytracing shaders");
     m_rayGenShaderBlob = nv_helpers_dx12::CompileShaderLibrary(L"resources/shaders/raytracing/raygen.hlsl"); 
-
     m_missShaderBlob = nv_helpers_dx12::CompileShaderLibrary(L"resources/shaders/raytracing/miss.hlsl");
-
     m_hitShaderBlob = nv_helpers_dx12::CompileShaderLibrary(L"resources/shaders/raytracing/closesthit.hlsl");
 
-    spdlog::debug("Adding raytracing shaders to pipeline");
+    // Creating raytracing pipeline state object
+    // It is consisting of several subobjects, each defining a part of the pipeline
+    // 1. Ray generation shader DXIL
+    // 2. Miss shader DXIL
+    // 3. Hit shader DXIL
+    // 4. Hit group
+    // 5. Root signatures for each shader (local root signatures)
+    // 6. Shader configuration (payload size, attribute size)
+    // 7. Pipeline configuration (max recursion depth)
+    
+
+    spdlog::debug("Adding raytracing shaders DXIL to pipeline");
+
+    // 1. Ray generation shader DXIL
     m_rayGenShaderName = L"RayGen";
-    pipeline.AddLibrary(m_rayGenShaderBlob.Get(), {m_rayGenShaderName});
+    {
+        auto lib = raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+        D3D12_SHADER_BYTECODE libdxil = CD3DX12_SHADER_BYTECODE(m_rayGenShaderBlob.Get()->GetBufferPointer(), m_rayGenShaderBlob.Get()->GetBufferSize());
+        lib->SetDXILLibrary(&libdxil);
+        lib->DefineExport(m_rayGenShaderName.c_str(), m_rayGenShaderName.c_str());
+    }
 
+    // 2. Miss shader DXIL
     m_missShaderName = L"Miss";
-    pipeline.AddLibrary(m_missShaderBlob.Get(), {m_missShaderName});
+    {
+        auto lib = raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+        D3D12_SHADER_BYTECODE libdxil = CD3DX12_SHADER_BYTECODE(m_missShaderBlob->GetBufferPointer(), m_missShaderBlob->GetBufferSize());
+        lib->SetDXILLibrary(&libdxil);
+        lib->DefineExport(m_missShaderName.c_str(), m_missShaderName.c_str());
+    }
 
-    m_hitShaderName = L"ClosestHit";
-    pipeline.AddLibrary(m_hitShaderBlob.Get(), {m_hitShaderName});
+    // 3. Hit shader DXIL
+    m_hitShaderName = L"Hit";
+    {
+        auto lib =  raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+        D3D12_SHADER_BYTECODE libdxil = CD3DX12_SHADER_BYTECODE(m_hitShaderBlob->GetBufferPointer(), m_hitShaderBlob->GetBufferSize());
+        lib->SetDXILLibrary(&libdxil);
+        lib->DefineExport(m_hitShaderName.c_str(), m_hitShaderName.c_str());
+    }
 
+    // 4. Hit group
+    spdlog::debug("Adding hit group to pipeline");
+    m_hitGroupName = L"HitGroup";
+    {
+        auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+        hitGroup->SetClosestHitShaderImport(m_hitShaderName.c_str());
+        hitGroup->SetHitGroupExport(m_hitGroupName.c_str());
+        hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
+    }
+    
     spdlog::debug("Creating raytracing root signatures");
     m_rayGenSignature = CreateRayGenSignature();
     m_missSignature = CreateMissSignature();
     m_hitSignature = CreateHitSignature();
-
-    spdlog::debug("Adding hit group to pipeline");
-
-    m_hitGroupName = L"HitGroup";
-    pipeline.AddHitGroup(m_hitGroupName, m_hitShaderName);
-
+    
+    // 5. Root signature associations
     spdlog::debug("Associating root signatures with pipeline");
-    pipeline.AddRootSignatureAssociation(m_rayGenSignature.Get(), {m_rayGenShaderName});
-    pipeline.AddRootSignatureAssociation(m_missSignature.Get(), {m_missShaderName});
-    pipeline.AddRootSignatureAssociation(m_hitSignature.Get(), {m_hitGroupName});
+    {
+        auto localRootSignatureSubObj = raytracingPipeline.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
+        localRootSignatureSubObj->SetRootSignature(m_rayGenSignature.Get());
 
-    spdlog::debug("Setting pipeline payload and attributes");
-    pipeline.SetMaxPayloadSize(4 * sizeof(float)); // RGB + distance
-    pipeline.SetMaxAttributeSize(2 * sizeof(float)); // barycentric coordinates
-    pipeline.SetMaxRecursionDepth(1);
+        auto rootSignatureAssociation = raytracingPipeline.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
+        rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignatureSubObj);
+        rootSignatureAssociation->AddExport(m_rayGenShaderName.c_str());
+    }
 
-    spdlog::debug("Generating raytracing pipeline state object");
-    m_rtStateObject = pipeline.Generate();
+    {
+        auto localRootSignatureSubObj = raytracingPipeline.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
+        localRootSignatureSubObj->SetRootSignature(m_missSignature.Get());
+        
+        auto rootSignatureAssociation = raytracingPipeline.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
+        rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignatureSubObj);
+        rootSignatureAssociation->AddExport(m_missShaderName.c_str());
+    }
 
-    // Create the state object properties interface to query shader identifiers
+    {
+        auto localRootSignatureSubObj = raytracingPipeline.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
+        localRootSignatureSubObj->SetRootSignature(m_hitSignature.Get());
+
+        auto rootSignatureAssociation = raytracingPipeline.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
+        rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignatureSubObj);
+        rootSignatureAssociation->AddExport(m_hitShaderName.c_str());
+    }
+
+    // 6. Shader configuration
+    spdlog::debug("Setting raytracing shader configuration");
+    {
+        auto shaderConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
+        uint32_t maxPayloadSize = 4 * sizeof(float); // RGB + distance
+        uint32_t maxAttributeSize = 2 * sizeof(float); // barycentric coordinates
+        shaderConfig->Config(maxPayloadSize, maxAttributeSize);
+    }
+
+    // 7. Pipeline configuration
+    spdlog::debug("Setting raytracing pipeline configuration");
+    {
+        auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
+        pipelineConfig->Config(1); // Max recursion depth
+    }
+
+    ThrowIfFailed(m_device->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&m_rtStateObject)));
     ThrowIfFailed(m_rtStateObject->QueryInterface(IID_PPV_ARGS(&m_rtStateObjectProperties)));
 }
 
@@ -301,8 +365,10 @@ void RaytracePass::CreateShaderBindingTable()
     spdlog::debug("Adding shaders to shader binding table");
     m_shaderBindingTableGenerator->AddRayGenerationProgram(m_rayGenShaderName, {heapPtr});
     m_shaderBindingTableGenerator->AddMissProgram(m_missShaderName, {});
-    m_shaderBindingTableGenerator->AddHitGroup(m_hitGroupName, {/*reinterpret_cast<void*>(m_vertexBuffer->GetGPUVirtualAddress()), reinterpret_cast<void*>(m_indexBuffer->GetGPUVirtualAddress())*/});
-
+    m_shaderBindingTableGenerator->AddHitGroup(m_hitGroupName, {});
+    
+    /*reinterpret_cast<void*>(m_vertexBuffer->GetGPUVirtualAddress()), reinterpret_cast<void*>(m_indexBuffer->GetGPUVirtualAddress())*/
+    
     uint32_t sbtSize = m_shaderBindingTableGenerator->ComputeSBTSize();
 
     spdlog::debug("Creating shader binding table resource");

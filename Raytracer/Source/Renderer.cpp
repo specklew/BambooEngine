@@ -13,7 +13,7 @@
 #include "Helpers.h"
 #include "InputElements.h"
 #include "RaytracePass.h"
-#include "ResourceManager.h"
+#include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
 #include "Window.h"
 

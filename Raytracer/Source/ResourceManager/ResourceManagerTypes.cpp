@@ -1,5 +1,5 @@
 ﻿#include "pch.h"
-#include "ResourceManagerTypes.h"
+#include "ResourceManager/ResourceManagerTypes.h"
 
 static constexpr int MAX_PATH_LENGTH = 255;
 static constexpr int SCRATCH_SIZE = MAX_PATH_LENGTH + 1; // +1 for null terminator
