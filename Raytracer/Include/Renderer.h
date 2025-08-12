@@ -2,6 +2,7 @@
 #include "Constants.h"
 #include "Helpers.h"
 
+class DescriptorHeapAllocator;
 class RaytracePass;
 class AccelerationStructures;
 
@@ -32,7 +33,7 @@ private:
 
 	void CreateDepthStencilView();
 	void CreateDSVDescriptorHeap();
-
+	
 	void CreateVertexAndIndexBuffer();
 
 	void CreateConstantBufferView();
@@ -51,6 +52,9 @@ private:
 
 	void SetupAccelerationStructures();
 
+	void InitializeImGui();
+	void RenderImGui();
+	
 	std::shared_ptr<RaytracePass> m_raytracePass;
 	std::shared_ptr<AccelerationStructures> m_accelerationStructures;
 	

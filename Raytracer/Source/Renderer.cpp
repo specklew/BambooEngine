@@ -6,6 +6,7 @@
 #include <chrono>
 
 #include "AccelerationStructures.h"
+#include "DescriptorHeapAllocator.h"
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
 #include "backends/imgui_impl_win32.h"
@@ -75,6 +76,8 @@ constexpr UINT64 vbByteSize = 8 * sizeof(Vertex);
 
 auto& resourceManager = ResourceManager::Get();
 
+static std::shared_ptr<DescriptorHeapAllocator> g_imGuiDescriptorHeapAllocator;
+
 void Renderer::Initialize()
 {
 	spdlog::info("Initializing renderer...");
@@ -124,6 +127,8 @@ void Renderer::Initialize()
 	m_raytracePass->Initialize(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures, m_vertexBuffer, m_indexBuffer);
 
 	spdlog::info("Renderer initialized successfully.");
+
+	InitializeImGui();
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)
@@ -162,6 +167,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 void Renderer::Render(double elapsedTime, double totalTime)
 {
+	RenderImGui();
+	
 	ResetCommandList();
 	SetViewport();
 	SetScissorRect();
@@ -170,7 +177,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	
 	auto allocator = m_d3d12CommandAllocators[m_frameIndex];
 	auto backBuffer = m_d3d12RenderTargets[m_frameIndex];
-
+	
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 		   backBuffer.Get(),
@@ -223,6 +230,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		m_raytracePass->Render(backBuffer);
 	}
 
+	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_d3d12CommandList.Get());
+	
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 			backBuffer.Get(),
@@ -230,15 +239,16 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			D3D12_RESOURCE_STATE_PRESENT);
 
 		m_d3d12CommandList->ResourceBarrier(1, &barrier);
-
-		ThrowIfFailed(m_d3d12CommandList->Close());
+		
 	}
-
+	
 	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
+	
+	ThrowIfFailed(m_d3d12CommandList->Close());
 	
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
 	UINT presentFlags = m_tearingSupport ? DXGI_PRESENT_ALLOW_TEARING : 0; // TODO: do not check every time
-
+	
 	ThrowIfFailed(m_dxgiSwapChain->Present(0, presentFlags));
 
 	FlushCommandQueue();
@@ -247,6 +257,10 @@ void Renderer::Render(double elapsedTime, double totalTime)
 void Renderer::CleanUp()
 {
 	FlushCommandQueue();
+
+	ImGui_ImplDX12_Shutdown();
+	ImGui_ImplWin32_Shutdown();
+	ImGui::DestroyContext();
 	
 	m_constantBuffer->Unmap(0, nullptr);
 }
@@ -510,7 +524,7 @@ void Renderer::CreateConstantBufferView()
 
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = 1;
+	desc.NumDescriptors = 2;
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -530,7 +544,7 @@ void Renderer::CreateConstantBufferView()
 	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
 	cbvDesc.BufferLocation = m_constantBuffer->GetGPUVirtualAddress();
 	cbvDesc.SizeInBytes = static_cast<UINT>(sizeof(DirectX::XMFLOAT4X4) + 255) & ~255;
-
+	
 	m_d3d12Device->CreateConstantBufferView(&cbvDesc, m_CBVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 }
 
@@ -686,6 +700,74 @@ void Renderer::SetupAccelerationStructures()
 	FlushCommandQueue();
 
 	m_bottomLevelAS = bottomLevelBuffers.p_result;	// TODO: Store BLAS in the acceleration structure
+}
+
+void Renderer::InitializeImGui()
+{
+	// Make process DPI aware and get main monitor scale
+	ImGui_ImplWin32_EnableDpiAwareness();
+	float mainScaleImGui = ImGui_ImplWin32_GetDpiScaleForMonitor(::MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY));
+	
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
+	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
+
+	ImGui::StyleColorsDark();
+
+	ImGuiStyle& style = ImGui::GetStyle();
+	style.ScaleAllSizes(mainScaleImGui);
+
+	ImGui_ImplWin32_Init(Window::Get().GetHandle());
+
+	/*D3D12_DESCRIPTOR_HEAP_DESC imGuiHeapDesc = {};
+	imGuiHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	imGuiHeapDesc.NumDescriptors = 64; // The same number as in ImGui example. - It seems too much, but whatever…
+	imGuiHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+
+	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(&imGuiHeapDesc, IID_PPV_ARGS(&m_imGuiDescriptorHeap)));
+
+	g_imGuiDescriptorHeapAllocator = std::make_shared<DescriptorHeapAllocator>(m_d3d12Device.Get(), m_imGuiDescriptorHeap.Get());*/
+	
+	ImGui_ImplDX12_InitInfo init_info = {};
+	init_info.Device = m_d3d12Device.Get();
+	init_info.CommandQueue = m_d3d12CommandQueue.Get();
+	init_info.NumFramesInFlight = Constants::Graphics::NUM_FRAMES;
+	init_info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	init_info.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+
+	auto descriptorDesc = m_CBVDescriptorHeap->GetDesc();
+	auto increment = m_d3d12Device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
+	
+	init_info.LegacySingleSrvCpuDescriptor.ptr = (m_CBVDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr + increment);
+	init_info.LegacySingleSrvGpuDescriptor.ptr = (m_CBVDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr + increment);
+	init_info.SrvDescriptorHeap = m_CBVDescriptorHeap.Get();
+	
+ 	/*init_info.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE* gpuHandle)
+ 	{
+ 		return g_imGuiDescriptorHeapAllocator->Alloc(cpuHandle, gpuHandle);
+ 	};
+	init_info.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle)
+	{
+		g_imGuiDescriptorHeapAllocator->Free(cpuHandle, gpuHandle);
+	};*/
+	
+	ImGui_ImplDX12_Init(&init_info);
+	spdlog::info("ImGui initialized successfully.");
+}
+
+void Renderer::RenderImGui()
+{
+	ImGui_ImplDX12_NewFrame();
+	ImGui_ImplWin32_NewFrame();
+	ImGui::NewFrame();
+
+	// TODO: Define the UI here.
+	ImGui::ShowDemoWindow();
+
+	ImGui::Render();
 }
 
 void Renderer::ToggleRasterization()
