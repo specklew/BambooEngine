@@ -16,7 +16,7 @@ public:
     DescriptorHeapAllocator& operator=(DescriptorHeapAllocator&&) = delete;
 
     void Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle);
-    void Free(D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle);
+    void Free(const D3D12_CPU_DESCRIPTOR_HANDLE& cpuHandle, const D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle);
 private:
     ID3D12Device* m_device;
     ID3D12DescriptorHeap* m_descriptorHeap;

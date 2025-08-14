@@ -70,13 +70,15 @@ std::uint32_t indices[] = {
 struct ObjectConstants
 {
 	DirectX::XMFLOAT4X4 WorldViewProj = Math::Identity4x4();
+	DirectX::XMFLOAT4X4 View = Math::Identity4x4();
+	DirectX::XMFLOAT4X4 Projection = Math::Identity4x4();
+	DirectX::XMFLOAT4X4 ViewInverse = Math::Identity4x4();
+	DirectX::XMFLOAT4X4 ProjectionInverse = Math::Identity4x4();
 };
 
 constexpr UINT64 vbByteSize = 8 * sizeof(Vertex);
 
 auto& resourceManager = ResourceManager::Get();
-
-static std::shared_ptr<DescriptorHeapAllocator> g_imGuiDescriptorHeapAllocator;
 
 void Renderer::Initialize()
 {
@@ -109,8 +111,11 @@ void Renderer::Initialize()
 	ResetCommandList();
 	
 	CreateVertexAndIndexBuffer();
-	CreateConstantBufferView();
-	CreateRootSignature();
+
+	CreateDescriptorHeaps();
+	CreateWorldProjCBV();
+	
+	CreateRasterizationRootSignature();
 
 	CreatePipelineState();
 
@@ -124,7 +129,7 @@ void Renderer::Initialize()
 	SetupAccelerationStructures();
 
 	m_raytracePass = std::make_shared<RaytracePass>();
-	m_raytracePass->Initialize(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures, m_vertexBuffer, m_indexBuffer);
+	m_raytracePass->Initialize(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures, m_vertexBuffer, m_indexBuffer, m_srvCbvUavDescriptorHeap);
 
 	spdlog::info("Renderer initialized successfully.");
 
@@ -151,12 +156,18 @@ void Renderer::Update(double elapsedTime, double totalTime)
     XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
     XMStoreFloat4x4(&m_view, view);
 
-    XMMATRIX world = XMLoadFloat4x4(&m_world);
+    XMMATRIX world = XMLoadFloat4x4(&Math::Identity4x4());
     XMMATRIX proj = XMLoadFloat4x4(&m_proj);
     XMMATRIX worldViewProj = world*view*proj;
 
+	XMVECTOR det;
+	
 	ObjectConstants constants;
 	XMStoreFloat4x4(&constants.WorldViewProj, XMMatrixTranspose(worldViewProj));
+	XMStoreFloat4x4(&constants.View, XMMatrixTranspose(view));
+	XMStoreFloat4x4(&constants.Projection, XMMatrixTranspose(proj));
+	XMStoreFloat4x4(&constants.ViewInverse, XMMatrixInverse(&det, view));
+	XMStoreFloat4x4(&constants.ProjectionInverse, XMMatrixInverse(&det, proj));
 
 	m_worldViewProj = XMMatrixTranspose(worldViewProj);
 	
@@ -208,7 +219,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		&m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 	}
 
-	ID3D12DescriptorHeap* descriptorHeaps[] = {m_CBVDescriptorHeap.Get()};
+	ID3D12DescriptorHeap* descriptorHeaps[] = {m_srvCbvUavDescriptorHeap.Get()};
 
 	m_d3d12CommandList->SetPipelineState(m_pipelineStateObject.Get());
 	m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
@@ -220,7 +231,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
     	m_d3d12CommandList->IASetIndexBuffer(&m_indexBufferView);
     	m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     
-    	m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_CBVDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    	m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
     	
     	m_d3d12CommandList->DrawIndexedInstanced(_countof(indices), 1, 0, 0, 0);
 	}
@@ -519,46 +530,62 @@ void Renderer::CreateVertexAndIndexBuffer()
 	m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 }
 
-void Renderer::CreateConstantBufferView()
+void Renderer::CreateDescriptorHeaps()
 {
+	///	|							|								|								|					|							|
+	///	|	SRV IMGUI TEXTURE (1)	|	CBV WORLD PROJECTION (1)	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (1)	|	TEXTURES (MAX_TEXTURE)	|
+	///	|							|								|								|					|							|
 
+	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = 2;
+	desc.NumDescriptors = Constants::Graphics::NUM_DESCRIPTORS_ON_HEAP + Constants::Graphics::MAX_TEXTURES;
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
-	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_CBVDescriptorHeap)));
-	
+	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_srvCbvUavDescriptorHeap)));
+
+	//g_descriptorHeapAllocator = std::make_shared<DescriptorHeapAllocator>(m_d3d12Device.Get(), m_srvCbvUavDescriptorHeap.Get());
+}
+
+void Renderer::CreateWorldProjCBV()
+{
 	m_d3d12Device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(256),
+		&CD3DX12_RESOURCE_DESC::Buffer(256 * 5),
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
 		IID_PPV_ARGS(&m_constantBuffer));
 
-	m_constantBuffer->SetName(L"WorldProjectionBuffer");
+	m_constantBuffer->SetName(L"Camera and World Proj buffer");
 	ThrowIfFailed(m_constantBuffer->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData)));
 	
 	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
 	cbvDesc.BufferLocation = m_constantBuffer->GetGPUVirtualAddress();
-	cbvDesc.SizeInBytes = static_cast<UINT>(sizeof(DirectX::XMFLOAT4X4) + 255) & ~255;
+	cbvDesc.SizeInBytes = static_cast<UINT>(sizeof(DirectX::XMFLOAT4X4) + 255 * 5) & ~255;
+
+	auto descriptorDesc = m_srvCbvUavDescriptorHeap->GetDesc();
+	auto increment = m_d3d12Device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
+
+	D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle;
+	cbvHandle.ptr = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr + increment;
 	
-	m_d3d12Device->CreateConstantBufferView(&cbvDesc, m_CBVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	m_d3d12Device->CreateConstantBufferView(&cbvDesc, cbvHandle);
 }
 
-void Renderer::CreateRootSignature()
+void Renderer::CreateRasterizationRootSignature()
 {
 	CD3DX12_ROOT_PARAMETER rootParameters[1];
-	CD3DX12_DESCRIPTOR_RANGE cbvTable;
+	
+	D3D12_DESCRIPTOR_RANGE cbvRange;
+	cbvRange.BaseShaderRegister = 0;
+	cbvRange.NumDescriptors = 1;
+	cbvRange.RegisterSpace = 0;
+	cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+	cbvRange.OffsetInDescriptorsFromTableStart = 1;
 
-	cbvTable.Init(
-		D3D12_DESCRIPTOR_RANGE_TYPE_CBV,
-		1,
-		0);
-
-	rootParameters[0].InitAsDescriptorTable(1, &cbvTable);
+	rootParameters[0].InitAsDescriptorTable(1, &cbvRange);
 
 	CD3DX12_ROOT_SIGNATURE_DESC desc = {};
 	desc.NumParameters = 1;
@@ -721,15 +748,6 @@ void Renderer::InitializeImGui()
 	style.ScaleAllSizes(mainScaleImGui);
 
 	ImGui_ImplWin32_Init(Window::Get().GetHandle());
-
-	/*D3D12_DESCRIPTOR_HEAP_DESC imGuiHeapDesc = {};
-	imGuiHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	imGuiHeapDesc.NumDescriptors = 64; // The same number as in ImGui example. - It seems too much, but whatever…
-	imGuiHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-
-	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(&imGuiHeapDesc, IID_PPV_ARGS(&m_imGuiDescriptorHeap)));
-
-	g_imGuiDescriptorHeapAllocator = std::make_shared<DescriptorHeapAllocator>(m_d3d12Device.Get(), m_imGuiDescriptorHeap.Get());*/
 	
 	ImGui_ImplDX12_InitInfo init_info = {};
 	init_info.Device = m_d3d12Device.Get();
@@ -737,22 +755,10 @@ void Renderer::InitializeImGui()
 	init_info.NumFramesInFlight = Constants::Graphics::NUM_FRAMES;
 	init_info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	init_info.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-
-	auto descriptorDesc = m_CBVDescriptorHeap->GetDesc();
-	auto increment = m_d3d12Device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
 	
-	init_info.LegacySingleSrvCpuDescriptor.ptr = (m_CBVDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr + increment);
-	init_info.LegacySingleSrvGpuDescriptor.ptr = (m_CBVDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr + increment);
-	init_info.SrvDescriptorHeap = m_CBVDescriptorHeap.Get();
-	
- 	/*init_info.SrvDescriptorAllocFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE* cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE* gpuHandle)
- 	{
- 		return g_imGuiDescriptorHeapAllocator->Alloc(cpuHandle, gpuHandle);
- 	};
-	init_info.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*, D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle, D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle)
-	{
-		g_imGuiDescriptorHeapAllocator->Free(cpuHandle, gpuHandle);
-	};*/
+	init_info.LegacySingleSrvCpuDescriptor.ptr = (m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr);
+	init_info.LegacySingleSrvGpuDescriptor.ptr = (m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr);
+	init_info.SrvDescriptorHeap = m_srvCbvUavDescriptorHeap.Get();
 	
 	ImGui_ImplDX12_Init(&init_info);
 	spdlog::info("ImGui initialized successfully.");

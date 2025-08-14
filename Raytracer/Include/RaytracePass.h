@@ -15,7 +15,8 @@ public:
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList, 
         std::shared_ptr<AccelerationStructures> accelerationStructures,
         Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
-        Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer);
+        Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer,
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvUavHeap);
     
     void Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget);
     void Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj);
@@ -31,8 +32,6 @@ private:
     void CreateRaytracingOutputBuffer();
     void CreateShaderResourceHeap();
     void CreateShaderBindingTable();
-
-    void CreateConstantCameraBuffer();
     
     // Properties
     std::shared_ptr<AccelerationStructures> m_accelerationStructures;
@@ -63,7 +62,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_shaderBindingTableStorage;
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbDescriptorHeap;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_cbCamera;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBuffer;

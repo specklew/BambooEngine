@@ -36,9 +36,10 @@ private:
 	
 	void CreateVertexAndIndexBuffer();
 
-	void CreateConstantBufferView();
+	void CreateDescriptorHeaps();
+	void CreateWorldProjCBV();
 
-	void CreateRootSignature();
+	void CreateRasterizationRootSignature();
 
 	void CreatePipelineState();
 
@@ -94,7 +95,7 @@ private:
 	D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_constantBuffer;
-	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_CBVDescriptorHeap;
+	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvCbvUavDescriptorHeap;
 	BYTE* m_mappedData = nullptr;
 
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;

@@ -7,6 +7,7 @@ namespace Constants
     namespace Graphics
     {
         constexpr int NUM_FRAMES = 3;
-        constexpr int MAX_TEXTURES = 256;
+        constexpr int MAX_TEXTURES = 64;
+        constexpr int NUM_DESCRIPTORS_ON_HEAP = 64;
     }
 }

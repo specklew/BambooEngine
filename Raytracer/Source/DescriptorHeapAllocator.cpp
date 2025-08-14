@@ -21,8 +21,7 @@ DescriptorHeapAllocator::DescriptorHeapAllocator(ID3D12Device* device, ID3D12Des
     
     m_handleIncrementSize = m_device->GetDescriptorHandleIncrementSize(desc.Type);
     m_freeIndices.reserve(desc.NumDescriptors);
-
-    // This may be wrong! The original implementation populates the m_freeIndices from NumDescriptors to 1.
+    
     for (int i = 0; i < desc.NumDescriptors; i++)
     {
         m_freeIndices.push_back(i);
@@ -44,11 +43,11 @@ void DescriptorHeapAllocator::Alloc(D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
     const int index = m_freeIndices.back();
     m_freeIndices.pop_back();
 
-    outCpuHandle->ptr = m_descriptorStartCpuHandle.ptr + static_cast<long long>(index * m_handleIncrementSize);
-    outGpuHandle->ptr = m_descriptorStartGpuHandle.ptr + static_cast<long long>(index * m_handleIncrementSize);
+    if (outCpuHandle != nullptr) outCpuHandle->ptr = m_descriptorStartCpuHandle.ptr + static_cast<long long>(index * m_handleIncrementSize);
+    if (outGpuHandle != nullptr) outGpuHandle->ptr = m_descriptorStartGpuHandle.ptr + static_cast<long long>(index * m_handleIncrementSize);
 }
 
-void DescriptorHeapAllocator::Free(const D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle, const D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle)
+void DescriptorHeapAllocator::Free(const D3D12_CPU_DESCRIPTOR_HANDLE& cpuHandle, const D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle)
 {
     UINT64 gpuIndex = (gpuHandle.ptr - m_descriptorStartGpuHandle.ptr) / m_handleIncrementSize;
     UINT64 cpuIndex = (cpuHandle.ptr - m_descriptorStartCpuHandle.ptr) / m_handleIncrementSize;

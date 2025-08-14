@@ -14,7 +14,8 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
                               std::shared_ptr<AccelerationStructures> accelerationStructures,
                               Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
-                              Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer)
+                              Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer,
+                              Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> cbvSrvUavHeap)
 {
     spdlog::info("Initializing raytracer pass...");
     
@@ -24,10 +25,10 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
     m_shaderBindingTableGenerator = std::make_shared<nv_helpers_dx12::ShaderBindingTableGenerator>();
     m_vertexBuffer = vertexBuffer;
     m_indexBuffer = indexBuffer;
+    m_srvUavHeap = cbvSrvUavHeap;
 
     InitializeRaytracingPipeline();
     CreateRaytracingOutputBuffer();
-    CreateConstantCameraBuffer();
     CreateShaderResourceHeap();
     CreateShaderBindingTable();
     
@@ -115,17 +116,6 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
 
 void RaytracePass::Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj)
 {
-    std::vector<DirectX::XMMATRIX> matrices(4);
-    matrices[0] = view;
-    matrices[1] = proj;
-    DirectX::XMVECTOR det;
-    matrices[2] = XMMatrixInverse(&det, view);
-    matrices[3] = XMMatrixInverse(&det, proj);
-
-    uint8_t* pData;
-    ThrowIfFailed(m_cbCamera->Map(0, nullptr, (void**)&pData));
-    memcpy(pData, matrices.data(), sizeof(DirectX::XMMATRIX) * matrices.size());
-    m_cbCamera->Unmap(0, nullptr);
 }
 
 void RaytracePass::InitializeRaytracingPipeline()
@@ -255,29 +245,29 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateRayGenSignature(
 {
     spdlog::debug("Creating ray generation root signature");
     nv_helpers_dx12::RootSignatureGenerator rsGenerator;
-    
-    D3D12_DESCRIPTOR_RANGE outputBufferRange;
-    outputBufferRange.BaseShaderRegister = 0;
-    outputBufferRange.NumDescriptors = 1;
-    outputBufferRange.RegisterSpace = 0;
-    outputBufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    outputBufferRange.OffsetInDescriptorsFromTableStart = 0;
-
-    D3D12_DESCRIPTOR_RANGE tlasRange;
-    tlasRange.BaseShaderRegister = 0;
-    tlasRange.NumDescriptors = 1;
-    tlasRange.RegisterSpace = 0;
-    tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    tlasRange.OffsetInDescriptorsFromTableStart = 1;
 
     D3D12_DESCRIPTOR_RANGE cbvRange;
     cbvRange.BaseShaderRegister = 0;
     cbvRange.NumDescriptors = 1;
     cbvRange.RegisterSpace = 0;
     cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.OffsetInDescriptorsFromTableStart = 2;
+    cbvRange.OffsetInDescriptorsFromTableStart = 1;
     
-    rsGenerator.AddHeapRangesParameter({outputBufferRange, tlasRange, cbvRange});
+    D3D12_DESCRIPTOR_RANGE outputBufferRange;
+    outputBufferRange.BaseShaderRegister = 0;
+    outputBufferRange.NumDescriptors = 1;
+    outputBufferRange.RegisterSpace = 0;
+    outputBufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    outputBufferRange.OffsetInDescriptorsFromTableStart = 2;
+
+    D3D12_DESCRIPTOR_RANGE tlasRange;
+    tlasRange.BaseShaderRegister = 0;
+    tlasRange.NumDescriptors = 1;
+    tlasRange.RegisterSpace = 0;
+    tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    tlasRange.OffsetInDescriptorsFromTableStart = 3;
+    
+    rsGenerator.AddHeapRangesParameter({cbvRange, outputBufferRange, tlasRange});
 
     spdlog::debug("Generating ray generation root signature");
     return rsGenerator.Generate(m_device.Get(), true);
@@ -345,12 +335,11 @@ void RaytracePass::CreateRaytracingOutputBuffer()
 
 void RaytracePass::CreateShaderResourceHeap()
 {
-    spdlog::debug("Creating SRV UAV shader resource heap for raytracing");
-    m_srvUavHeap = nv_helpers_dx12::CreateDescriptorHeap(
-        m_device.Get(), 3, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, true);
+    D3D12_CPU_DESCRIPTOR_HANDLE srvHandle;
 
-    D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart();
-
+    auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
+    srvHandle.ptr = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart().ptr + 2 * increment; // IMGUI | CBV | UAV <- ptr
+    
     spdlog::debug("Creating UAV for raytracing output buffer");
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
@@ -366,14 +355,7 @@ void RaytracePass::CreateShaderResourceHeap()
     srvDesc.RaytracingAccelerationStructure.Location = m_accelerationStructures->GetTopLevelAS().p_result->GetGPUVirtualAddress();
     m_device->CreateShaderResourceView(nullptr, &srvDesc, srvHandle);
 
-    srvHandle.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-    spdlog::debug("Creating constant buffer view for camera data");
-    D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-    cbvDesc.BufferLocation = m_cbCamera->GetGPUVirtualAddress();
-    cbvDesc.SizeInBytes = static_cast<UINT>(sizeof(DirectX::XMMATRIX) * 4 + 255) & ~255;
-
-    m_device->CreateConstantBufferView(&cbvDesc, srvHandle);  
+    // CBV for camera is already created in CreateConstantCameraBuffer() in Renderer
 }
 
 void RaytracePass::CreateShaderBindingTable()
@@ -409,17 +391,4 @@ void RaytracePass::CreateShaderBindingTable()
 
     spdlog::debug("Compiling the shader binding table");
     m_shaderBindingTableGenerator->Generate(m_shaderBindingTableStorage.Get(), m_rtStateObjectProperties.Get());
-}
-
-void RaytracePass::CreateConstantCameraBuffer()
-{
-    m_device->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-        D3D12_HEAP_FLAG_NONE,
-        &CD3DX12_RESOURCE_DESC::Buffer(256),
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&m_cbCamera));
-
-    m_cbCamera->SetName(L"Raytracing camera world view projection buffer");
 }
