@@ -9,6 +9,11 @@ void ReadDataFromFile(const char* szFilepath, void* buffer, int bufferSize, bool
 void WriteTextToFile(const char* szFilepath, const char* buffer, int bufferSize);
 void WriteDataToFile(const char* szFilepath, const char* buffer, int bufferSize, const char* fileMode);
 
+inline UINT64 Align(UINT64 size, UINT64 alignment)
+{
+    return (size + (alignment - 1)) & ~(alignment - 1);
+}
+
 std::string GetName(ID3D12Object *d3dObject);
 
 template <typename T>

@@ -96,6 +96,8 @@ void WriteDataToFile(const char* szFilepath, const char* buffer, int bufferSize,
    assert(ferror(file) == 0);
 }
 
+
+
 std::string GetName(ID3D12Object *d3dObject)
 {
    wchar_t name[128] = { };

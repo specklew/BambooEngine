@@ -24,10 +24,10 @@ public:
 private:
     void InitializeRaytracingPipeline();
     
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateRayGenSignature();
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateMissSignature();
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateHitSignature();
-    void CreateGloablRootSignature();
+    void CreateRayGenSignature();
+    void CreateMissSignature();
+    void CreateHitSignature();
+    void CreateGlobalRootSignature();
 
     void CreateRaytracingOutputBuffer();
     void CreateShaderResourceHeap();

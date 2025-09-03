@@ -20,5 +20,5 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attrib)
                BTriVertex[indices[vertId + 1]].color * barycentrics.y +
                BTriVertex[indices[vertId + 2]].color * barycentrics.z;*/
   
-    payload.colorAndDistance = float4(1,0,0,1); 
+    payload.colorAndDistance = float4(1,1,1,1); 
 }

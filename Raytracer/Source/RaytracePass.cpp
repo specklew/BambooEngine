@@ -66,16 +66,16 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
 
     // Start addresses must be aligned to D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT
     // and strides (basically shader record sizes) must be aligned to D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT
-    desc.MissShaderTable.StartAddress = (desc.MissShaderTable.StartAddress + D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1) & ~(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1);
-    desc.MissShaderTable.StrideInBytes = (desc.MissShaderTable.StrideInBytes + D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT - 1) & ~(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT - 1); 
+    desc.MissShaderTable.StartAddress = Align(desc.MissShaderTable.StartAddress, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+    desc.MissShaderTable.StrideInBytes = Align(desc.MissShaderTable.StrideInBytes, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT); 
     
     uint32_t hitGroupsSelectionSize = m_shaderBindingTableGenerator->GetHitGroupSectionSize();
     desc.HitGroupTable.StartAddress = desc.MissShaderTable.StartAddress + desc.MissShaderTable.StrideInBytes;
     desc.HitGroupTable.StrideInBytes = hitGroupsSelectionSize;
     desc.HitGroupTable.SizeInBytes = m_shaderBindingTableGenerator->GetHitGroupEntrySize();
     
-    desc.HitGroupTable.StartAddress = (desc.HitGroupTable.StartAddress + D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1) & ~(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1);
-    desc.HitGroupTable.StrideInBytes = (desc.HitGroupTable.StrideInBytes + D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT - 1) & ~(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT - 1); 
+    desc.HitGroupTable.StartAddress = Align(desc.HitGroupTable.StartAddress, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+    desc.HitGroupTable.StrideInBytes = Align(desc.HitGroupTable.StrideInBytes, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT); 
 
     desc.Width = Window::Get().GetWidth();
     desc.Height = Window::Get().GetHeight();
@@ -182,10 +182,10 @@ void RaytracePass::InitializeRaytracingPipeline()
     }
     
     spdlog::debug("Creating raytracing root signatures");
-    m_rayGenSignature = CreateRayGenSignature();
-    m_missSignature = CreateMissSignature();
-    /*m_hitSignature = */CreateHitSignature();
-    CreateGloablRootSignature();
+    CreateRayGenSignature();
+    CreateMissSignature();
+    CreateHitSignature();
+    CreateGlobalRootSignature();
     
     // 5. Root signature associations
     spdlog::debug("Associating root signatures with pipeline");
@@ -241,10 +241,11 @@ void RaytracePass::InitializeRaytracingPipeline()
     ThrowIfFailed(m_rtStateObject->QueryInterface(IID_PPV_ARGS(&m_rtStateObjectProperties)));
 }
 
-Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateRayGenSignature()
+void RaytracePass::CreateRayGenSignature()
 {
     spdlog::debug("Creating ray generation root signature");
-    nv_helpers_dx12::RootSignatureGenerator rsGenerator;
+
+    CD3DX12_ROOT_PARAMETER rootParameters[1];
 
     D3D12_DESCRIPTOR_RANGE cbvRange;
     cbvRange.BaseShaderRegister = 0;
@@ -252,13 +253,13 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateRayGenSignature(
     cbvRange.RegisterSpace = 0;
     cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
     cbvRange.OffsetInDescriptorsFromTableStart = 1;
-    
-    D3D12_DESCRIPTOR_RANGE outputBufferRange;
-    outputBufferRange.BaseShaderRegister = 0;
-    outputBufferRange.NumDescriptors = 1;
-    outputBufferRange.RegisterSpace = 0;
-    outputBufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    outputBufferRange.OffsetInDescriptorsFromTableStart = 2;
+
+    D3D12_DESCRIPTOR_RANGE rtRange;
+    rtRange.BaseShaderRegister = 0;
+    rtRange.NumDescriptors = 1;
+    rtRange.RegisterSpace = 0;
+    rtRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    rtRange.OffsetInDescriptorsFromTableStart = 2;
 
     D3D12_DESCRIPTOR_RANGE tlasRange;
     tlasRange.BaseShaderRegister = 0;
@@ -266,23 +267,35 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateRayGenSignature(
     tlasRange.RegisterSpace = 0;
     tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     tlasRange.OffsetInDescriptorsFromTableStart = 3;
-    
-    rsGenerator.AddHeapRangesParameter({cbvRange, outputBufferRange, tlasRange});
 
-    spdlog::debug("Generating ray generation root signature");
-    return rsGenerator.Generate(m_device.Get(), true);
+    D3D12_DESCRIPTOR_RANGE fullRange[3] = {cbvRange, rtRange, tlasRange};
+    rootParameters[0].InitAsDescriptorTable(3, fullRange);
+    
+    CD3DX12_ROOT_SIGNATURE_DESC localRayGenSignatureDesc(1, rootParameters);
+    localRayGenSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+    Microsoft::WRL::ComPtr<ID3DBlob> blob;
+    Microsoft::WRL::ComPtr<ID3DBlob> error;
+
+    ThrowIfFailed(D3D12SerializeRootSignature(&localRayGenSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
+    ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_rayGenSignature)));
 }
 
-Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateMissSignature()
+void RaytracePass::CreateMissSignature()
 {
     spdlog::debug("Creating miss root signature");
-    nv_helpers_dx12::RootSignatureGenerator rsGenerator;
+    
+    CD3DX12_ROOT_SIGNATURE_DESC localMissSignatureDesc(0, nullptr);
+    localMissSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
 
-    spdlog::debug("Generating miss root signature");
-    return rsGenerator.Generate(m_device.Get(), true);
+    Microsoft::WRL::ComPtr<ID3DBlob> blob;
+    Microsoft::WRL::ComPtr<ID3DBlob> error;
+
+    ThrowIfFailed(D3D12SerializeRootSignature(&localMissSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
+    ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_missSignature)));
 }
 
-Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateHitSignature()
+void RaytracePass::CreateHitSignature()
 {
     spdlog::debug("Creating hit root signature");
 
@@ -294,11 +307,9 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> RaytracePass::CreateHitSignature()
 
     ThrowIfFailed(D3D12SerializeRootSignature(&localHitSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
     ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_hitSignature)));
-
-    return nullptr;
 }
 
-void RaytracePass::CreateGloablRootSignature()
+void RaytracePass::CreateGlobalRootSignature()
 {
     CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(0, nullptr);
     
