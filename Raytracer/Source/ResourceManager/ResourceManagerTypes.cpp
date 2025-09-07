@@ -5,11 +5,7 @@ static constexpr int MAX_PATH_LENGTH = 255;
 static constexpr int SCRATCH_SIZE = MAX_PATH_LENGTH + 1; // +1 for null terminator
 static char g_scratch[SCRATCH_SIZE] = {}; // 255 limit + null terminator
 
-// TODO : how do assert narrow strings?
-
-AssetId::AssetId(const char* szPath) : AssetId(szPath, strlen(szPath))
-{
-}
+AssetId::AssetId(const char* szPath) : AssetId(szPath, strlen(szPath)){}
 
 AssetId::AssetId(const char* path, const size_t len)
 {
@@ -17,7 +13,7 @@ AssetId::AssetId(const char* path, const size_t len)
 
     // Copy the path into the scratch buffer.
     const errno_t ret = memcpy_s(g_scratch, MAX_PATH_LENGTH, path, len);
-    assert(ret == 0);
+    assert(ret == 0 && "Failed to copy AssetId path into scratch buffer");
     g_scratch[len] = '\0';
 
     // Convert all characters to lowercase.
@@ -25,7 +21,7 @@ AssetId::AssetId(const char* path, const size_t len)
     // but our hash function is case-sensitive.
     for (size_t i = 0; i < len; i++)
     {
-        g_scratch[i] = (char)tolower(g_scratch[i]);
+        g_scratch[i] = static_cast<char>(tolower(g_scratch[i]));
     }
 
     // convert all slashes to forward slashes
@@ -41,13 +37,18 @@ AssetId::AssetId(const char* path, const size_t len)
     m_path = std::string(g_scratch, len);
 }
 
+AssetId::AssetId(const std::string_view str)
+    : AssetId(str.data(), str.size())
+{
+}
+
 std::string_view AssetId::GetExtension() const
 {
     const size_t lastSlash = m_path.find_last_of(".");
     if (lastSlash == std::string::npos)
     {
         assert(false && "Asset Id must always have extension");
-        return std::string_view();
+        return {};
     }
 
     return std::string_view(m_path.c_str() + lastSlash); // includes the dot, to conform with std::filesystem::path::extension()

@@ -37,6 +37,13 @@ static std::string_view GetStringViewForResourceId(const std::string& narrowStri
     return std::string_view(str, assetIdLength - extensionLength);
 }
 
+ResourceId ResourceManager::GetResourceId(const AssetId& assetId)
+{
+    const std::string narrowString = assetId.AsString();
+    const std::string_view strView = GetStringViewForResourceId(narrowString, assetId);
+    return ResourceId::New(strView);
+}
+
 ResourceId ResourceManager::CreateNewResourceId(const AssetId& assetId) const
 {
     const std::string narrowString = assetId.AsString();

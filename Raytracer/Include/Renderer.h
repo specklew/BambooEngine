@@ -1,7 +1,9 @@
 #pragma once
 #include "Constants.h"
 #include "Helpers.h"
+#include "Primitive.h"
 
+struct Primitive;
 class DescriptorHeapAllocator;
 class RaytracePass;
 class AccelerationStructures;
@@ -17,6 +19,8 @@ public:
 	void CleanUp();
 	void OnMouseMove(unsigned long long btnState, int x, int y);
 	void ToggleRasterization();
+
+	void CreateGpuResourcesForPrimitive(Primitive& primitive);
 
 private:
 	void SetupDeviceAndDebug();
@@ -123,4 +127,6 @@ private:
 	DirectX::XMFLOAT4X4 m_world = Math::Identity4x4();
 	DirectX::XMFLOAT4X4 m_proj = Math::Identity4x4();
 	DirectX::XMMATRIX m_worldViewProj = DirectX::XMMatrixIdentity();
+
+	std::shared_ptr<Primitive> m_primitive;
 };

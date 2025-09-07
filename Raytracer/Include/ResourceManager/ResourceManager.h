@@ -150,6 +150,8 @@ public:
     void AllocateResources();
     void ReleaseResources();
 
+    [[nodiscard]] static ResourceId GetResourceId(const AssetId& assetId);
+    
     [[nodiscard]] ResourceId CreateNewResourceId(const AssetId& assetId) const;
     [[nodiscard]] ResourceId GetExistingResourceId(const AssetId& assetId) const;
 

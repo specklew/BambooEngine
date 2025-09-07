@@ -17,6 +17,30 @@ inline UINT64 Align(UINT64 size, UINT64 alignment)
 std::string GetName(ID3D12Object *d3dObject);
 
 template <typename T>
+__forceinline void AssertReleaseClear(Microsoft::WRL::ComPtr<T>& ptr)
+{
+    assert(ptr != nullptr);
+    ptr.Reset();
+    ptr = nullptr;
+}
+
+template <typename T>
+__forceinline void AssertDeleteSingleClear(T** ptr)
+{
+    assert(*ptr != nullptr);
+    delete *ptr;
+    *ptr = nullptr;
+}
+
+template <typename T>
+__forceinline void AssertDeleteArrayClear(T** ptr)
+{
+    assert(*ptr != nullptr);
+    delete[] *ptr;
+    *ptr = nullptr;
+}
+
+template <typename T>
 __forceinline void AssertFreeClear(T** ptr)
 {
     assert(*ptr != nullptr);

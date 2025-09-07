@@ -3,7 +3,7 @@
 struct Vertex
 {
     DirectX::XMFLOAT3 Pos;
-    //irectX::XMFLOAT4 Color;
+    //DirectX::XMFLOAT4 Color;
     //DirectX::XMFLOAT2 Tex0;
 };
 

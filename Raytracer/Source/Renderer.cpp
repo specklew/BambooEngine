@@ -13,59 +13,20 @@
 
 #include "Helpers.h"
 #include "InputElements.h"
+#include "ModelLoading.h"
+#include "Primitive.h"
 #include "RaytracePass.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
+#include "Utils.h"
 #include "Window.h"
+#include "tinygltf/tiny_gltf.h"
 
 #ifdef _DEBUG
 #define ENABLE_GPU_BASED_VALIDATION 1
 #endif
 
 using namespace Microsoft::WRL;
-
-Vertex vertices[] = {
-	{ DirectX::XMFLOAT3(-1.0f, -1.0f, -1.0f) },
-	{ DirectX::XMFLOAT3(-1.0f, +1.0f, -1.0f) },
-	{ DirectX::XMFLOAT3(+1.0f, +1.0f, -1.0f) },
-	{ DirectX::XMFLOAT3(+1.0f, -1.0f, -1.0f) },
-	{ DirectX::XMFLOAT3(-1.0f, -1.0f, +1.0f) },
-	{ DirectX::XMFLOAT3(-1.0f, +1.0f, +1.0f) },
-	{ DirectX::XMFLOAT3(+1.0f, +1.0f, +1.0f) },
-	{ DirectX::XMFLOAT3(+1.0f, -1.0f, +1.0f) }
-};
-
-/*Vertex vertices[] = {
-	{ DirectX::XMFLOAT3(-1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4(0, 0, 0, 1) },
-	{ DirectX::XMFLOAT3(-1.0f, +1.0f, -1.0f), DirectX::XMFLOAT4(0, 1, 0, 1) },
-	{ DirectX::XMFLOAT3(+1.0f, +1.0f, -1.0f), DirectX::XMFLOAT4(1, 1, 0, 1) },
-	{ DirectX::XMFLOAT3(+1.0f, -1.0f, -1.0f), DirectX::XMFLOAT4(1, 0, 0, 1) },
-	{ DirectX::XMFLOAT3(-1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4(0, 0, 1, 1) },
-	{ DirectX::XMFLOAT3(-1.0f, +1.0f, +1.0f), DirectX::XMFLOAT4(0, 1, 1, 1) },
-	{ DirectX::XMFLOAT3(+1.0f, +1.0f, +1.0f), DirectX::XMFLOAT4(1, 1, 1, 1) },
-	{ DirectX::XMFLOAT3(+1.0f, -1.0f, +1.0f), DirectX::XMFLOAT4(1, 0, 1, 1) }
-};*/
-
-std::uint32_t indices[] = {
-	// front face
-	0, 1, 2,
-	0, 2, 3,
-	// back face
-	4, 6, 5,
-	4, 7, 6,
-	// left face
-	4, 5, 1,
-	4, 1, 0,
-	// right face
-	3, 2, 6,
-	3, 6, 7,
-	// top face
-	1, 5, 6,
-	1, 6, 2,
-	// bottom face
-	4, 0, 3,
-	4, 3, 7
-};
 
 struct ObjectConstants
 {
@@ -101,6 +62,11 @@ void Renderer::Initialize()
 	CreateSwapChain();
 	
 	CreateCommandList();
+	ResetCommandList();
+
+	auto p = ModelLoading::LoadModel(*this, AssetId("resources/models/avocado/avocado.glb"));
+	m_primitive = std::make_shared<Primitive>(p);
+
 	ResetCommandList();
 	
 	CreateRTVDescriptorHeap();
@@ -227,13 +193,16 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	if (m_rasterize)
 	{
-		m_d3d12CommandList->IASetVertexBuffers(0, 1, m_vertexBuffers);
-    	m_d3d12CommandList->IASetIndexBuffer(&m_indexBufferView);
+		auto vbv = m_primitive->GetVertexBufferView();
+		auto ibv = m_primitive->GetIndexBufferView();
+		
+		m_d3d12CommandList->IASetVertexBuffers(0, 1, &vbv);
+    	m_d3d12CommandList->IASetIndexBuffer(&ibv);
     	m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     
     	m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
     	
-    	m_d3d12CommandList->DrawIndexedInstanced(_countof(indices), 1, 0, 0, 0);
+    	m_d3d12CommandList->DrawIndexedInstanced(m_primitive->indexCount, 1, m_primitive->firstIndex, m_primitive->firstVertex, 0);
 	}
 	else
 	{
@@ -511,7 +480,7 @@ void Renderer::CreateDSVDescriptorHeap()
 
 void Renderer::CreateVertexAndIndexBuffer()
 {
-	m_vertexBuffer = CreateDefaultBuffer(vertices, vbByteSize, m_vertexBufferUploader);
+	/*m_vertexBuffer = CreateDefaultBuffer(vertices, vbByteSize, m_vertexBufferUploader);
 	m_vertexBuffer->SetName(L"VertexBuffer");
 
 	m_vertexBufferView = {};
@@ -527,7 +496,7 @@ void Renderer::CreateVertexAndIndexBuffer()
 	m_indexBufferView = {};
 	m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
 	m_indexBufferView.SizeInBytes = sizeof(indices);
-	m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+	m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;*/
 }
 
 void Renderer::CreateDescriptorHeaps()
@@ -713,7 +682,7 @@ void Renderer::SetupAccelerationStructures()
 	m_accelerationStructures = std::make_shared<AccelerationStructures>();
 
 	AccelerationStructureBuffers bottomLevelBuffers = m_accelerationStructures->CreateBottomLevelAS(
-		m_d3d12Device.Get(), m_d3d12CommandList.Get(), {{m_vertexBuffer, std::size(vertices)}}, {{m_indexBuffer, std::size(indices)}});
+		m_d3d12Device.Get(), m_d3d12CommandList.Get(), {{m_primitive->vertexBufferGpu, m_primitive->vertexCount}}, {{m_primitive->indexBufferGpu, m_primitive->indexCount}});
 
 	auto instance = std::pair(bottomLevelBuffers.p_result, DirectX::XMMatrixIdentity());
 	m_accelerationStructures->GetInstances().push_back(instance);
@@ -779,6 +748,17 @@ void Renderer::RenderImGui()
 void Renderer::ToggleRasterization()
 {
 	m_rasterize = !m_rasterize;
+}
+
+void Renderer::CreateGpuResourcesForPrimitive(Primitive& primitive)
+{
+	primitive.vertexBufferGpu = RenderingUtils::CreateDefaultBuffer(m_d3d12Device.Get(), m_d3d12CommandList.Get(), primitive.vertexBufferCpu, primitive.vertexBufferByteSize, primitive.vertexBufferUploader);
+	primitive.indexBufferGpu = RenderingUtils::CreateDefaultBuffer(m_d3d12Device.Get(), m_d3d12CommandList.Get(), primitive.indexBufferCpu, primitive.indexBufferByteSize, primitive.indexBufferUploader);
+
+	m_d3d12CommandList->Close();
+	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	FlushCommandQueue();
 }
 
 ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)

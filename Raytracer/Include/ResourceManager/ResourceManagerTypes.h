@@ -3,45 +3,47 @@
 
 #include "StringId.h"
 
-template<int TypeIndex, typename TIndex>
+template<typename IndexType>
 struct ResourceHandle
 {
-	TIndex index;
+	IndexType index;
 
 	constexpr ResourceHandle() : index(0) {}
 	constexpr explicit ResourceHandle(uint32_t index) : index(index) {}
-	constexpr inline bool IsValid() const { return index != Invalid().index; }
-	constexpr inline static ResourceHandle Invalid() { return ResourceHandle(-1); }
+
+	[[nodiscard]] constexpr bool IsValid() const { return index != Invalid().index; }
+	
+	constexpr static ResourceHandle Invalid() { return ResourceHandle(-1); }
 
 	friend class ResourceManager;
 };
 
-typedef ResourceHandle<0, uint16_t> TextureHandle;
-typedef ResourceHandle<1, uint16_t> MaterialHandle;
-typedef ResourceHandle<2, uint8_t> MeshHandle;
-typedef ResourceHandle<3, uint8_t> PrimitiveHandle;
-typedef ResourceHandle<4, uint8_t> SpecialMaterialHandle;
-typedef ResourceHandle<5, uint8_t> ShaderHandle;
-typedef ResourceHandle<6, uint8_t> FontHandle;
-typedef ResourceHandle<7, uint8_t> AnimationHandle;
+typedef ResourceHandle<uint16_t> TextureHandle;
+typedef ResourceHandle<uint16_t> MaterialHandle;
+typedef ResourceHandle<uint8_t> MeshHandle;
+typedef ResourceHandle<uint8_t> PrimitiveHandle;
+typedef ResourceHandle<uint8_t> SpecialMaterialHandle;
+typedef ResourceHandle<uint8_t> ShaderHandle;
+typedef ResourceHandle<uint8_t> FontHandle;
+typedef ResourceHandle<uint8_t> AnimationHandle;
 
-template<int TypeIndex, typename THandle>
-struct std::hash<ResourceHandle<TypeIndex, THandle>>
+template<typename IndexType>
+struct std::hash<ResourceHandle<IndexType>>
 {
-	constexpr std::size_t operator()(const ResourceHandle<TypeIndex, THandle>& s) const noexcept
+	constexpr std::size_t operator()(const ResourceHandle<IndexType>& s) const noexcept
 	{
 		return std::hash<int>()(s.index);
 	}
 };
 
-template<int TypeIndex, typename THandle>
-constexpr inline bool operator==(const ResourceHandle<TypeIndex, THandle>& lhs, const ResourceHandle<TypeIndex, THandle>& rhs)
+template<typename IndexType>
+constexpr inline bool operator==(const ResourceHandle<IndexType>& lhs, const ResourceHandle<IndexType>& rhs)
 {
 	return lhs.index == rhs.index;
 }
 
-template<int TypeIndex, typename THandle>
-constexpr inline bool operator!=(const ResourceHandle<TypeIndex, THandle>& lhs, const ResourceHandle<TypeIndex, THandle>& rhs)
+template<typename IndexType>
+constexpr inline bool operator!=(const ResourceHandle<IndexType>& lhs, const ResourceHandle<IndexType>& rhs)
 {
 	return lhs.index != rhs.index;
 }
@@ -57,6 +59,7 @@ public:
 	AssetId() = default;
 	explicit AssetId(const char* szPath);
 	explicit AssetId(const char* path, size_t len);
+	explicit AssetId(std::string_view str);
 
 	[[nodiscard]] std::string_view GetExtension() const; // will return the dot with extension, e.g. ".dds"
 	[[nodiscard]] std::string_view GetFileName() const; // with extension; e.g. "Resources/textures/MyTexture.dds" will give "MyTexture.dds"
