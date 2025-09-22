@@ -28,7 +28,7 @@ Resource::Resource(const Microsoft::WRL::ComPtr<ID3D12Device5>& device, const D3
         D3D12_RESOURCE_STATE_COMMON,
         m_clearValue.get(),
         IID_PPV_ARGS(&m_resource)));
-
+    
     QueryFeatureSupport();
 }
 

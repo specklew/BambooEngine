@@ -101,6 +101,7 @@
   <ItemGroup>
     <ClInclude Include="Include\AccelerationStructures.h" />
     <ClInclude Include="Include\Application.h" />
+    <ClInclude Include="Include\Buffer.h" />
     <ClInclude Include="Include\Constants.h" />
     <ClInclude Include="Include\DescriptorHeapAllocator.h" />
     <ClInclude Include="Include\Helpers.h" />
@@ -120,6 +121,7 @@
     <ClInclude Include="Include\StringHash.h" />
     <ClInclude Include="Include\StringId.h" />
     <ClInclude Include="Include\Utils.h" />
+    <ClInclude Include="Include\VertexBuffer.h" />
     <ClInclude Include="Include\Window.h" />
     <ClInclude Include="Vendor\DXC\inc\d3d12shader.h" />
     <ClInclude Include="Vendor\DXC\inc\dxcapi.h" />
@@ -180,6 +182,7 @@
     <None Include="Resources\Shaders\Raytracing\RayGen.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
+    <ClCompile Include="Source\Buffer.cpp"/>
     <ClCompile Include="Source\DescriptorHeapAllocator.cpp"/>
     <ClCompile Include="Source\Helpers.cpp" />
     <ClCompile Include="Source\HIghResolutionClock.cpp" />
@@ -195,6 +198,7 @@
     <ClCompile Include="Source\ShaderCompilation.cpp" />
     <ClCompile Include="Source\StringId.cpp" />
     <ClCompile Include="Source\Utils.cpp"/>
+    <ClCompile Include="Source\VertexBuffer.cpp"/>
     <ClCompile Include="Source\Window.cpp" />
     <ClCompile Include="Source\WinMain.cpp" />
     <ClCompile Include="Vendor\DXRHelpers\nv_helpers_dx12\BottomLevelASGenerator.cpp">
