@@ -14,6 +14,9 @@ public:
         }
         return D3D12_RESOURCE_DESC{};
     }
+
+    [[nodiscard]] bool CheckFormatSupport(D3D12_FORMAT_SUPPORT1 formatSupport1) const;
+    [[nodiscard]] bool CheckFormatSupport(D3D12_FORMAT_SUPPORT2 formatSupport2) const;
     
 protected:
 
@@ -29,5 +32,5 @@ protected:
     std::wstring m_resourceName;
 
 private:
-    void QueryFormatSupport();
+    void QueryFeatureSupport();
 };

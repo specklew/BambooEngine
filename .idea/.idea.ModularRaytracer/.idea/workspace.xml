@@ -8,12 +8,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="4675605e-4326-4594-8991-54dd6a135ec0" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.ModularRaytracer/.idea/.gitignore" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.ModularRaytracer/.idea/encodings.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.ModularRaytracer/.idea/indexLayout.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/.idea.ModularRaytracer/.idea/vcs.xml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ModularRaytracer.sln" beforeDir="false" afterPath="$PROJECT_DIR$/BambooEngine.sln" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Raytracer/Raytracer.vcxproj" beforeDir="false" afterPath="$PROJECT_DIR$/Raytracer/Raytracer.vcxproj" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/.idea.ModularRaytracer/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/.idea.ModularRaytracer/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Raytracer/Include/Resource.h" beforeDir="false" afterPath="$PROJECT_DIR$/Raytracer/Include/Resource.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Raytracer/Source/Resource.cpp" beforeDir="false" afterPath="$PROJECT_DIR$/Raytracer/Source/Resource.cpp" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -28,7 +24,7 @@
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="HighlightingSettingsPerFile">
-    <setting file="cidr-memory-view://0" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/packages/Microsoft.Direct3D.D3D12.1.615.1/build/native/include/d3d12.h" root0="SKIP_HIGHLIGHTING" />
   </component>
   <component name="ProjectColorInfo">{
   &quot;customColor&quot;: &quot;&quot;,
@@ -51,6 +47,7 @@
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.sourceCode.C/C++&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
 }</component>
@@ -99,7 +96,7 @@
       <workItem from="1754934821239" duration="3527000" />
       <workItem from="1757261079908" duration="170000" />
       <workItem from="1757314429278" duration="1122000" />
-      <workItem from="1758526938494" duration="912000" />
+      <workItem from="1758526938494" duration="3924000" />
     </task>
     <servers />
   </component>
@@ -109,5 +106,9 @@
   <component name="UnityProjectConfiguration" hasMinimizedUI="false" />
   <component name="VcsManagerConfiguration">
     <option name="CLEAR_INITIAL_COMMIT_MESSAGE" value="true" />
+  </component>
+  <component name="XSLT-Support.FileAssociations.UIState">
+    <expand />
+    <select />
   </component>
 </project>
