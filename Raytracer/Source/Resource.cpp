@@ -21,3 +21,12 @@ Resource::Resource(const Microsoft::WRL::ComPtr<ID3D12Device5>& device, const D3
 
     QueryFormatSupport();
 }
+
+Resource::Resource(const Microsoft::WRL::ComPtr<ID3D12Device5>& device,
+    const Microsoft::WRL::ComPtr<ID3D12Resource>& resource, const D3D12_CLEAR_VALUE* clearValue)
+{
+}
+
+void Resource::QueryFormatSupport()
+{
+}
