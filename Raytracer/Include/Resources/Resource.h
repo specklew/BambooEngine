@@ -17,6 +17,16 @@ public:
 
     [[nodiscard]] bool CheckFormatSupport(D3D12_FORMAT_SUPPORT1 formatSupport1) const;
     [[nodiscard]] bool CheckFormatSupport(D3D12_FORMAT_SUPPORT2 formatSupport2) const;
+
+    void SetResourceName(const std::wstring& name)
+    {
+        m_resourceName = name;
+        if (m_resource)
+        {
+            m_resource->SetName(name.c_str());
+        }
+    }
+    [[nodiscard]] std::wstring GetResourceName() const { return m_resourceName; }
     
 protected:
 

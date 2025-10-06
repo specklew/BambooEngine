@@ -1,5 +1,5 @@
 ﻿#include "pch.h"
-#include "Resource.h"
+#include "Resources/Resource.h"
 
 #include "Helpers.h"
 

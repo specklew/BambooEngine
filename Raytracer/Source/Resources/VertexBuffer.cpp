@@ -1,5 +1,5 @@
 ﻿#include "pch.h"
-#include "VertexBuffer.h"
+#include "Resources/VertexBuffer.h"
 
 #include "InputElements.h"
 
@@ -9,6 +9,7 @@ VertexBuffer::VertexBuffer(Microsoft::WRL::ComPtr<ID3D12Device5> device, size_t 
         m_vertexStride(vertexStride)
 {
     m_vertexBufferView = CreateAndGetVertexBufferView();
+    SetResourceName(L"Vertex Buffer");
 }
 
 VertexBuffer::VertexBuffer(Microsoft::WRL::ComPtr<ID3D12Device5> device, Microsoft::WRL::ComPtr<ID3D12Resource> resource, size_t vertexCount, size_t vertexStride)
@@ -17,6 +18,7 @@ VertexBuffer::VertexBuffer(Microsoft::WRL::ComPtr<ID3D12Device5> device, Microso
         m_vertexStride(vertexStride)
 {
     m_vertexBufferView = CreateAndGetVertexBufferView();
+    SetResourceName(L"Vertex Buffer");
 }
 
 D3D12_VERTEX_BUFFER_VIEW VertexBuffer::CreateAndGetVertexBufferView() const

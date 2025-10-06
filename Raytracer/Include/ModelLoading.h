@@ -1,9 +1,10 @@
 ﻿#pragma once
-#include "Primitive.h"
 
+struct Primitive;
+class AssetId;
 class Renderer;
 
 namespace ModelLoading
 {
-    Primitive LoadModel(Renderer& renderer, const AssetId& assetId);
+    std::shared_ptr<Primitive> LoadModel(Renderer& renderer, const AssetId& assetId);
 }

@@ -1,8 +1,10 @@
 #pragma once
+#include <iosfwd>
+#include <vector>
+
 #include "Constants.h"
 #include "Helpers.h"
-#include "Primitive.h"
-
+#include "InputElements.h"
 struct Primitive;
 class DescriptorHeapAllocator;
 class RaytracePass;
@@ -20,7 +22,7 @@ public:
 	void OnMouseMove(unsigned long long btnState, int x, int y);
 	void ToggleRasterization();
 
-	void CreateGpuResourcesForPrimitive(Primitive& primitive);
+	std::shared_ptr<Primitive> CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 
 private:
 	void SetupDeviceAndDebug();

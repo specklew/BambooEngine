@@ -3,11 +3,11 @@
 
 #include <filesystem>
 #include <tinygltf/tiny_gltf.h>
+#include <spdlog/spdlog.h>
 
 #include "InputElements.h"
 #include "Primitive.h"
 #include "Renderer.h"
-#include "ResourceManager/ResourceManager.h"
 #include "ResourceManager/ResourceManagerTypes.h"
 
 static void ExtractVertices(tinygltf::Model& model, std::vector<Vertex>& outVertices)
@@ -100,7 +100,7 @@ static bool LoadTinyGLTFModel(const std::filesystem::path &path, tinygltf::Model
     std::string err;
     std::string warn;
 
-    //SPDLOG_DEBUG("Loading glTF model from path: {}", path.string());
+    spdlog::debug("Loading glTF model from path: {}", path.string());
     
     bool success;
     if (path.extension() == ".glb")
@@ -113,38 +113,20 @@ static bool LoadTinyGLTFModel(const std::filesystem::path &path, tinygltf::Model
     }
     
     if (!warn.empty()) {
-        //SPDLOG_WARN("TinyGLTF warning: {}", warn);
+        spdlog::warn("TinyGLTF warning: {}", warn);
     }
     if (!err.empty()) {
-        //SPDLOG_ERROR("TinyGLTF error: {}", err);
+        spdlog::error("TinyGLTF error: {}", err);
     }
     if (!success) {
-        //SPDLOG_ERROR("Failed to load glTF model: {}", path);
+        spdlog::error("Failed to load glTF model: {}", path.string());
         return false;
     }
 
     return true;
 }
 
-static void CreateAndPopulateBuffers(Renderer& renderer, Primitive& primitive, const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
-{
-    const uint32_t vbByteSize = static_cast<uint32_t>(vertices.size() * sizeof(Vertex));
-    const uint32_t ibByteSize = static_cast<uint32_t>(indices.size() * sizeof(uint32_t));
-
-    primitive.vertexBufferCpu = static_cast<BYTE*>(malloc(vbByteSize));
-    primitive.indexBufferCpu = static_cast<BYTE*>(malloc(ibByteSize));
-    memcpy(primitive.vertexBufferCpu, vertices.data(), vbByteSize);
-    memcpy(primitive.indexBufferCpu, indices.data(), ibByteSize);
-    
-    primitive.vertexByteStride = sizeof(Vertex);
-    primitive.vertexBufferByteSize = vbByteSize;
-    primitive.indexFormat = DXGI_FORMAT_R32_UINT;
-    primitive.indexBufferByteSize = ibByteSize;
-
-    renderer.CreateGpuResourcesForPrimitive(primitive);
-}
-
-Primitive ModelLoading::LoadModel(Renderer& renderer, const AssetId& assetId)
+std::shared_ptr<Primitive> ModelLoading::LoadModel(Renderer& renderer, const AssetId& assetId)
 {
     tinygltf::Model model;
     bool succeeded = LoadTinyGLTFModel(assetId.AsPath(), model);
@@ -154,13 +136,13 @@ Primitive ModelLoading::LoadModel(Renderer& renderer, const AssetId& assetId)
     // TODO: Support more.
     if (model.meshes.size() != 1)
     {
-        SPDLOG_ERROR("The engine is currently limited to loading models with exactly one mesh. The model at path {} has {} meshes.", assetId.AsString(), model.meshes.size());
+        spdlog::error("The engine is currently limited to loading models with exactly one mesh. The model at path {} has {} meshes.", assetId.AsString(), model.meshes.size());
         assert(false && "Failed to load model. Only one mesh per model is supported.");
     }
 
     if (model.meshes[0].primitives.size() != 1)
     {
-        SPDLOG_ERROR("The engine is currently limited to loading models with exactly one primitive per mesh. The model at path {} has {} primitives in its first mesh.", assetId.AsString(), model.meshes[0].primitives.size());
+        spdlog::error("The engine is currently limited to loading models with exactly one primitive per mesh. The model at path {} has {} primitives in its first mesh.", assetId.AsString(), model.meshes[0].primitives.size());
         assert(false && "Failed to load model. Only one primitive per mesh is supported.");
     }
 
@@ -172,16 +154,8 @@ Primitive ModelLoading::LoadModel(Renderer& renderer, const AssetId& assetId)
     
     assert(vertices.size() < INT_MAX);
     assert(indices.size() < INT_MAX);
-
-    Primitive primitive(ResourceManager::GetResourceId(assetId));
-    primitive.indexCount = indices.size();
-    primitive.vertexCount = vertices.size();
-    primitive.firstIndex = 0;
-    primitive.firstVertex = 0;
-
+    
     // Here we would normally calculate tangents and AABB.
 
-    CreateAndPopulateBuffers(renderer, primitive, vertices, indices);
-
-    return primitive;
+    return renderer.CreatePrimitive(vertices, indices);
 }

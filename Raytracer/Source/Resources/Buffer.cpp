@@ -1,5 +1,5 @@
 ﻿#include "pch.h"
-#include "Buffer.h"
+#include "Resources/Buffer.h"
 
 Buffer::Buffer(const Microsoft::WRL::ComPtr<ID3D12Device5>& device, const D3D12_RESOURCE_DESC& desc)
     :   Resource(device, desc) {}

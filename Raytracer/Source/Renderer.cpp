@@ -20,6 +20,8 @@
 #include "Shader.h"
 #include "Utils.h"
 #include "Window.h"
+#include "Resources/IndexBuffer.h"
+#include "Resources/VertexBuffer.h"
 #include "tinygltf/tiny_gltf.h"
 
 #ifdef _DEBUG
@@ -64,8 +66,7 @@ void Renderer::Initialize()
 	CreateCommandList();
 	ResetCommandList();
 
-	auto p = ModelLoading::LoadModel(*this, AssetId("resources/models/avocado/avocado.glb"));
-	m_primitive = std::make_shared<Primitive>(p);
+	m_primitive = ModelLoading::LoadModel(*this, AssetId("resources/models/avocado/avocado.glb"));
 
 	ResetCommandList();
 	
@@ -193,16 +194,17 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	if (m_rasterize)
 	{
-		auto vbv = m_primitive->GetVertexBufferView();
-		auto ibv = m_primitive->GetIndexBufferView();
+		auto vertexBuffer = m_primitive->GetVertexBuffer();
+		auto indexBuffer = m_primitive->GetIndexBuffer();
 		
-		m_d3d12CommandList->IASetVertexBuffers(0, 1, &vbv);
-    	m_d3d12CommandList->IASetIndexBuffer(&ibv);
+		m_d3d12CommandList->IASetVertexBuffers(0, 1, &vertexBuffer->GetVertexBufferView());
+    	m_d3d12CommandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
     	m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     
     	m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-    	
-    	m_d3d12CommandList->DrawIndexedInstanced(m_primitive->indexCount, 1, m_primitive->firstIndex, m_primitive->firstVertex, 0);
+
+		// Assume first index and vertex are 0 ( buffers are only for one object )
+    	m_d3d12CommandList->DrawIndexedInstanced(indexBuffer->GetIndexCount(), 1, 0, 0, 0);
 	}
 	else
 	{
@@ -681,8 +683,14 @@ void Renderer::SetupAccelerationStructures()
 	spdlog::debug("Setting up acceleration structures");
 	m_accelerationStructures = std::make_shared<AccelerationStructures>();
 
+	auto vertexBuffer = m_primitive->GetVertexBuffer();
+	auto indexBuffer = m_primitive->GetIndexBuffer();
+	
 	AccelerationStructureBuffers bottomLevelBuffers = m_accelerationStructures->CreateBottomLevelAS(
-		m_d3d12Device.Get(), m_d3d12CommandList.Get(), {{m_primitive->vertexBufferGpu, m_primitive->vertexCount}}, {{m_primitive->indexBufferGpu, m_primitive->indexCount}});
+		m_d3d12Device.Get(),
+		m_d3d12CommandList.Get(),
+		{{vertexBuffer->GetUnderlyingResource(), vertexBuffer->GetVertexCount()}},
+		{{indexBuffer->GetUnderlyingResource(), indexBuffer->GetIndexCount()}});
 
 	auto instance = std::pair(bottomLevelBuffers.p_result, DirectX::XMMatrixIdentity());
 	m_accelerationStructures->GetInstances().push_back(instance);
@@ -750,15 +758,34 @@ void Renderer::ToggleRasterization()
 	m_rasterize = !m_rasterize;
 }
 
-void Renderer::CreateGpuResourcesForPrimitive(Primitive& primitive)
+std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 {
-	primitive.vertexBufferGpu = RenderingUtils::CreateDefaultBuffer(m_d3d12Device.Get(), m_d3d12CommandList.Get(), primitive.vertexBufferCpu, primitive.vertexBufferByteSize, primitive.vertexBufferUploader);
-	primitive.indexBufferGpu = RenderingUtils::CreateDefaultBuffer(m_d3d12Device.Get(), m_d3d12CommandList.Get(), primitive.indexBufferCpu, primitive.indexBufferByteSize, primitive.indexBufferUploader);
+	ComPtr<ID3D12Resource> vertex_upload_buffer;
+	ComPtr<ID3D12Resource> index_upload_buffer;
 
+	auto cpuVertex = static_cast<BYTE*>(malloc(vertices.size() * sizeof(Vertex)));
+	auto cpuIndex = static_cast<BYTE*>(malloc(indices.size() * sizeof(uint32_t)));
+	memcpy(cpuVertex, vertices.data(), vertices.size() * sizeof(Vertex));
+	memcpy(cpuIndex, indices.data(), indices.size() * sizeof(uint32_t));
+	
+	auto vertex_buffer_resource = RenderingUtils::CreateDefaultBuffer(m_d3d12Device.Get(), m_d3d12CommandList.Get(), cpuVertex, vertices.size() * sizeof(Vertex), vertex_upload_buffer);
+	auto index_buffer_resource = RenderingUtils::CreateDefaultBuffer(m_d3d12Device.Get(), m_d3d12CommandList.Get(), cpuIndex, indices.size() * sizeof(uint32_t), index_upload_buffer);
+	
+	// Need to be closed and executed to create buffers before the upload buffers go out of scope.
 	m_d3d12CommandList->Close();
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
 	FlushCommandQueue();
+
+	auto vertex_buffer = std::make_shared<VertexBuffer>(m_d3d12Device, vertex_buffer_resource, static_cast<UINT>(vertices.size()), sizeof(Vertex));
+	auto index_buffer = std::make_shared<IndexBuffer>(m_d3d12Device, index_buffer_resource, static_cast<UINT>(indices.size()), DXGI_FORMAT_R32_UINT);
+
+	auto primitive = std::make_shared<Primitive>(vertex_buffer, index_buffer);
+
+	AssertFreeClear(&cpuVertex);
+	AssertFreeClear(&cpuIndex);
+	
+	return primitive;
 }
 
 ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)

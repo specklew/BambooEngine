@@ -8,9 +8,6 @@ public:
     size_t GetVertexStride() const { return m_vertexStride; }
     D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const { return m_vertexBufferView; }
     
-protected:
-    friend class ResourceManager;
-    
     VertexBuffer(Microsoft::WRL::ComPtr<ID3D12Device5> device, size_t vertexCount, size_t vertexStride);
     VertexBuffer(Microsoft::WRL::ComPtr<ID3D12Device5> device, Microsoft::WRL::ComPtr<ID3D12Resource> resource, size_t vertexCount, size_t vertexStride);
 

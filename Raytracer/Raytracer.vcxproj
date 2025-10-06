@@ -101,27 +101,28 @@
   <ItemGroup>
     <ClInclude Include="Include\AccelerationStructures.h" />
     <ClInclude Include="Include\Application.h" />
-    <ClInclude Include="Include\Buffer.h" />
     <ClInclude Include="Include\Constants.h" />
     <ClInclude Include="Include\DescriptorHeapAllocator.h" />
     <ClInclude Include="Include\Helpers.h" />
     <ClInclude Include="Include\HighResolutionClock.h" />
     <ClInclude Include="Include\InputElements.h" />
-    <ClInclude Include="Include\Primitive.h" />
     <ClInclude Include="Include\ModelLoading.h" />
     <ClInclude Include="Include\pch.h" />
+    <ClInclude Include="Include\Primitive.h" />
     <ClInclude Include="Include\Random.h" />
     <ClInclude Include="Include\RaytracePass.h" />
     <ClInclude Include="Include\Renderer.h" />
-    <ClInclude Include="Include\Resource.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManager.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManagerTypes.h" />
+    <ClInclude Include="Include\Resources\Buffer.h" />
+    <ClInclude Include="Include\Resources\IndexBuffer.h" />
+    <ClInclude Include="Include\Resources\Resource.h" />
+    <ClInclude Include="Include\Resources\VertexBuffer.h" />
     <ClInclude Include="Include\Shader.h" />
     <ClInclude Include="Include\ShaderCompilation.h" />
     <ClInclude Include="Include\StringHash.h" />
     <ClInclude Include="Include\StringId.h" />
     <ClInclude Include="Include\Utils.h" />
-    <ClInclude Include="Include\VertexBuffer.h" />
     <ClInclude Include="Include\Window.h" />
     <ClInclude Include="Vendor\DXC\inc\d3d12shader.h" />
     <ClInclude Include="Vendor\DXC\inc\dxcapi.h" />
@@ -169,6 +170,111 @@
     <ClInclude Include="Vendor\imgui\misc\cpp\imgui_stdlib.h" />
     <ClInclude Include="Vendor\imgui\misc\freetype\imgui_freetype.h" />
     <ClInclude Include="Vendor\imgui\misc\single_file\imgui_single_file.h" />
+    <ClInclude Include="Vendor\spdlog\async.h" />
+    <ClInclude Include="Vendor\spdlog\async_logger-inl.h" />
+    <ClInclude Include="Vendor\spdlog\async_logger.h" />
+    <ClInclude Include="Vendor\spdlog\cfg\argv.h" />
+    <ClInclude Include="Vendor\spdlog\cfg\env.h" />
+    <ClInclude Include="Vendor\spdlog\cfg\helpers-inl.h" />
+    <ClInclude Include="Vendor\spdlog\cfg\helpers.h" />
+    <ClInclude Include="Vendor\spdlog\common-inl.h" />
+    <ClInclude Include="Vendor\spdlog\common.h" />
+    <ClInclude Include="Vendor\spdlog\details\backtracer-inl.h" />
+    <ClInclude Include="Vendor\spdlog\details\backtracer.h" />
+    <ClInclude Include="Vendor\spdlog\details\circular_q.h" />
+    <ClInclude Include="Vendor\spdlog\details\console_globals.h" />
+    <ClInclude Include="Vendor\spdlog\details\file_helper-inl.h" />
+    <ClInclude Include="Vendor\spdlog\details\file_helper.h" />
+    <ClInclude Include="Vendor\spdlog\details\fmt_helper.h" />
+    <ClInclude Include="Vendor\spdlog\details\log_msg-inl.h" />
+    <ClInclude Include="Vendor\spdlog\details\log_msg.h" />
+    <ClInclude Include="Vendor\spdlog\details\log_msg_buffer-inl.h" />
+    <ClInclude Include="Vendor\spdlog\details\log_msg_buffer.h" />
+    <ClInclude Include="Vendor\spdlog\details\mpmc_blocking_q.h" />
+    <ClInclude Include="Vendor\spdlog\details\null_mutex.h" />
+    <ClInclude Include="Vendor\spdlog\details\os-inl.h" />
+    <ClInclude Include="Vendor\spdlog\details\os.h" />
+    <ClInclude Include="Vendor\spdlog\details\periodic_worker-inl.h" />
+    <ClInclude Include="Vendor\spdlog\details\periodic_worker.h" />
+    <ClInclude Include="Vendor\spdlog\details\registry-inl.h" />
+    <ClInclude Include="Vendor\spdlog\details\registry.h" />
+    <ClInclude Include="Vendor\spdlog\details\synchronous_factory.h" />
+    <ClInclude Include="Vendor\spdlog\details\tcp_client-windows.h" />
+    <ClInclude Include="Vendor\spdlog\details\tcp_client.h" />
+    <ClInclude Include="Vendor\spdlog\details\thread_pool-inl.h" />
+    <ClInclude Include="Vendor\spdlog\details\thread_pool.h" />
+    <ClInclude Include="Vendor\spdlog\details\udp_client-windows.h" />
+    <ClInclude Include="Vendor\spdlog\details\udp_client.h" />
+    <ClInclude Include="Vendor\spdlog\details\windows_include.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bin_to_hex.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\args.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\base.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\chrono.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\color.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\compile.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\core.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\format-inl.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\format.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\locale.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\os.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\ostream.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\printf.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\ranges.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\std.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\bundled\xchar.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\chrono.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\compile.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\fmt.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\ostr.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\ranges.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\std.h" />
+    <ClInclude Include="Vendor\spdlog\fmt\xchar.h" />
+    <ClInclude Include="Vendor\spdlog\formatter.h" />
+    <ClInclude Include="Vendor\spdlog\fwd.h" />
+    <ClInclude Include="Vendor\spdlog\logger-inl.h" />
+    <ClInclude Include="Vendor\spdlog\logger.h" />
+    <ClInclude Include="Vendor\spdlog\mdc.h" />
+    <ClInclude Include="Vendor\spdlog\pattern_formatter-inl.h" />
+    <ClInclude Include="Vendor\spdlog\pattern_formatter.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\android_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\ansicolor_sink-inl.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\ansicolor_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\base_sink-inl.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\base_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\basic_file_sink-inl.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\basic_file_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\callback_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\daily_file_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\dist_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\dup_filter_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\hourly_file_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\kafka_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\mongo_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\msvc_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\null_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\ostream_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\qt_sinks.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\ringbuffer_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\rotating_file_sink-inl.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\rotating_file_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\sink-inl.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\stdout_color_sinks-inl.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\stdout_color_sinks.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\stdout_sinks-inl.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\stdout_sinks.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\syslog_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\systemd_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\tcp_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\udp_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\wincolor_sink-inl.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\wincolor_sink.h" />
+    <ClInclude Include="Vendor\spdlog\sinks\win_eventlog_sink.h" />
+    <ClInclude Include="Vendor\spdlog\spdlog-inl.h" />
+    <ClInclude Include="Vendor\spdlog\spdlog.h" />
+    <ClInclude Include="Vendor\spdlog\stopwatch.h" />
+    <ClInclude Include="Vendor\spdlog\tweakme.h" />
+    <ClInclude Include="Vendor\spdlog\version.h" />
     <ClInclude Include="Vendor\tinygltf\json.hpp" />
     <ClInclude Include="Vendor\tinygltf\stb_image.h" />
     <ClInclude Include="Vendor\tinygltf\stb_image_write.h" />
@@ -182,23 +288,336 @@
     <None Include="Resources\Shaders\Raytracing\RayGen.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
-    <ClCompile Include="Source\Buffer.cpp"/>
-    <ClCompile Include="Source\DescriptorHeapAllocator.cpp"/>
+    <ClCompile Include="Source\DescriptorHeapAllocator.cpp" />
     <ClCompile Include="Source\Helpers.cpp" />
     <ClCompile Include="Source\HIghResolutionClock.cpp" />
     <ClCompile Include="Source\InputElements.cpp" />
-    <ClCompile Include="Source\ModelLoading.cpp"/>
+    <ClCompile Include="Source\ModelLoading.cpp" />
     <ClCompile Include="Source\Random.cpp" />
     <ClCompile Include="Source\RaytracePass.cpp" />
     <ClCompile Include="Source\Renderer.cpp" />
-    <ClCompile Include="Source\Resource.cpp"/>
-    <ClCompile Include="Source\ResourceManager\ResourceManager.cpp"/>
-    <ClCompile Include="Source\ResourceManager\ResourceManagerTypes.cpp"/>
+    <ClCompile Include="Source\ResourceManager\ResourceManager.cpp" />
+    <ClCompile Include="Source\ResourceManager\ResourceManagerTypes.cpp" />
+    <ClCompile Include="Source\Resources\Buffer.cpp">
+      <RuntimeLibrary>MultiThreadedDebugDll</RuntimeLibrary>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <Optimization>Disabled</Optimization>
+      <SupportJustMyCode>true</SupportJustMyCode>
+      <AssemblerOutput>NoListing</AssemblerOutput>
+      <AssemblerListingLocation>x64\Debug\</AssemblerListingLocation>
+      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
+      <BrowseInformation>false</BrowseInformation>
+      <BrowseInformationFile>x64\Debug\</BrowseInformationFile>
+      <CompileAs>Default</CompileAs>
+      <UseDynamicDebugging>false</UseDynamicDebugging>
+      <ConformanceMode>false</ConformanceMode>
+      <DiagnosticsFormat>Column</DiagnosticsFormat>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <ErrorReporting>Prompt</ErrorReporting>
+      <ExpandAttributedSource>false</ExpandAttributedSource>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <EnableASAN>false</EnableASAN>
+      <EnableFuzzer>false</EnableFuzzer>
+      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
+      <EnableVectorLength>NotSet</EnableVectorLength>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
+      <GenerateModuleDependencies>false</GenerateModuleDependencies>
+      <GenerateSourceDependencies>false</GenerateSourceDependencies>
+      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <IntrinsicFunctions>false</IntrinsicFunctions>
+      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <MinimalRebuild>false</MinimalRebuild>
+      <ModuleDependenciesFile>x64\Debug\</ModuleDependenciesFile>
+      <ModuleOutputFile>x64\Debug\</ModuleOutputFile>
+      <OmitDefaultLibName>false</OmitDefaultLibName>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+      <ObjectFileName>x64\Debug\</ObjectFileName>
+      <CallingConvention>Cdecl</CallingConvention>
+      <ProgramDataBaseFileName>x64\Debug\vc143.pdb</ProgramDataBaseFileName>
+      <PrecompiledHeader>Create</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>x64\Debug\Raytracer.pch</PrecompiledHeaderOutputFile>
+      <PreprocessToFile>false</PreprocessToFile>
+      <PreprocessKeepComments>false</PreprocessKeepComments>
+      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
+      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+      <ShowIncludes>false</ShowIncludes>
+      <SourceDependenciesFile>x64\Debug\</SourceDependenciesFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <SmallerTypeCheck>false</SmallerTypeCheck>
+      <SpectreMitigation>false</SpectreMitigation>
+      <StructMemberAlignment>Default</StructMemberAlignment>
+      <TrackerLogDirectory>x64\Debug\Raytracer.tlog\</TrackerLogDirectory>
+      <TranslateIncludes>false</TranslateIncludes>
+      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
+      <UseFullPaths>true</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <XMLDocumentationFileName>x64\Debug\</XMLDocumentationFileName>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <IntelJCCErratum>false</IntelJCCErratum>
+      <BuildStlModules>false</BuildStlModules>
+      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
+      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
+      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_UNICODE;UNICODE;</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\include;C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\include\d3dx12;C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Include;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\imgui;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\DXRHelpers;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\DXRHelpers\nv_helpers_dx12;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor;</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 </AdditionalOptions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LinkCompiled>true</LinkCompiled>
+    </ClCompile>
+    <ClCompile Include="Source\Resources\IndexBuffer.cpp">
+      <RuntimeLibrary>MultiThreadedDebugDll</RuntimeLibrary>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <Optimization>Disabled</Optimization>
+      <SupportJustMyCode>true</SupportJustMyCode>
+      <AssemblerOutput>NoListing</AssemblerOutput>
+      <AssemblerListingLocation>x64\Debug\</AssemblerListingLocation>
+      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
+      <BrowseInformation>false</BrowseInformation>
+      <BrowseInformationFile>x64\Debug\</BrowseInformationFile>
+      <CompileAs>Default</CompileAs>
+      <UseDynamicDebugging>false</UseDynamicDebugging>
+      <ConformanceMode>false</ConformanceMode>
+      <DiagnosticsFormat>Column</DiagnosticsFormat>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <ErrorReporting>Prompt</ErrorReporting>
+      <ExpandAttributedSource>false</ExpandAttributedSource>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <EnableASAN>false</EnableASAN>
+      <EnableFuzzer>false</EnableFuzzer>
+      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
+      <EnableVectorLength>NotSet</EnableVectorLength>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
+      <GenerateModuleDependencies>false</GenerateModuleDependencies>
+      <GenerateSourceDependencies>false</GenerateSourceDependencies>
+      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <IntrinsicFunctions>false</IntrinsicFunctions>
+      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <MinimalRebuild>false</MinimalRebuild>
+      <ModuleDependenciesFile>x64\Debug\</ModuleDependenciesFile>
+      <ModuleOutputFile>x64\Debug\</ModuleOutputFile>
+      <OmitDefaultLibName>false</OmitDefaultLibName>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+      <ObjectFileName>x64\Debug\</ObjectFileName>
+      <CallingConvention>Cdecl</CallingConvention>
+      <ProgramDataBaseFileName>x64\Debug\vc143.pdb</ProgramDataBaseFileName>
+      <PrecompiledHeader>Create</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>x64\Debug\Raytracer.pch</PrecompiledHeaderOutputFile>
+      <PreprocessToFile>false</PreprocessToFile>
+      <PreprocessKeepComments>false</PreprocessKeepComments>
+      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
+      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+      <ShowIncludes>false</ShowIncludes>
+      <SourceDependenciesFile>x64\Debug\</SourceDependenciesFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <SmallerTypeCheck>false</SmallerTypeCheck>
+      <SpectreMitigation>false</SpectreMitigation>
+      <StructMemberAlignment>Default</StructMemberAlignment>
+      <TrackerLogDirectory>x64\Debug\Raytracer.tlog\</TrackerLogDirectory>
+      <TranslateIncludes>false</TranslateIncludes>
+      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
+      <UseFullPaths>true</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <XMLDocumentationFileName>x64\Debug\</XMLDocumentationFileName>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <IntelJCCErratum>false</IntelJCCErratum>
+      <BuildStlModules>false</BuildStlModules>
+      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
+      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
+      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_UNICODE;UNICODE;</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\include;C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\include\d3dx12;C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Include;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\imgui;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\DXRHelpers;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\DXRHelpers\nv_helpers_dx12;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor;</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 </AdditionalOptions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LinkCompiled>true</LinkCompiled>
+    </ClCompile>
+    <ClCompile Include="Source\Resources\Resource.cpp">
+      <RuntimeLibrary>MultiThreadedDebugDll</RuntimeLibrary>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <Optimization>Disabled</Optimization>
+      <SupportJustMyCode>true</SupportJustMyCode>
+      <AssemblerOutput>NoListing</AssemblerOutput>
+      <AssemblerListingLocation>x64\Debug\</AssemblerListingLocation>
+      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
+      <BrowseInformation>false</BrowseInformation>
+      <BrowseInformationFile>x64\Debug\</BrowseInformationFile>
+      <CompileAs>Default</CompileAs>
+      <UseDynamicDebugging>false</UseDynamicDebugging>
+      <ConformanceMode>false</ConformanceMode>
+      <DiagnosticsFormat>Column</DiagnosticsFormat>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <ErrorReporting>Prompt</ErrorReporting>
+      <ExpandAttributedSource>false</ExpandAttributedSource>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <EnableASAN>false</EnableASAN>
+      <EnableFuzzer>false</EnableFuzzer>
+      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
+      <EnableVectorLength>NotSet</EnableVectorLength>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
+      <GenerateModuleDependencies>false</GenerateModuleDependencies>
+      <GenerateSourceDependencies>false</GenerateSourceDependencies>
+      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <IntrinsicFunctions>false</IntrinsicFunctions>
+      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <MinimalRebuild>false</MinimalRebuild>
+      <ModuleDependenciesFile>x64\Debug\</ModuleDependenciesFile>
+      <ModuleOutputFile>x64\Debug\</ModuleOutputFile>
+      <OmitDefaultLibName>false</OmitDefaultLibName>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+      <ObjectFileName>x64\Debug\</ObjectFileName>
+      <CallingConvention>Cdecl</CallingConvention>
+      <ProgramDataBaseFileName>x64\Debug\vc143.pdb</ProgramDataBaseFileName>
+      <PrecompiledHeader>Create</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>x64\Debug\Raytracer.pch</PrecompiledHeaderOutputFile>
+      <PreprocessToFile>false</PreprocessToFile>
+      <PreprocessKeepComments>false</PreprocessKeepComments>
+      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
+      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+      <ShowIncludes>false</ShowIncludes>
+      <SourceDependenciesFile>x64\Debug\</SourceDependenciesFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <SmallerTypeCheck>false</SmallerTypeCheck>
+      <SpectreMitigation>false</SpectreMitigation>
+      <StructMemberAlignment>Default</StructMemberAlignment>
+      <TrackerLogDirectory>x64\Debug\Raytracer.tlog\</TrackerLogDirectory>
+      <TranslateIncludes>false</TranslateIncludes>
+      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
+      <UseFullPaths>true</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <XMLDocumentationFileName>x64\Debug\</XMLDocumentationFileName>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <IntelJCCErratum>false</IntelJCCErratum>
+      <BuildStlModules>false</BuildStlModules>
+      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
+      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
+      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_UNICODE;UNICODE;</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\include;C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\include\d3dx12;C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Include;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\imgui;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\DXRHelpers;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\DXRHelpers\nv_helpers_dx12;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor;</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 </AdditionalOptions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LinkCompiled>true</LinkCompiled>
+    </ClCompile>
+    <ClCompile Include="Source\Resources\VertexBuffer.cpp">
+      <RuntimeLibrary>MultiThreadedDebugDll</RuntimeLibrary>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <Optimization>Disabled</Optimization>
+      <SupportJustMyCode>true</SupportJustMyCode>
+      <AssemblerOutput>NoListing</AssemblerOutput>
+      <AssemblerListingLocation>x64\Debug\</AssemblerListingLocation>
+      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
+      <BrowseInformation>false</BrowseInformation>
+      <BrowseInformationFile>x64\Debug\</BrowseInformationFile>
+      <CompileAs>Default</CompileAs>
+      <UseDynamicDebugging>false</UseDynamicDebugging>
+      <ConformanceMode>false</ConformanceMode>
+      <DiagnosticsFormat>Column</DiagnosticsFormat>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <ErrorReporting>Prompt</ErrorReporting>
+      <ExpandAttributedSource>false</ExpandAttributedSource>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <EnableASAN>false</EnableASAN>
+      <EnableFuzzer>false</EnableFuzzer>
+      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
+      <EnableVectorLength>NotSet</EnableVectorLength>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
+      <GenerateModuleDependencies>false</GenerateModuleDependencies>
+      <GenerateSourceDependencies>false</GenerateSourceDependencies>
+      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <IntrinsicFunctions>false</IntrinsicFunctions>
+      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <MinimalRebuild>false</MinimalRebuild>
+      <ModuleDependenciesFile>x64\Debug\</ModuleDependenciesFile>
+      <ModuleOutputFile>x64\Debug\</ModuleOutputFile>
+      <OmitDefaultLibName>false</OmitDefaultLibName>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+      <ObjectFileName>x64\Debug\</ObjectFileName>
+      <CallingConvention>Cdecl</CallingConvention>
+      <ProgramDataBaseFileName>x64\Debug\vc143.pdb</ProgramDataBaseFileName>
+      <PrecompiledHeader>Create</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>x64\Debug\Raytracer.pch</PrecompiledHeaderOutputFile>
+      <PreprocessToFile>false</PreprocessToFile>
+      <PreprocessKeepComments>false</PreprocessKeepComments>
+      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
+      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+      <ShowIncludes>false</ShowIncludes>
+      <SourceDependenciesFile>x64\Debug\</SourceDependenciesFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <SmallerTypeCheck>false</SmallerTypeCheck>
+      <SpectreMitigation>false</SpectreMitigation>
+      <StructMemberAlignment>Default</StructMemberAlignment>
+      <TrackerLogDirectory>x64\Debug\Raytracer.tlog\</TrackerLogDirectory>
+      <TranslateIncludes>false</TranslateIncludes>
+      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
+      <UseFullPaths>true</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <XMLDocumentationFileName>x64\Debug\</XMLDocumentationFileName>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <IntelJCCErratum>false</IntelJCCErratum>
+      <BuildStlModules>false</BuildStlModules>
+      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
+      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
+      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_UNICODE;UNICODE;</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <AdditionalIncludeDirectories>C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\include;C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\include\d3dx12;C:\Users\macad\Documents\_Projects\ModularRaytracer\packages\Microsoft.Direct3D.D3D12.1.615.1\build\native\;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Include;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\imgui;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\DXRHelpers;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor\DXRHelpers\nv_helpers_dx12;C:\Users\macad\Documents\_Projects\ModularRaytracer\Raytracer\Vendor;</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 </AdditionalOptions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <LinkCompiled>true</LinkCompiled>
+    </ClCompile>
     <ClCompile Include="Source\Shader.cpp" />
     <ClCompile Include="Source\ShaderCompilation.cpp" />
     <ClCompile Include="Source\StringId.cpp" />
-    <ClCompile Include="Source\Utils.cpp"/>
-    <ClCompile Include="Source\VertexBuffer.cpp"/>
+    <ClCompile Include="Source\Utils.cpp" />
     <ClCompile Include="Source\Window.cpp" />
     <ClCompile Include="Source\WinMain.cpp" />
     <ClCompile Include="Vendor\DXRHelpers\nv_helpers_dx12\BottomLevelASGenerator.cpp">
@@ -260,6 +679,7 @@
     <Content Include="Vendor\DXC\LICENSE-LLVM.txt" />
     <Content Include="Vendor\DXC\LICENSE-MIT.txt" />
     <Content Include="Vendor\DXC\LICENSE-MS.txt" />
+    <Content Include="Vendor\spdlog\fmt\bundled\fmt.license.rst" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

@@ -3,63 +3,23 @@
 #include "pch.h"
 
 #include "Helpers.h"
-#include "ResourceManager/ResourceManagerTypes.h"
+
+class VertexBuffer;
+class IndexBuffer;
 
 struct Primitive
 {
-    explicit Primitive (const ResourceId id ) : id(id) {}
-    
-    ResourceId id;
-
-    uint32_t vertexCount = 0;
-    uint32_t indexCount = 0;
-
-    uint32_t firstVertex = 0;
-    uint32_t firstIndex = 0;
-
-    BYTE* vertexBufferCpu = nullptr;
-    BYTE* indexBufferCpu = nullptr;
-
-    Microsoft::WRL::ComPtr<ID3D12Resource> vertexBufferGpu = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12Resource> indexBufferGpu = nullptr;
-
-    Microsoft::WRL::ComPtr<ID3D12Resource> vertexBufferUploader = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12Resource> indexBufferUploader = nullptr;
-
-    UINT vertexByteStride = 0;
-    UINT vertexBufferByteSize = 0;
-    DXGI_FORMAT indexFormat = DXGI_FORMAT_R16_UINT;
-    UINT indexBufferByteSize = 0;
-
-    D3D12_VERTEX_BUFFER_VIEW GetVertexBufferView() const
+    // Primitive uses std::move to take ownership of the buffers.
+    Primitive (std::shared_ptr<VertexBuffer> vertexBuffer, std::shared_ptr<IndexBuffer> indexBuffer)
+        : m_vertexBuffer(std::move(vertexBuffer)), m_indexBuffer(std::move(indexBuffer))
     {
-        D3D12_VERTEX_BUFFER_VIEW vbv{};
-        vbv.BufferLocation = vertexBufferGpu->GetGPUVirtualAddress();
-        vbv.StrideInBytes = vertexByteStride;
-        vbv.SizeInBytes = vertexBufferByteSize;
-
-        return vbv;
+        assert(m_vertexBuffer != nullptr && "Vertex buffer cannot be null");
+        assert(m_indexBuffer != nullptr && "Index buffer cannot be null");
     }
 
-    D3D12_INDEX_BUFFER_VIEW GetIndexBufferView() const
-    {
-        D3D12_INDEX_BUFFER_VIEW ibv{};
-        ibv.BufferLocation = indexBufferGpu->GetGPUVirtualAddress();
-        ibv.Format = indexFormat;
-        ibv.SizeInBytes = indexBufferByteSize;
+    std::shared_ptr<VertexBuffer> m_vertexBuffer;
+    std::shared_ptr<IndexBuffer> m_indexBuffer;
 
-        return ibv;
-    }
-
-    void ReleaseResources()
-    {
-        AssertFreeClear(&vertexBufferCpu);
-        AssertFreeClear(&indexBufferCpu);
-        AssertReleaseClear(vertexBufferGpu);
-        AssertReleaseClear(indexBufferGpu);
-        AssertReleaseClear(vertexBufferUploader);
-        AssertReleaseClear(indexBufferUploader);
-        
-        this->~Primitive();
-    }
+    [[nodiscard]] std::shared_ptr<VertexBuffer> GetVertexBuffer() const { return m_vertexBuffer; }
+    [[nodiscard]] std::shared_ptr<IndexBuffer> GetIndexBuffer() const { return m_indexBuffer; }
 };
