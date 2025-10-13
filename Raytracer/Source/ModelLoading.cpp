@@ -41,8 +41,8 @@ static void ExtractVertices(tinygltf::Model& model, std::vector<Vertex>& outVert
 
         // Inverting Y and Z to convert from right-handed to left-handed coordinate system. https://stackoverflow.com/questions/16986017/how-do-i-make-blender-operate-in-left-hand
         vertex.Pos.x = positions[i * 3 + 0];
-        vertex.Pos.y = positions[i * 3 + 1] * -1.0f;
-        vertex.Pos.z = positions[i * 3 + 2] * -1.0f;
+        vertex.Pos.y = positions[i * 3 + 1];
+        vertex.Pos.z = positions[i * 3 + 2];
 
         outVertices.push_back(vertex);
     }

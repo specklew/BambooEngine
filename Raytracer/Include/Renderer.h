@@ -50,8 +50,6 @@ private:
 
 	void CreateDepthStencilView();
 	void CreateDSVDescriptorHeap();
-	
-	void CreateVertexAndIndexBuffer();
 
 	void CreateDescriptorHeaps();
 	void CreateWorldProjCBV();

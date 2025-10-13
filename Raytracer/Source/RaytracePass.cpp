@@ -247,6 +247,7 @@ void RaytracePass::CreateRayGenSignature()
 
     CD3DX12_ROOT_PARAMETER rootParameters[1];
 
+    // CBV for ImGui
     D3D12_DESCRIPTOR_RANGE cbvRange;
     cbvRange.BaseShaderRegister = 0;
     cbvRange.NumDescriptors = 1;

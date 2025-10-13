@@ -80,8 +80,6 @@ void Renderer::Initialize()
 	CreateDSVDescriptorHeap();
 	CreateDepthStencilView();
 	ResetCommandList();
-	
-	CreateVertexAndIndexBuffer();
 
 	CreateDescriptorHeaps();
 	CreateWorldProjCBV();
@@ -130,8 +128,6 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	{
 		m_camera->AddPosition(m_camera->GetRight() * static_cast<float>(elapsedTime) * -m_camera->GetSpeed());
 	}
-
-	
 	
 	using namespace DirectX;
 
@@ -139,15 +135,16 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	SimpleMath::Matrix worldViewProj = world * m_camera->GetViewProjectionMatrix();
 	SimpleMath::Matrix view = XMLoadFloat4x4(&m_camera->GetViewMatrix());
 	SimpleMath::Matrix viewProj = XMLoadFloat4x4(&m_camera->GetViewProjectionMatrix());
-
+	SimpleMath::Matrix projection = XMLoadFloat4x4(&m_camera->GetProjectionMatrix());
+	
 	XMVECTOR det;
 	
 	ObjectConstants constants;
 	XMStoreFloat4x4(&constants.WorldViewProj, XMMatrixTranspose(worldViewProj));
 	XMStoreFloat4x4(&constants.View, XMMatrixTranspose(view));
-	XMStoreFloat4x4(&constants.Projection, XMMatrixTranspose(viewProj));
+	XMStoreFloat4x4(&constants.Projection, XMMatrixTranspose(projection));
 	XMStoreFloat4x4(&constants.ViewInverse, XMMatrixInverse(&det, view));
-	XMStoreFloat4x4(&constants.ProjectionInverse, XMMatrixInverse(&det, viewProj));
+	XMStoreFloat4x4(&constants.ProjectionInverse, XMMatrixInverse(&det, projection));
 	
 	memcpy(&m_mappedData[0], &constants, sizeof(constants));
 
@@ -498,27 +495,6 @@ void Renderer::CreateDSVDescriptorHeap()
 	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(
 		&desc,
 		IID_PPV_ARGS(&m_d3d12DSVDescriptorHeap)));
-}
-
-void Renderer::CreateVertexAndIndexBuffer()
-{
-	/*m_vertexBuffer = CreateDefaultBuffer(vertices, vbByteSize, m_vertexBufferUploader);
-	m_vertexBuffer->SetName(L"VertexBuffer");
-
-	m_vertexBufferView = {};
-	m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
-	m_vertexBufferView.SizeInBytes = vbByteSize;
-	m_vertexBufferView.StrideInBytes = sizeof(Vertex);
-	
-	m_vertexBuffers[0] = m_vertexBufferView;
-
-	m_indexBuffer = CreateDefaultBuffer(indices, sizeof(indices), m_indexBufferUploader);
-	m_indexBuffer->SetName(L"IndexBuffer");
-
-	m_indexBufferView = {};
-	m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
-	m_indexBufferView.SizeInBytes = sizeof(indices);
-	m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;*/
 }
 
 void Renderer::CreateDescriptorHeaps()

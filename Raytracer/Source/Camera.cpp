@@ -23,8 +23,7 @@ void Camera::SetRotation(DirectX::XMFLOAT4 rotation)
 
 void Camera::AddPosition(DirectX::XMFLOAT3 position)
 {
-    m_position += position;
-    UpdateMatrices();
+    SetPosition(position + m_position);
 }
 
 void Camera::AddPosition(float x, float y, float z)
@@ -34,8 +33,7 @@ void Camera::AddPosition(float x, float y, float z)
 
 void Camera::AddRotation(DirectX::XMFLOAT4 rotation)
 {
-    m_rotation = Quaternion::Concatenate(m_rotation, rotation);
-    UpdateMatrices();
+    SetRotation(Quaternion::Concatenate(m_rotation, rotation));
 }
 
 void Camera::AddRotationEuler(DirectX::XMFLOAT3 rotation)
