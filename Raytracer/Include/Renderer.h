@@ -5,6 +5,14 @@
 #include "Constants.h"
 #include "Helpers.h"
 #include "InputElements.h"
+#include "Keyboard.h"
+
+namespace DirectX
+{
+	class Keyboard;
+}
+
+class Camera;
 struct Primitive;
 class DescriptorHeapAllocator;
 class RaytracePass;
@@ -19,7 +27,10 @@ public:
 	void Update(double elapsedTime, double totalTime);
 	void Render(double elapsedTime, double totalTime);
 	void CleanUp();
+	
 	void OnMouseMove(unsigned long long btnState, int x, int y);
+	void OnKeyDown(unsigned long long btnState) const;
+	
 	void ToggleRasterization();
 
 	std::shared_ptr<Primitive> CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
@@ -124,11 +135,12 @@ private:
 	float m_theta = 1.5f * DirectX::XM_PI;
 	float m_phi = DirectX::XM_PIDIV4;
 	float m_radius = 5.0f;
-
-	DirectX::XMFLOAT4X4 m_view = Math::Identity4x4();
+	
 	DirectX::XMFLOAT4X4 m_world = Math::Identity4x4();
-	DirectX::XMFLOAT4X4 m_proj = Math::Identity4x4();
-	DirectX::XMMATRIX m_worldViewProj = DirectX::XMMatrixIdentity();
 
 	std::shared_ptr<Primitive> m_primitive;
+
+	std::shared_ptr<Camera> m_camera;
+
+	std::shared_ptr<DirectX::Keyboard::KeyboardStateTracker> m_keyboardTracker;
 };

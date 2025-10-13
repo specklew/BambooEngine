@@ -20,6 +20,7 @@ private:
 	void SetupLoggingLevel();
 	
 	std::shared_ptr<Renderer> m_renderer;
+	std::unique_ptr<DirectX::Keyboard> m_keyboard;
 
 	HINSTANCE m_hInstance;
 	HighResolutionClock m_clock;

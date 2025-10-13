@@ -4,6 +4,7 @@
 #include "Application.h"
 #include "Constants.h"
 #include "imgui.h"
+#include <Keyboard.h>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -103,17 +104,33 @@ HRESULT Window::Initialize()
 	return S_OK;
 }
 
-LRESULT Window::MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT Window::MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) const
 {
+	using DirectX::Keyboard;
+	
 	switch (message)
 	{
+	case WM_ACTIVATE:
+		Keyboard::ProcessMessage(message, wParam, lParam);
+		break;
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		break;
 	case WM_MOUSEMOVE:
 		application->OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		break;
 	case WM_KEYDOWN:
+		if (wParam == VK_RETURN && (lParam & 0x60000000) == 0x20000000)
+		{
+			// This is where you'd implement the classic ALT+ENTER hotkey for fullscreen toggle
+			// But I'm not going to... heh
+		}
+		Keyboard::ProcessMessage(message, wParam, lParam);
 		application->OnKeyDown(wParam);
+		break;
+	case WM_KEYUP:
+		Keyboard::ProcessMessage(message, wParam, lParam);
+		break;
 	default:
 		return DefWindowProc(hWnd, message, wParam, lParam);
 	}

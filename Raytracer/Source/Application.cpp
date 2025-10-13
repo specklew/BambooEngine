@@ -13,6 +13,8 @@ Application::Application(HINSTANCE hInstance) : m_hInstance(hInstance)
 void Application::Run()
 {
 	SetupLoggingLevel();
+
+	m_keyboard = std::make_unique<DirectX::Keyboard>();
 	
 	Window::Create(m_hInstance, { 0, 0, 800, 600 }, this);
 	
@@ -55,6 +57,10 @@ void Application::OnKeyDown(WPARAM btnState)
 	if (btnState == VK_SPACE)
 	{
 		m_renderer->ToggleRasterization();
+	}
+	else
+	{
+		m_renderer->OnKeyDown(btnState);
 	}
 }
 

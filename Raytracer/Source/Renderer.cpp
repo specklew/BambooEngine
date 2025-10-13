@@ -6,6 +6,7 @@
 #include <chrono>
 
 #include "AccelerationStructures.h"
+#include "Camera.h"
 #include "DescriptorHeapAllocator.h"
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
@@ -46,6 +47,9 @@ auto& resourceManager = ResourceManager::Get();
 void Renderer::Initialize()
 {
 	spdlog::info("Initializing renderer...");
+
+	m_camera = std::make_shared<Camera>();
+	m_keyboardTracker = std::make_shared<DirectX::Keyboard::KeyboardStateTracker>();
 	
 	auto psh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.ps.shader"));
 	m_pixelShader = resourceManager.shaders.GetResource(psh).bytecode;
@@ -105,42 +109,49 @@ void Renderer::Initialize()
 
 void Renderer::Update(double elapsedTime, double totalTime)
 {
+	auto key_state = DirectX::Keyboard::Get().GetState();
+
+	if (key_state.W)
+	{
+		m_camera->AddPosition(m_camera->GetForward() * static_cast<float>(elapsedTime) * m_camera->GetSpeed());
+	}
+
+	if (key_state.S)
+	{
+		m_camera->AddPosition(m_camera->GetForward() * static_cast<float>(elapsedTime) * -m_camera->GetSpeed());
+	}
+
+	if (key_state.D)
+	{
+		m_camera->AddPosition(m_camera->GetRight() * static_cast<float>(elapsedTime) * m_camera->GetSpeed());
+	}
+
+	if (key_state.A)
+	{
+		m_camera->AddPosition(m_camera->GetRight() * static_cast<float>(elapsedTime) * -m_camera->GetSpeed());
+	}
+
+	
+	
 	using namespace DirectX;
 
-	XMMATRIX P = XMMatrixPerspectiveFovLH(0.25* 3.14159265358979323846f, static_cast<float>(Window::Get().GetWidth()) / static_cast<float>(Window::Get().GetHeight()), 0.1f, 100.0f);
-	XMStoreFloat4x4(&m_proj, P);
-	
-    // Convert Spherical to Cartesian coordinates.
-    float x = m_radius*sinf(m_phi)*cosf(m_theta);
-    float z = m_radius*sinf(m_phi)*sinf(m_theta);
-    float y = m_radius*cosf(m_phi);
-
-    // Build the view matrix.
-    XMVECTOR pos = XMVectorSet(x, y, z, 1.0f);
-    XMVECTOR target = XMVectorZero();
-    XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-
-    XMMATRIX view = XMMatrixLookAtLH(pos, target, up);
-    XMStoreFloat4x4(&m_view, view);
-
-    XMMATRIX world = XMLoadFloat4x4(&Math::Identity4x4());
-    XMMATRIX proj = XMLoadFloat4x4(&m_proj);
-    XMMATRIX worldViewProj = world*view*proj;
+    SimpleMath::Matrix world = m_world;
+	SimpleMath::Matrix worldViewProj = world * m_camera->GetViewProjectionMatrix();
+	SimpleMath::Matrix view = XMLoadFloat4x4(&m_camera->GetViewMatrix());
+	SimpleMath::Matrix viewProj = XMLoadFloat4x4(&m_camera->GetViewProjectionMatrix());
 
 	XMVECTOR det;
 	
 	ObjectConstants constants;
 	XMStoreFloat4x4(&constants.WorldViewProj, XMMatrixTranspose(worldViewProj));
 	XMStoreFloat4x4(&constants.View, XMMatrixTranspose(view));
-	XMStoreFloat4x4(&constants.Projection, XMMatrixTranspose(proj));
+	XMStoreFloat4x4(&constants.Projection, XMMatrixTranspose(viewProj));
 	XMStoreFloat4x4(&constants.ViewInverse, XMMatrixInverse(&det, view));
-	XMStoreFloat4x4(&constants.ProjectionInverse, XMMatrixInverse(&det, proj));
-
-	m_worldViewProj = XMMatrixTranspose(worldViewProj);
+	XMStoreFloat4x4(&constants.ProjectionInverse, XMMatrixInverse(&det, viewProj));
 	
 	memcpy(&m_mappedData[0], &constants, sizeof(constants));
 
-	m_raytracePass->Update(view, proj);
+	m_raytracePass->Update(view, viewProj);
 }
 
 void Renderer::Render(double elapsedTime, double totalTime)
@@ -257,8 +268,11 @@ void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
 		// Update angles based on input to orbit camera around box.
 		m_theta += dx;
 		m_phi += dy;
+
+		m_camera->AddRotationEuler(DirectX::SimpleMath::Vector3(dy, -dx, 0.0f));
+		
 		// Restrict the angle mPhi.
-		m_phi = std::clamp(m_phi, 0.1f,  3.1415f - 0.1f);
+		m_phi = std::clamp(m_phi, 0.01f - DirectX::XM_PIDIV2,  DirectX::XM_PIDIV2 - 0.01f);
 	}
 	else if((btnState & MK_RBUTTON) != 0)
 	{
@@ -272,6 +286,12 @@ void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
 	}
 	m_lastMousePosX = x;
 	m_lastMousePosY = y;
+}
+
+void Renderer::OnKeyDown(unsigned long long btnState) const
+{
+	const auto state = DirectX::Keyboard::Get().GetState();
+	m_keyboardTracker->Update(state);
 }
 
 void Renderer::SetupDeviceAndDebug()

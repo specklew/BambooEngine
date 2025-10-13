@@ -29,7 +29,14 @@
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="HighlightingSettingsPerFile">
+    <setting file="file://$PROJECT_DIR$/../../../../../Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/include/vector" root0="SKIP_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Raytracer/Include/Resource.h" root0="SKIP_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Raytracer/Include/Utils.h" root0="FORCE_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Raytracer/Source/Resource.cpp" root0="SKIP_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Raytracer/Source/Utils.cpp" root0="SKIP_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/Raytracer/Vendor/tinygltf/tiny_gltf.h" root0="SKIP_HIGHLIGHTING" />
     <setting file="file://$PROJECT_DIR$/packages/Microsoft.Direct3D.D3D12.1.615.1/build/native/include/d3d12.h" root0="SKIP_HIGHLIGHTING" />
+    <setting file="file://$PROJECT_DIR$/packages/Microsoft.Direct3D.D3D12.1.615.1/build/native/include/d3dx12/d3dx12_root_signature.h" root0="SKIP_HIGHLIGHTING" />
   </component>
   <component name="ProjectColorInfo">{
   &quot;customColor&quot;: &quot;&quot;,

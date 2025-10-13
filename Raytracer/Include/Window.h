@@ -18,7 +18,7 @@ public:
 	LRESULT CALLBACK MsgProc(
 		HWND hWnd,
 		UINT message,
-		WPARAM wParam, LPARAM lParam);
+		WPARAM wParam, LPARAM lParam) const;
 	
 private:
 	Window() = default;
