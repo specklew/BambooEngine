@@ -64,18 +64,20 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
     desc.MissShaderTable.StrideInBytes = missSelectionSizeInBytes;
     desc.MissShaderTable.SizeInBytes = m_shaderBindingTableGenerator->GetMissEntrySize();
 
+    // !!! ALL OF THIS SHOULD HAPPEN IN THE SBT GENERATOR !!!
+    
     // Start addresses must be aligned to D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT
     // and strides (basically shader record sizes) must be aligned to D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT
-    desc.MissShaderTable.StartAddress = Align(desc.MissShaderTable.StartAddress, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-    desc.MissShaderTable.StrideInBytes = Align(desc.MissShaderTable.StrideInBytes, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT); 
+    //desc.MissShaderTable.StartAddress = Align(desc.MissShaderTable.StartAddress, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+    //desc.MissShaderTable.StrideInBytes = Align(desc.MissShaderTable.StrideInBytes, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT); 
     
     uint32_t hitGroupsSelectionSize = m_shaderBindingTableGenerator->GetHitGroupSectionSize();
     desc.HitGroupTable.StartAddress = desc.MissShaderTable.StartAddress + desc.MissShaderTable.StrideInBytes;
     desc.HitGroupTable.StrideInBytes = hitGroupsSelectionSize;
     desc.HitGroupTable.SizeInBytes = m_shaderBindingTableGenerator->GetHitGroupEntrySize();
     
-    desc.HitGroupTable.StartAddress = Align(desc.HitGroupTable.StartAddress, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-    desc.HitGroupTable.StrideInBytes = Align(desc.HitGroupTable.StrideInBytes, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT); 
+    //desc.HitGroupTable.StartAddress = Align(desc.HitGroupTable.StartAddress, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
+    //desc.HitGroupTable.StrideInBytes = Align(desc.HitGroupTable.StrideInBytes, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT); 
 
     desc.Width = Window::Get().GetWidth();
     desc.Height = Window::Get().GetHeight();

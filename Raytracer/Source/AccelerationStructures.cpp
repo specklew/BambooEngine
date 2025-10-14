@@ -95,8 +95,6 @@ void AccelerationStructures::CreateTopLevelAS(
             nv_helpers_dx12::kUploadHeapProps);
         m_topLevelASBuffers.p_instanceDesc->SetName(L"Instance Descriptions TLAS Buffer");
     }
-    
-    //spdlog::debug("Generating TLAS");
 
     m_topLevelAsGenerator->Generate(commandList.Get(),
         m_topLevelASBuffers.p_scratch.Get(),

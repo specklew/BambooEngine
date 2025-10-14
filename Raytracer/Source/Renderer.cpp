@@ -40,8 +40,6 @@ struct ObjectConstants
 	DirectX::XMFLOAT4X4 ProjectionInverse = Math::Identity4x4();
 };
 
-constexpr UINT64 vbByteSize = 8 * sizeof(Vertex);
-
 auto& resourceManager = ResourceManager::Get();
 
 void Renderer::Initialize()
