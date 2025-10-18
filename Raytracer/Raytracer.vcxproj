@@ -125,6 +125,7 @@
     <ClInclude Include="Include\StringId.h" />
     <ClInclude Include="Include\Utils.h" />
     <ClInclude Include="Include\Window.h" />
+    <ClInclude Include="Vendor\DDSTextureLoader\DDSTextureLoader12.h" />
     <ClInclude Include="Vendor\DXC\inc\d3d12shader.h" />
     <ClInclude Include="Vendor\DXC\inc\dxcapi.h" />
     <ClInclude Include="Vendor\DXC\inc\dxcerrors.h" />
@@ -310,6 +311,9 @@
     <ClCompile Include="Source\Utils.cpp" />
     <ClCompile Include="Source\Window.cpp" />
     <ClCompile Include="Source\WinMain.cpp" />
+    <ClCompile Include="Vendor\DDSTextureLoader\DDSTextureLoader12.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="Vendor\DXRHelpers\nv_helpers_dx12\BottomLevelASGenerator.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
