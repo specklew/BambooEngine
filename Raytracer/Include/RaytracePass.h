@@ -20,6 +20,7 @@ public:
     
     void Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget);
     void Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj);
+    void OnResize();
     
 private:
     void InitializeRaytracingPipeline();

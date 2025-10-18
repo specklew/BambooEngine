@@ -77,7 +77,16 @@ void Renderer::Initialize()
 
 	CreateDSVDescriptorHeap();
 	CreateDepthStencilView();
+
+	// Execute depth stencil creation commands
+	ThrowIfFailed(m_d3d12CommandList->Close());
+	
+	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	
+	FlushCommandQueue();
 	ResetCommandList();
+	// Finish execution - reset command list for next setup commands
 
 	CreateDescriptorHeaps();
 	CreateWorldProjCBV();
@@ -87,7 +96,7 @@ void Renderer::Initialize()
 	CreatePipelineState();
 
 	m_d3d12CommandList->Close();
-	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
+	commandLists[0] = m_d3d12CommandList.Get();
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
 	
 	FlushCommandQueue();
@@ -101,6 +110,9 @@ void Renderer::Initialize()
 	spdlog::info("Renderer initialized successfully.");
 
 	InitializeImGui();
+	
+	FlushCommandQueue();
+	ResetCommandList();
 }
 
 void Renderer::Update(double elapsedTime, double totalTime)
@@ -153,7 +165,6 @@ void Renderer::Render(double elapsedTime, double totalTime)
 {
 	RenderImGui();
 	
-	ResetCommandList();
 	SetViewport();
 	SetScissorRect();
 	
@@ -240,6 +251,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	ThrowIfFailed(m_dxgiSwapChain->Present(0, presentFlags));
 
 	FlushCommandQueue();
+	ResetCommandList();
 }
 
 void Renderer::CleanUp()
@@ -255,7 +267,48 @@ void Renderer::CleanUp()
 
 void Renderer::OnResize()
 {
+	assert(m_d3d12Device && "Attempted to resize window without device.");
+	assert(m_dxgiSwapChain && "Attempted to resize window without swap chain.");
+	
 	auto& window = Window::Get();
+
+	FlushCommandQueue();
+
+	for (int i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
+	{
+		m_d3d12RenderTargets[i].Reset();
+	}
+
+	int swapChainFlags = CheckTearingSupport() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+	ThrowIfFailed(m_dxgiSwapChain->ResizeBuffers(
+		Constants::Graphics::NUM_FRAMES,
+		window.GetWidth(),
+		window.GetHeight(),
+		m_backBufferFormat,
+		swapChainFlags));
+
+	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
+	{
+		ThrowIfFailed(m_dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
+		m_d3d12Device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
+		rtvHandle.Offset(1, m_rtvDescriptorSize);
+	}
+	
+	m_depthStencilBuffer.Reset();
+
+	CreateDepthStencilView();
+	SetScissorRect();
+	SetViewport();
+	
+	m_raytracePass->OnResize();
+
+	m_d3d12CommandList->Close();
+	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	
+	FlushCommandQueue();
+	ResetCommandList();
 }
 
 void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
@@ -478,13 +531,6 @@ void Renderer::CreateDepthStencilView()
 			m_depthStencilBuffer.Get(),
 			D3D12_RESOURCE_STATE_COMMON,
 			D3D12_RESOURCE_STATE_DEPTH_WRITE));
-
-	ThrowIfFailed(m_d3d12CommandList->Close());
-	
-	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-	
-	FlushCommandQueue();
 }
 
 void Renderer::CreateDSVDescriptorHeap()
@@ -637,12 +683,12 @@ void Renderer::SetScissorRect()
 
 void Renderer::FlushCommandQueue()
 {
+	m_fenceValues[m_frameIndex]++;
+	
 	ThrowIfFailed(m_d3d12CommandQueue->Signal(m_d3d12Fence.Get(), m_fenceValues[m_frameIndex]));
 	ThrowIfFailed(m_d3d12Fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
 
 	WaitForSingleObject(m_fenceEvent, INFINITE);
-
-	m_fenceValues[m_frameIndex]++;
 }
 
 bool Renderer::CheckTearingSupport()

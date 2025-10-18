@@ -120,6 +120,13 @@ void RaytracePass::Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj)
 {
 }
 
+void RaytracePass::OnResize()
+{
+    m_outputResource.Reset();
+    CreateRaytracingOutputBuffer();
+    CreateShaderResourceHeap();
+}
+
 void RaytracePass::InitializeRaytracingPipeline()
 {
     spdlog::debug("Initializing raytracing pipeline");

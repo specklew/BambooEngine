@@ -19,9 +19,11 @@ void Application::Run()
 	Window::Create(m_hInstance, { 0, 0, 800, 600 }, this);
 	
 	m_renderer->Initialize();
+	m_ready = true;
 
 	GameLoop();
 
+	m_ready = false;
 	m_renderer->CleanUp();
 	m_renderer.reset();
 
@@ -45,6 +47,11 @@ void Application::GameLoop()
 		m_renderer->Update(m_clock.GetDeltaSeconds(), m_clock.GetTotalSeconds());
 		m_renderer->Render(m_clock.GetDeltaSeconds(), m_clock.GetTotalSeconds());
 	}
+}
+
+void Application::OnResize()
+{
+	m_renderer->OnResize();
 }
 
 void Application::OnMouseMove(WPARAM btnState, int x, int y)

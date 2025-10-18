@@ -104,7 +104,7 @@ HRESULT Window::Initialize()
 	return S_OK;
 }
 
-LRESULT Window::MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) const
+LRESULT Window::MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	using DirectX::Keyboard;
 	
@@ -116,6 +116,12 @@ LRESULT Window::MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) c
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		break;
+	case WM_SIZE:
+		if (!application->IsReady()) break; 
+		if (wParam == SIZE_MINIMIZED) break;
+		m_windowRect = RECT{ 0, 0, LOWORD(lParam), HIWORD(lParam) };
+		application->OnResize();
+	break;
 	case WM_MOUSEMOVE:
 		application->OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		break;
