@@ -67,8 +67,8 @@ static void ExtractIndices(tinygltf::Model& model, std::vector<uint32_t>& outInd
             for (int i = 0; i < accessor.count; i+=3)
             {
                 outIndices.push_back(rawIndices[i]);
-                outIndices.push_back(rawIndices[i+2]);
                 outIndices.push_back(rawIndices[i+1]);
+                outIndices.push_back(rawIndices[i+2]);
             }
 
             break;
@@ -81,8 +81,8 @@ static void ExtractIndices(tinygltf::Model& model, std::vector<uint32_t>& outInd
             for (int i = 0; i < accessor.count; i+=3)
             {
                 outIndices.push_back(rawIndices[i]);
-                outIndices.push_back(rawIndices[i+2]);
                 outIndices.push_back(rawIndices[i+1]);
+                outIndices.push_back(rawIndices[i+2]);
             }
             break;
         }

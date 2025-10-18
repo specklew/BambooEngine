@@ -253,6 +253,11 @@ void Renderer::CleanUp()
 	m_constantBuffer->Unmap(0, nullptr);
 }
 
+void Renderer::OnResize()
+{
+	auto& window = Window::Get();
+}
+
 void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
 {
 	if((btnState & MK_LBUTTON) != 0)

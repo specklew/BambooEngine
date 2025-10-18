@@ -27,7 +27,8 @@ public:
 	void Update(double elapsedTime, double totalTime);
 	void Render(double elapsedTime, double totalTime);
 	void CleanUp();
-	
+
+	void OnResize();
 	void OnMouseMove(unsigned long long btnState, int x, int y);
 	void OnKeyDown(unsigned long long btnState) const;
 	

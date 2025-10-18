@@ -12,13 +12,13 @@ struct STriVertex
 [shader("closesthit")] 
 void Hit(inout HitInfo payload : SV_RayPayload, Attributes attrib) 
 {
-    //float3 barycentrics = 
-    //float3(1.f - attrib.bary.x - attr ib.bary.y, attrib.bary.x, attrib.bary.y);
+    float3 barycentrics = 
+    float3(1.f - attrib.bary.x - attrib.bary.y, attrib.bary.x, attrib.bary.y);
 
-    uint vertId = 3 * PrimitiveIndex();
-    /*float3 hitColor = BTriVertex[indices[vertId + 0]].color * barycentrics.x +
-               BTriVertex[indices[vertId + 1]].color * barycentrics.y +
-               BTriVertex[indices[vertId + 2]].color * barycentrics.z;*/
+    //uint vertId = 3 * PrimitiveIndex();
+    //float3 hitColor = BTriVertex[indices[vertId + 0]].color * barycentrics.x +
+               //BTriVertex[indices[vertId + 1]].color * barycentrics.y +
+               //BTriVertex[indices[vertId + 2]].color * barycentrics.z;
   
-    payload.colorAndDistance = float4(1,1,1,1); 
+    payload.colorAndDistance = float4(barycentrics.x,barycentrics.y,barycentrics.z,1); 
 }
