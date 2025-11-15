@@ -124,7 +124,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS;
 	
 	UINT m_frameIndex = 0;
-	UINT64 m_fenceValues[Constants::Graphics::NUM_FRAMES] = {};
+	UINT64 m_fenceValue = 0;
 	HANDLE m_fenceEvent = nullptr;
 
 	UINT m_rtvDescriptorSize = 0;
@@ -137,7 +137,7 @@ private:
 	
 	DirectX::XMFLOAT4X4 m_world = Math::Identity4x4();
 
-	std::shared_ptr<Primitive> m_primitive;
+	std::vector<std::shared_ptr<Primitive>> m_primitives;
 
 	std::shared_ptr<Camera> m_camera;
 

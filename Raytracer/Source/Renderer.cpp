@@ -68,9 +68,7 @@ void Renderer::Initialize()
 	CreateCommandList();
 	ResetCommandList();
 
-	m_primitive = ModelLoading::LoadModel(*this, AssetId("resources/models/avocado/avocado.glb"));
-
-	ResetCommandList();
+	m_primitives = ModelLoading::LoadFullModel(*this, AssetId("resources/models/abeautifulgame.glb"));
 	
 	CreateRTVDescriptorHeap();
 	CreateRenderTargetViews();
@@ -211,17 +209,20 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	if (m_rasterize)
 	{
-		auto vertexBuffer = m_primitive->GetVertexBuffer();
-		auto indexBuffer = m_primitive->GetIndexBuffer();
+		for (const auto& primitive : m_primitives)
+		{
+			auto vertexBuffer = primitive->GetVertexBuffer();
+			auto indexBuffer = primitive->GetIndexBuffer();
 		
-		m_d3d12CommandList->IASetVertexBuffers(0, 1, &vertexBuffer->GetVertexBufferView());
-    	m_d3d12CommandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
-    	m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			m_d3d12CommandList->IASetVertexBuffers(0, 1, &vertexBuffer->GetVertexBufferView());
+			m_d3d12CommandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
+			m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     
-    	m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+			m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
-		// Assume first index and vertex are 0 ( buffers are only for one object )
-    	m_d3d12CommandList->DrawIndexedInstanced(indexBuffer->GetIndexCount(), 1, 0, 0, 0);
+			// Assume first index and vertex are 0 ( buffers are only for one object )
+			m_d3d12CommandList->DrawIndexedInstanced(indexBuffer->GetIndexCount(), 1, 0, 0, 0);
+		}
 	}
 	else
 	{
@@ -399,7 +400,7 @@ void Renderer::CreateFence()
 {
 	ThrowIfFailed(m_d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_d3d12Fence)));
 
-	m_fenceValues[m_frameIndex]++;
+	m_fenceValue++;
 
 	m_fenceEvent = CreateEventEx(nullptr, FALSE, FALSE, EVENT_ALL_ACCESS);
 
@@ -683,12 +684,16 @@ void Renderer::SetScissorRect()
 
 void Renderer::FlushCommandQueue()
 {
-	m_fenceValues[m_frameIndex]++;
-	
-	ThrowIfFailed(m_d3d12CommandQueue->Signal(m_d3d12Fence.Get(), m_fenceValues[m_frameIndex]));
-	ThrowIfFailed(m_d3d12Fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
+	m_fenceValue++;
+	ThrowIfFailed(m_d3d12CommandQueue->Signal(m_d3d12Fence.Get(), m_fenceValue));
 
-	WaitForSingleObject(m_fenceEvent, INFINITE);
+	if (m_d3d12Fence->GetCompletedValue() < m_fenceValue)
+	{
+		ThrowIfFailed(m_d3d12Fence->SetEventOnCompletion(m_fenceValue, m_fenceEvent));
+		WaitForSingleObject(m_fenceEvent, INFINITE);
+	}
+
+	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
 }
 
 bool Renderer::CheckTearingSupport()
@@ -728,8 +733,8 @@ void Renderer::SetupAccelerationStructures()
 	spdlog::debug("Setting up acceleration structures");
 	m_accelerationStructures = std::make_shared<AccelerationStructures>();
 
-	auto vertexBuffer = m_primitive->GetVertexBuffer();
-	auto indexBuffer = m_primitive->GetIndexBuffer();
+	auto vertexBuffer = m_primitives[0]->GetVertexBuffer();
+	auto indexBuffer = m_primitives[0]->GetIndexBuffer();
 	
 	AccelerationStructureBuffers bottomLevelBuffers = m_accelerationStructures->CreateBottomLevelAS(
 		m_d3d12Device.Get(),
@@ -821,6 +826,17 @@ std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& 
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
 	FlushCommandQueue();
+	// WHY is resetting the allocator impossible if:
+	// 1. commands are closed
+	// 2. commands are executed
+	// 3. command queue is flushed
+	// D3D12 ERROR: ID3D12CommandAllocator::Reset: The command allocator cannot be reset because a command list is currently being recorded with the allocator. [ EXECUTION ERROR #543: COMMAND_ALLOCATOR_CANNOT_RESET]
+	// Is it possible that in the meantime something gets recorded to the command list?
+	// ---
+	// We have 3 allocators for each of the triple buffered frames
+	// When we reset, we reset only the current frame's allocator
+	// But maybe we haven't yet presented the frame, and we need to??? is that it?
+	ResetCommandList();
 
 	auto vertex_buffer = std::make_shared<VertexBuffer>(m_d3d12Device, vertex_buffer_resource, static_cast<UINT>(vertices.size()), sizeof(Vertex));
 	auto index_buffer = std::make_shared<IndexBuffer>(m_d3d12Device, index_buffer_resource, static_cast<UINT>(indices.size()), DXGI_FORMAT_R32_UINT);
