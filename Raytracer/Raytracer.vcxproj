@@ -107,6 +107,7 @@
     <ClInclude Include="Include\Helpers.h" />
     <ClInclude Include="Include\HighResolutionClock.h" />
     <ClInclude Include="Include\InputElements.h" />
+    <ClInclude Include="Include\Model.h" />
     <ClInclude Include="Include\ModelLoading.h" />
     <ClInclude Include="Include\pch.h" />
     <ClInclude Include="Include\Primitive.h" />
@@ -116,6 +117,7 @@
     <ClInclude Include="Include\ResourceManager\ResourceManager.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManagerTypes.h" />
     <ClInclude Include="Include\Resources\Buffer.h" />
+    <ClInclude Include="Include\Resources\ConstantBuffer.h" />
     <ClInclude Include="Include\Resources\IndexBuffer.h" />
     <ClInclude Include="Include\Resources\Resource.h" />
     <ClInclude Include="Include\Resources\VertexBuffer.h" />
@@ -293,8 +295,9 @@
     <ClCompile Include="Source\Camera.cpp" />
     <ClCompile Include="Source\DescriptorHeapAllocator.cpp" />
     <ClCompile Include="Source\Helpers.cpp" />
-    <ClCompile Include="Source\HIghResolutionClock.cpp" />
+    <ClCompile Include="Source\HighResolutionClock.cpp" />
     <ClCompile Include="Source\InputElements.cpp" />
+    <ClCompile Include="Source\Model.cpp"/>
     <ClCompile Include="Source\ModelLoading.cpp" />
     <ClCompile Include="Source\Random.cpp" />
     <ClCompile Include="Source\RaytracePass.cpp" />
@@ -302,6 +305,7 @@
     <ClCompile Include="Source\ResourceManager\ResourceManager.cpp" />
     <ClCompile Include="Source\ResourceManager\ResourceManagerTypes.cpp" />
     <ClCompile Include="Source\Resources\Buffer.cpp" />
+    <ClCompile Include="Source\Resources\ConstantBuffer.cpp"/>
     <ClCompile Include="Source\Resources\IndexBuffer.cpp" />
     <ClCompile Include="Source\Resources\Resource.cpp" />
     <ClCompile Include="Source\Resources\VertexBuffer.cpp" />

@@ -21,6 +21,7 @@
 #include "Shader.h"
 #include "Utils.h"
 #include "Window.h"
+#include "Resources/ConstantBuffer.h"
 #include "Resources/IndexBuffer.h"
 #include "Resources/VertexBuffer.h"
 #include "tinygltf/tiny_gltf.h"
@@ -263,7 +264,7 @@ void Renderer::CleanUp()
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
 	
-	m_constantBuffer->Unmap(0, nullptr);
+	m_constantBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
 }
 
 void Renderer::OnResize()
@@ -549,10 +550,10 @@ void Renderer::CreateDSVDescriptorHeap()
 
 void Renderer::CreateDescriptorHeaps()
 {
-	///	|							|								|								|					|							|
-	///	|	SRV IMGUI TEXTURE (1)	|	CBV WORLD PROJECTION (1)	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (1)	|	TEXTURES (MAX_TEXTURE)	|
-	///	|							|								|								|					|							|
-
+	///	|							|						|								|					|							|								|
+	///	|	SRV IMGUI TEXTURE (1)	|	CBV for ProjMatrix	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (1)	|	TEXTURES (MAX_TEXTURE)	|	FRAME N CBVs (MAX_OBJS) 	|
+	///	|							|						|								|					|							|								|
+	///										Current CBV																							  NOT IMPLEMENTED YET
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -567,20 +568,24 @@ void Renderer::CreateDescriptorHeaps()
 
 void Renderer::CreateWorldProjCBV()
 {
+	ComPtr<ID3D12Resource> cbvUav;
+	
 	m_d3d12Device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,
 		&CD3DX12_RESOURCE_DESC::Buffer(256 * 5),
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
-		IID_PPV_ARGS(&m_constantBuffer));
+		IID_PPV_ARGS(&cbvUav));
 
-	m_constantBuffer->SetName(L"Camera and World Proj buffer");
-	ThrowIfFailed(m_constantBuffer->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData)));
+	m_constantBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, cbvUav);
+	m_constantBuffer->SetResourceName(L"Camera and World Proj CBV Resource");
+	
+	ThrowIfFailed(m_constantBuffer->GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData)));
 	
 	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-	cbvDesc.BufferLocation = m_constantBuffer->GetGPUVirtualAddress();
-	cbvDesc.SizeInBytes = static_cast<UINT>(sizeof(DirectX::XMFLOAT4X4) + 255 * 5) & ~255;
+	cbvDesc.BufferLocation = m_constantBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+	cbvDesc.SizeInBytes = Align(256ULL * 5, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
 
 	auto descriptorDesc = m_srvCbvUavDescriptorHeap->GetDesc();
 	auto increment = m_d3d12Device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
@@ -836,6 +841,9 @@ std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& 
 	// We have 3 allocators for each of the triple buffered frames
 	// When we reset, we reset only the current frame's allocator
 	// But maybe we haven't yet presented the frame, and we need to??? is that it?
+
+	// After all it seems that the FlushGPU method was not functioning correctly, I never quite researched why that was the case. But it seems that there was an issue with the fence value.
+	// There was a unique fence value for each allocator (frame) and somehow it was not being updated properly. TODO: Check out why was that for the next iteration of the engine.
 	ResetCommandList();
 
 	auto vertex_buffer = std::make_shared<VertexBuffer>(m_d3d12Device, vertex_buffer_resource, static_cast<UINT>(vertices.size()), sizeof(Vertex));

@@ -266,7 +266,7 @@ std::vector<std::shared_ptr<Primitive>> ModelLoading::LoadFullModel(Renderer& re
     assert(succeeded && "Failed to load model");
     
     std::vector<std::shared_ptr<Primitive>> primitives;
-
+    
     for (auto& mesh : model.meshes)
     {
         for (auto& primitive : mesh.primitives)

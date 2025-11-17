@@ -7,6 +7,8 @@
 #include "InputElements.h"
 #include "Keyboard.h"
 
+class ConstantBuffer;
+
 namespace DirectX
 {
 	class Keyboard;
@@ -110,7 +112,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBufferUploader;
 	D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
 
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_constantBuffer;
+	std::shared_ptr<ConstantBuffer> m_constantBuffer;
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvCbvUavDescriptorHeap;
 	BYTE* m_mappedData = nullptr;
 
