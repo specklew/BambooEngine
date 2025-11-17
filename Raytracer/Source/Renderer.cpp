@@ -34,7 +34,7 @@ using namespace Microsoft::WRL;
 
 struct ObjectConstants
 {
-	DirectX::XMFLOAT4X4 WorldViewProj = Math::Identity4x4();
+	DirectX::XMFLOAT4X4 ViewProj = Math::Identity4x4();
 	DirectX::XMFLOAT4X4 View = Math::Identity4x4();
 	DirectX::XMFLOAT4X4 Projection = Math::Identity4x4();
 	DirectX::XMFLOAT4X4 ViewInverse = Math::Identity4x4();
@@ -140,8 +140,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	
 	using namespace DirectX;
 
-    SimpleMath::Matrix world = m_world;
-	SimpleMath::Matrix worldViewProj = world * m_camera->GetViewProjectionMatrix();
+    //SimpleMath::Matrix world = m_world;
+	SimpleMath::Matrix viewProjection = XMLoadFloat4x4(&m_camera->GetViewProjectionMatrix());
 	SimpleMath::Matrix view = XMLoadFloat4x4(&m_camera->GetViewMatrix());
 	SimpleMath::Matrix viewProj = XMLoadFloat4x4(&m_camera->GetViewProjectionMatrix());
 	SimpleMath::Matrix projection = XMLoadFloat4x4(&m_camera->GetProjectionMatrix());
@@ -149,13 +149,19 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	XMVECTOR det;
 	
 	ObjectConstants constants;
-	XMStoreFloat4x4(&constants.WorldViewProj, XMMatrixTranspose(worldViewProj));
+	XMStoreFloat4x4(&constants.ViewProj, XMMatrixTranspose(viewProjection));
 	XMStoreFloat4x4(&constants.View, XMMatrixTranspose(view));
 	XMStoreFloat4x4(&constants.Projection, XMMatrixTranspose(projection));
 	XMStoreFloat4x4(&constants.ViewInverse, XMMatrixInverse(&det, view));
 	XMStoreFloat4x4(&constants.ProjectionInverse, XMMatrixInverse(&det, projection));
 	
 	memcpy(&m_mappedData[0], &constants, sizeof(constants));
+
+	XMMATRIX modelTranslation = XMMatrixTranslation(0.0f, 0.0f + totalTime, 0.0f);
+	XMFLOAT4X4 model;
+	XMStoreFloat4x4(&model, XMMatrixTranspose(modelTranslation));
+
+	memcpy(&m_modelMappedData[0], &model, sizeof(model));
 
 	m_raytracePass->Update(view, viewProj);
 }
@@ -265,6 +271,7 @@ void Renderer::CleanUp()
 	ImGui::DestroyContext();
 	
 	m_constantBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
+	m_modelBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
 }
 
 void Renderer::OnResize()
@@ -594,6 +601,29 @@ void Renderer::CreateWorldProjCBV()
 	cbvHandle.ptr = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr + increment;
 	
 	m_d3d12Device->CreateConstantBufferView(&cbvDesc, cbvHandle);
+
+	ComPtr<ID3D12Resource> modelBuffer;
+
+	m_d3d12Device->CreateCommittedResource(
+		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+		D3D12_HEAP_FLAG_NONE,
+		&CD3DX12_RESOURCE_DESC::Buffer(256),
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&modelBuffer));
+
+	m_modelBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, modelBuffer);
+	m_modelBuffer->SetResourceName(L"Model CBV Resource");
+	
+	ThrowIfFailed(m_modelBuffer->GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(&m_modelMappedData)));
+
+	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc2;
+	cbvDesc2.BufferLocation = m_modelBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+	cbvDesc2.SizeInBytes = Align(256ULL, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+
+	cbvHandle.ptr += 3 * increment;
+
+	m_d3d12Device->CreateConstantBufferView(&cbvDesc2, cbvHandle);
 }
 
 void Renderer::CreateRasterizationRootSignature()
@@ -607,7 +637,30 @@ void Renderer::CreateRasterizationRootSignature()
 	cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
 	cbvRange.OffsetInDescriptorsFromTableStart = 1;
 
-	rootParameters[0].InitAsDescriptorTable(1, &cbvRange);
+	D3D12_DESCRIPTOR_RANGE rtRange;
+	rtRange.BaseShaderRegister = 0;
+	rtRange.NumDescriptors = 1;
+	rtRange.RegisterSpace = 0;
+	rtRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+	rtRange.OffsetInDescriptorsFromTableStart = 2;
+
+	D3D12_DESCRIPTOR_RANGE tlasRange;
+	tlasRange.BaseShaderRegister = 0;
+	tlasRange.NumDescriptors = 1;
+	tlasRange.RegisterSpace = 0;
+	tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	tlasRange.OffsetInDescriptorsFromTableStart = 3;
+	
+	D3D12_DESCRIPTOR_RANGE cbvRange2;
+	cbvRange2.BaseShaderRegister = 1;
+	cbvRange2.NumDescriptors = 1;
+	cbvRange2.RegisterSpace = 0;
+	cbvRange2.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+	cbvRange2.OffsetInDescriptorsFromTableStart = 4;
+
+	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, cbvRange2};
+	
+	rootParameters[0].InitAsDescriptorTable(4, ranges);
 
 	CD3DX12_ROOT_SIGNATURE_DESC desc = {};
 	desc.NumParameters = 1;

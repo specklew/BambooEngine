@@ -113,8 +113,10 @@ private:
 	D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
 
 	std::shared_ptr<ConstantBuffer> m_constantBuffer;
+	std::shared_ptr<ConstantBuffer> m_modelBuffer;
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvCbvUavDescriptorHeap;
 	BYTE* m_mappedData = nullptr;
+	BYTE* m_modelMappedData = nullptr;
 
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
 

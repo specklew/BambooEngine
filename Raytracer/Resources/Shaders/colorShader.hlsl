@@ -1,10 +1,15 @@
 cbuffer CameraParams : register(b0)
 {
-    float4x4 worldViewProj;
+    float4x4 viewProj;
     float4x4 view;
     float4x4 projection;
     float4x4 viewI;
     float4x4 projectionI;
+}
+
+cbuffer ModelParams : register(b1)
+{
+    float4x4 world;
 }
 
 struct VertexIn
@@ -24,7 +29,7 @@ VertexOut vertex(VertexIn vin)
     VertexOut vout;
 	
     // Transform to homogeneous clip space.
-    vout.PosH = mul(float4(vin.PosL, 1.0f), worldViewProj);
+    vout.PosH = mul(float4(vin.PosL, 1.0f), mul(world, viewProj));
     // Just pass vertex color into the pixel shader.
     //vout.Color = vin.Color;
     
