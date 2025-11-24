@@ -14,6 +14,7 @@
 
 #include "Helpers.h"
 #include "InputElements.h"
+#include "Model.h"
 #include "ModelLoading.h"
 #include "Primitive.h"
 #include "RaytracePass.h"
@@ -89,6 +90,8 @@ void Renderer::Initialize()
 
 	CreateDescriptorHeaps();
 	CreateWorldProjCBV();
+
+	auto idk = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb"));
 	
 	CreateRasterizationRootSignature();
 
@@ -564,7 +567,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_DESCRIPTORS_ON_HEAP + Constants::Graphics::MAX_TEXTURES;
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_OBJECTS + Constants::Graphics::MAX_TEXTURES;
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -653,7 +656,7 @@ void Renderer::CreateRasterizationRootSignature()
 	
 	D3D12_DESCRIPTOR_RANGE cbvRange2;
 	cbvRange2.BaseShaderRegister = 1;
-	cbvRange2.NumDescriptors = 1;
+	cbvRange2.NumDescriptors = Constants::Graphics::MAX_OBJECTS;
 	cbvRange2.RegisterSpace = 0;
 	cbvRange2.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
 	cbvRange2.OffsetInDescriptorsFromTableStart = 4;
@@ -1007,4 +1010,39 @@ ComPtr<ID3D12Resource> Renderer::CreateDefaultBuffer(const void* initData, UINT6
 			D3D12_RESOURCE_STATE_GENERIC_READ));
 	
 	return defaultBuffer;
+}
+
+std::shared_ptr<Model> Renderer::InstantiateModel()
+{
+	ComPtr<ID3D12Resource> buffer;
+	
+	m_d3d12Device->CreateCommittedResource(
+	&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+	D3D12_HEAP_FLAG_NONE,
+	&CD3DX12_RESOURCE_DESC::Buffer(256),
+	D3D12_RESOURCE_STATE_GENERIC_READ,
+	nullptr,
+	IID_PPV_ARGS(&buffer));
+
+	auto constantBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, buffer);
+	constantBuffer->SetResourceName(L"Model CBV Resource");
+
+	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+	cbvDesc.BufferLocation = constantBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+	cbvDesc.SizeInBytes = Align(256ULL, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+
+	auto descriptorDesc = m_srvCbvUavDescriptorHeap->GetDesc();
+	auto increment = m_d3d12Device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
+	
+	D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle;
+	cbvHandle.ptr = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr;
+	cbvHandle.ptr += Constants::Graphics::NUM_BASE_DESCRIPTORS * increment + increment; // The model CBVs start after the base descriptors TODO: REMOVE +1!!! ITS ONLY FOR TESTING WHEN CBVs ARE SETUP LEGACY WAY
+	cbvHandle.ptr += m_currentModelCBVIndex++ * increment;
+	
+	m_d3d12Device->CreateConstantBufferView(&cbvDesc, cbvHandle);
+
+	auto model = std::make_shared<Model>();
+	model->m_modelWorldMatrixBuffer = constantBuffer;
+
+	return model;
 }

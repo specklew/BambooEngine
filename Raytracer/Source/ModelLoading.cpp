@@ -6,9 +6,13 @@
 #include <spdlog/spdlog.h>
 
 #include "InputElements.h"
+#include "Model.h"
 #include "Primitive.h"
 #include "Renderer.h"
+#include "Scene.h"
+#include "SceneNode.h"
 #include "ResourceManager/ResourceManagerTypes.h"
+#include "tinygltf/tiny_gltf.h"
 
 static void ExtractVertices(tinygltf::Model& model, std::vector<Vertex>& outVertices)
 {
@@ -279,4 +283,76 @@ std::vector<std::shared_ptr<Primitive>> ModelLoading::LoadFullModel(Renderer& re
     spdlog::info("Loaded model at path {} with {} meshes and {} primitives.", assetId.AsString(), model.meshes.size(), primitives.size());
     
     return primitives;
+}
+
+std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId& assetId)
+{
+    tinygltf::Model model;
+    bool succeeded = LoadTinyGLTFModel(assetId.AsPath(), model);
+
+    assert(succeeded && "Failed to load model");
+    assert(model.scenes.size() > 0 && "Model has no scenes!");
+    
+    auto scene = std::make_shared<Scene>();
+    auto sceneRoot = scene->GetRoot();
+
+    auto gltf_scene = model.scenes[model.defaultScene];
+
+    spdlog::info("Scene nodes in glTF scene: {}", gltf_scene.nodes.size());
+    spdlog::info("Model nodes in glTF model: {}", model.nodes.size());
+
+    // TODO: Make this part recursive and extracted!!
+    for (auto gltf_node_index : gltf_scene.nodes)
+    {
+        std::shared_ptr<SceneNode> current_node = std::make_shared<SceneNode>();
+
+        auto gltf_node = model.nodes[gltf_node_index];
+
+        if (gltf_node.mesh != 0)
+        {
+            auto node_mesh = model.meshes[gltf_node.mesh];
+            auto current_model = renderer.InstantiateModel();
+            
+            for (auto& primitive : node_mesh.primitives)
+            {
+                auto prim = LoadPrimitive(renderer, model, primitive);
+                current_model->AddMesh(prim);
+            }
+
+            current_node->AddModel(current_model);
+        }
+
+        if (gltf_node.translation.size() > 0)
+        {
+            // May cause errors, but I'm not changing float precision to double.
+            float x = gltf_node.translation[0];
+            float y = gltf_node.translation[1];
+            float z = gltf_node.translation[2];
+
+            current_node->SetPosition({x, y, z});
+        }
+
+        if (gltf_node.rotation.size() > 0)
+        {
+
+            float x = gltf_node.rotation[0];
+            float y = gltf_node.rotation[1];
+            float z = gltf_node.rotation[2];
+            float w = gltf_node.rotation[3];
+            current_node->SetRotation({x, y, z, w});
+        }
+
+        if (gltf_node.scale.size() > 0)
+        {
+
+            float x = gltf_node.scale[0];
+            float y = gltf_node.scale[1];
+            float z = gltf_node.scale[2];
+            current_node->SetScale({x, y, z});
+        }
+        
+    }
+    // END - TODO
+
+    return nullptr;
 }

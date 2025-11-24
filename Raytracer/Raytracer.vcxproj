@@ -121,10 +121,13 @@
     <ClInclude Include="Include\Resources\IndexBuffer.h" />
     <ClInclude Include="Include\Resources\Resource.h" />
     <ClInclude Include="Include\Resources\VertexBuffer.h" />
+    <ClInclude Include="Include\Scene.h" />
+    <ClInclude Include="Include\SceneNode.h" />
     <ClInclude Include="Include\Shader.h" />
     <ClInclude Include="Include\ShaderCompilation.h" />
     <ClInclude Include="Include\StringHash.h" />
     <ClInclude Include="Include\StringId.h" />
+    <ClInclude Include="Include\Transform.h" />
     <ClInclude Include="Include\Utils.h" />
     <ClInclude Include="Include\Window.h" />
     <ClInclude Include="Vendor\DDSTextureLoader\DDSTextureLoader12.h" />
@@ -309,9 +312,12 @@
     <ClCompile Include="Source\Resources\IndexBuffer.cpp" />
     <ClCompile Include="Source\Resources\Resource.cpp" />
     <ClCompile Include="Source\Resources\VertexBuffer.cpp" />
+    <ClCompile Include="Source\Scene.cpp"/>
+    <ClCompile Include="Source\SceneNode.cpp"/>
     <ClCompile Include="Source\Shader.cpp" />
     <ClCompile Include="Source\ShaderCompilation.cpp" />
     <ClCompile Include="Source\StringId.cpp" />
+    <ClCompile Include="Source\Transform.cpp" />
     <ClCompile Include="Source\Utils.cpp" />
     <ClCompile Include="Source\Window.cpp" />
     <ClCompile Include="Source\WinMain.cpp" />

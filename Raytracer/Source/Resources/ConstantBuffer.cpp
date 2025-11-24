@@ -5,3 +5,13 @@ ConstantBuffer::ConstantBuffer(const Microsoft::WRL::ComPtr<ID3D12Device5>& devi
 {
     m_sizeInBytes = GetUnderlyingResource()->GetDesc().Width;
 }
+
+void ConstantBuffer::MapDataToWholeBuffer(BYTE* data) const
+{
+    GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(&data));
+}
+
+void ConstantBuffer::Unmap() const
+{
+    GetUnderlyingResource()->Unmap(0, nullptr);
+}

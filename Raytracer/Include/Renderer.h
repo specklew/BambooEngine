@@ -1,5 +1,4 @@
 #pragma once
-#include <iosfwd>
 #include <vector>
 
 #include "Constants.h"
@@ -7,6 +6,7 @@
 #include "InputElements.h"
 #include "Keyboard.h"
 
+class Model;
 class ConstantBuffer;
 
 namespace DirectX
@@ -37,6 +37,7 @@ public:
 	void ToggleRasterization();
 
 	std::shared_ptr<Primitive> CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+	std::shared_ptr<Model> InstantiateModel();
 
 private:
 	void SetupDeviceAndDebug();
@@ -146,4 +147,6 @@ private:
 	std::shared_ptr<Camera> m_camera;
 
 	std::shared_ptr<DirectX::Keyboard::KeyboardStateTracker> m_keyboardTracker;
+
+	int m_currentModelCBVIndex = 0;
 };
