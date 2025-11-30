@@ -9,13 +9,14 @@ void Model::AddMesh(const std::shared_ptr<Primitive>& mesh)
     m_meshes.push_back(mesh);
 }
 
-void Model::UpdateConstantBuffer(DirectX::XMFLOAT4X4 modelWorldMatrix) const
+void Model::UpdateConstantBuffer(DirectX::XMFLOAT4X4 modelWorldMatrix)
 {
-    BYTE* mappedData = reinterpret_cast<BYTE*>(malloc(sizeof(DirectX::XMFLOAT4X4)));
+    m_modelWorldMatrix = modelWorldMatrix;
+
+    DirectX::XMFLOAT4X4 dataBucket = DirectX::XMFLOAT4X4{};
+    DirectX::XMFLOAT4X4* mappedData = &dataBucket;
     
-    m_modelWorldMatrixBuffer->MapDataToWholeBuffer(mappedData);
+    m_modelWorldMatrixBuffer->MapDataToWholeBuffer(&mappedData);
     memcpy(&mappedData[0], &modelWorldMatrix, sizeof(DirectX::XMFLOAT4X4));
     m_modelWorldMatrixBuffer->Unmap();
-
-    free(mappedData);
 }

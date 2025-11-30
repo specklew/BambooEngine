@@ -6,6 +6,7 @@
 #include "InputElements.h"
 #include "Keyboard.h"
 
+class Scene;
 class Model;
 class ConstantBuffer;
 
@@ -113,11 +114,11 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBufferUploader;
 	D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
 
-	std::shared_ptr<ConstantBuffer> m_constantBuffer;
-	std::shared_ptr<ConstantBuffer> m_modelBuffer;
+	std::shared_ptr<ConstantBuffer> m_projectionMatrixConstantBuffer;
+	std::shared_ptr<ConstantBuffer> m_modelIndexConstantBuffer;
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvCbvUavDescriptorHeap;
 	BYTE* m_mappedData = nullptr;
-	BYTE* m_modelMappedData = nullptr;
+	BYTE* m_modelData = nullptr;
 
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
 
@@ -149,4 +150,6 @@ private:
 	std::shared_ptr<DirectX::Keyboard::KeyboardStateTracker> m_keyboardTracker;
 
 	int m_currentModelCBVIndex = 0;
+
+	std::shared_ptr<Scene> m_scene;
 };

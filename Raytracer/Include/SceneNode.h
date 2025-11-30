@@ -6,8 +6,7 @@ class Model;
 class SceneNode
 {
 public:
-
-    SceneNode(const std::shared_ptr<SceneNode>& parent = nullptr, const Transform& transform = Transform(), const std::shared_ptr<Model>& model = nullptr);
+    explicit SceneNode(const std::shared_ptr<SceneNode>& parent = nullptr, const Transform& transform = Transform());
     
     [[nodiscard]] std::shared_ptr<SceneNode> GetParent() const { return m_parent; }
     [[nodiscard]] const std::vector<std::shared_ptr<SceneNode>>& GetChildren() const { return m_children; }
@@ -29,9 +28,10 @@ private:
     friend class Scene;
 
     void UpdateModelConstantBuffer() const;
-    
-    std::shared_ptr<Model> m_model;
+
+    std::shared_ptr<Scene> m_scene;
     std::shared_ptr<SceneNode> m_parent;
     std::vector<std::shared_ptr<SceneNode>> m_children;
+    std::shared_ptr<Model> m_model;
     Transform m_transform;
 };

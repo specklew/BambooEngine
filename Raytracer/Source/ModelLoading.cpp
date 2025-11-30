@@ -294,18 +294,20 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
     assert(model.scenes.size() > 0 && "Model has no scenes!");
     
     auto scene = std::make_shared<Scene>();
+    scene->Initialize(); // TODO: I hate this initialization, but shared_from_this needs to be called after something that happens during initialization.
     auto sceneRoot = scene->GetRoot();
-
+    
     auto gltf_scene = model.scenes[model.defaultScene];
 
-    spdlog::info("Scene nodes in glTF scene: {}", gltf_scene.nodes.size());
-    spdlog::info("Model nodes in glTF model: {}", model.nodes.size());
-
+    spdlog::debug("Scene nodes in glTF scene: {}", gltf_scene.nodes.size());
+    spdlog::debug("Model nodes in glTF model: {}", model.nodes.size());
+    
     // TODO: Make this part recursive and extracted!!
     for (auto gltf_node_index : gltf_scene.nodes)
     {
         std::shared_ptr<SceneNode> current_node = std::make_shared<SceneNode>();
-
+        sceneRoot->AddChild(current_node);
+        
         auto gltf_node = model.nodes[gltf_node_index];
 
         if (gltf_node.mesh != 0)
@@ -350,9 +352,8 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
             float z = gltf_node.scale[2];
             current_node->SetScale({x, y, z});
         }
-        
     }
     // END - TODO
 
-    return nullptr;
+    return scene;
 }

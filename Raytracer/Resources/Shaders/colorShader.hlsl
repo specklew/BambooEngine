@@ -7,7 +7,7 @@ cbuffer CameraParams : register(b0)
     float4x4 projectionI;
 }
 
-cbuffer ModelParams : register(b1)
+cbuffer ModelTransforms : register(b1)
 {
     float4x4 world;
 }

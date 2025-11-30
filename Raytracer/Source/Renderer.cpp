@@ -18,6 +18,7 @@
 #include "ModelLoading.h"
 #include "Primitive.h"
 #include "RaytracePass.h"
+#include "Scene.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
 #include "Utils.h"
@@ -32,15 +33,6 @@
 #endif
 
 using namespace Microsoft::WRL;
-
-struct ObjectConstants
-{
-	DirectX::XMFLOAT4X4 ViewProj = Math::Identity4x4();
-	DirectX::XMFLOAT4X4 View = Math::Identity4x4();
-	DirectX::XMFLOAT4X4 Projection = Math::Identity4x4();
-	DirectX::XMFLOAT4X4 ViewInverse = Math::Identity4x4();
-	DirectX::XMFLOAT4X4 ProjectionInverse = Math::Identity4x4();
-};
 
 auto& resourceManager = ResourceManager::Get();
 
@@ -91,7 +83,8 @@ void Renderer::Initialize()
 	CreateDescriptorHeaps();
 	CreateWorldProjCBV();
 
-	auto idk = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb"));
+	m_scene = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb"));
+	m_scene->PrintDebugInfo();
 	
 	CreateRasterizationRootSignature();
 
@@ -150,6 +143,15 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	SimpleMath::Matrix projection = XMLoadFloat4x4(&m_camera->GetProjectionMatrix());
 	
 	XMVECTOR det;
+
+	struct ObjectConstants
+	{
+		XMFLOAT4X4 ViewProj = Math::Identity4x4();
+		XMFLOAT4X4 View = Math::Identity4x4();
+		XMFLOAT4X4 Projection = Math::Identity4x4();
+		XMFLOAT4X4 ViewInverse = Math::Identity4x4();
+		XMFLOAT4X4 ProjectionInverse = Math::Identity4x4();
+	};
 	
 	ObjectConstants constants;
 	XMStoreFloat4x4(&constants.ViewProj, XMMatrixTranspose(viewProjection));
@@ -159,12 +161,6 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	XMStoreFloat4x4(&constants.ProjectionInverse, XMMatrixInverse(&det, projection));
 	
 	memcpy(&m_mappedData[0], &constants, sizeof(constants));
-
-	XMMATRIX modelTranslation = XMMatrixTranslation(0.0f, 0.0f + totalTime, 0.0f);
-	XMFLOAT4X4 model;
-	XMStoreFloat4x4(&model, XMMatrixTranspose(modelTranslation));
-
-	memcpy(&m_modelMappedData[0], &model, sizeof(model));
 
 	m_raytracePass->Update(view, viewProj);
 }
@@ -217,21 +213,28 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 	m_d3d12CommandList->SetGraphicsRootSignature(m_rootSignature.Get());
 
+
 	if (m_rasterize)
 	{
-		for (const auto& primitive : m_primitives)
+		int index = 0;
+		for (const auto& model : m_scene->GetModels())
 		{
-			auto vertexBuffer = primitive->GetVertexBuffer();
-			auto indexBuffer = primitive->GetIndexBuffer();
-		
-			m_d3d12CommandList->IASetVertexBuffers(0, 1, &vertexBuffer->GetVertexBufferView());
-			m_d3d12CommandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
-			m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    
-			m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+			m_d3d12CommandList->SetGraphicsRootConstantBufferView(1, model->m_modelWorldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress());
+			
+			for (const auto& primitive : model->GetMeshes())
+			{
+				auto vertexBuffer = primitive->GetVertexBuffer();
+				auto indexBuffer = primitive->GetIndexBuffer();
+	
+				m_d3d12CommandList->IASetVertexBuffers(0, 1, &vertexBuffer->GetVertexBufferView());
+				m_d3d12CommandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
+				m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-			// Assume first index and vertex are 0 ( buffers are only for one object )
-			m_d3d12CommandList->DrawIndexedInstanced(indexBuffer->GetIndexCount(), 1, 0, 0, 0);
+				m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+				// Assume first index and vertex are 0 ( buffers are only for one object )
+				m_d3d12CommandList->DrawIndexedInstanced(indexBuffer->GetIndexCount(), 1, 0, 0, 0);
+			}
 		}
 	}
 	else
@@ -273,8 +276,8 @@ void Renderer::CleanUp()
 	ImGui_ImplWin32_Shutdown();
 	ImGui::DestroyContext();
 	
-	m_constantBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
-	m_modelBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
+	m_projectionMatrixConstantBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
+	//m_modelIndexConstantBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
 }
 
 void Renderer::OnResize()
@@ -588,13 +591,13 @@ void Renderer::CreateWorldProjCBV()
 		nullptr,
 		IID_PPV_ARGS(&cbvUav));
 
-	m_constantBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, cbvUav);
-	m_constantBuffer->SetResourceName(L"Camera and World Proj CBV Resource");
+	m_projectionMatrixConstantBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, cbvUav);
+	m_projectionMatrixConstantBuffer->SetResourceName(L"Camera and World Proj CBV Resource");
 	
-	ThrowIfFailed(m_constantBuffer->GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData)));
+	ThrowIfFailed(m_projectionMatrixConstantBuffer->GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData)));
 	
 	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-	cbvDesc.BufferLocation = m_constantBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+	cbvDesc.BufferLocation = m_projectionMatrixConstantBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
 	cbvDesc.SizeInBytes = Align(256ULL * 5, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
 
 	auto descriptorDesc = m_srvCbvUavDescriptorHeap->GetDesc();
@@ -605,33 +608,24 @@ void Renderer::CreateWorldProjCBV()
 	
 	m_d3d12Device->CreateConstantBufferView(&cbvDesc, cbvHandle);
 
-	ComPtr<ID3D12Resource> modelBuffer;
-
-	m_d3d12Device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(256),
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(&modelBuffer));
-
-	m_modelBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, modelBuffer);
-	m_modelBuffer->SetResourceName(L"Model CBV Resource");
-	
-	ThrowIfFailed(m_modelBuffer->GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(&m_modelMappedData)));
-
-	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc2;
-	cbvDesc2.BufferLocation = m_modelBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
-	cbvDesc2.SizeInBytes = Align(256ULL, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-
-	cbvHandle.ptr += 3 * increment;
-
-	m_d3d12Device->CreateConstantBufferView(&cbvDesc2, cbvHandle);
+	// ComPtr<ID3D12Resource> modelIndexCBVResource;
+	// m_d3d12Device->CreateCommittedResource(
+	// 	&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
+	// 	D3D12_HEAP_FLAG_NONE,
+	// 	&CD3DX12_RESOURCE_DESC::Buffer(256),
+	// 	D3D12_RESOURCE_STATE_GENERIC_READ,
+	// 	nullptr,
+	// 	IID_PPV_ARGS(&modelIndexCBVResource));
+	//
+	// m_modelIndexConstantBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, modelIndexCBVResource);
+	// m_modelIndexConstantBuffer->SetResourceName(L"Model Index CBV Resource");
+	//
+	// ThrowIfFailed(m_modelIndexConstantBuffer->GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(&m_modelData)));
 }
 
 void Renderer::CreateRasterizationRootSignature()
 {
-	CD3DX12_ROOT_PARAMETER rootParameters[1];
+	CD3DX12_ROOT_PARAMETER rootParameters[2];
 	
 	D3D12_DESCRIPTOR_RANGE cbvRange;
 	cbvRange.BaseShaderRegister = 0;
@@ -655,7 +649,7 @@ void Renderer::CreateRasterizationRootSignature()
 	tlasRange.OffsetInDescriptorsFromTableStart = 3;
 	
 	D3D12_DESCRIPTOR_RANGE cbvRange2;
-	cbvRange2.BaseShaderRegister = 1;
+	cbvRange2.BaseShaderRegister = 2;
 	cbvRange2.NumDescriptors = Constants::Graphics::MAX_OBJECTS;
 	cbvRange2.RegisterSpace = 0;
 	cbvRange2.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
@@ -664,9 +658,10 @@ void Renderer::CreateRasterizationRootSignature()
 	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, cbvRange2};
 	
 	rootParameters[0].InitAsDescriptorTable(4, ranges);
+	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer
 
 	CD3DX12_ROOT_SIGNATURE_DESC desc = {};
-	desc.NumParameters = 1;
+	desc.NumParameters = 2;
 	desc.pParameters = rootParameters;
 	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
@@ -1027,19 +1022,21 @@ std::shared_ptr<Model> Renderer::InstantiateModel()
 	auto constantBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, buffer);
 	constantBuffer->SetResourceName(L"Model CBV Resource");
 
-	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-	cbvDesc.BufferLocation = constantBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
-	cbvDesc.SizeInBytes = Align(256ULL, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-
-	auto descriptorDesc = m_srvCbvUavDescriptorHeap->GetDesc();
-	auto increment = m_d3d12Device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
+	//TODO: Remove code for CBVs in descriptor heap. Model CVs will be passed as an inline descriptor
 	
-	D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle;
-	cbvHandle.ptr = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr;
-	cbvHandle.ptr += Constants::Graphics::NUM_BASE_DESCRIPTORS * increment + increment; // The model CBVs start after the base descriptors TODO: REMOVE +1!!! ITS ONLY FOR TESTING WHEN CBVs ARE SETUP LEGACY WAY
-	cbvHandle.ptr += m_currentModelCBVIndex++ * increment;
-	
-	m_d3d12Device->CreateConstantBufferView(&cbvDesc, cbvHandle);
+	// D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
+	// cbvDesc.BufferLocation = constantBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+	// cbvDesc.SizeInBytes = Align(256ULL, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+	//
+	// auto descriptorDesc = m_srvCbvUavDescriptorHeap->GetDesc();
+	// auto increment = m_d3d12Device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
+	//
+	// D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle;
+	// cbvHandle.ptr = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr;
+	// cbvHandle.ptr += Constants::Graphics::NUM_BASE_DESCRIPTORS * increment; // The model CBVs start after the base descriptors
+	// cbvHandle.ptr += m_currentModelCBVIndex++ * increment;
+	//
+	// m_d3d12Device->CreateConstantBufferView(&cbvDesc, cbvHandle);
 
 	auto model = std::make_shared<Model>();
 	model->m_modelWorldMatrixBuffer = constantBuffer;
