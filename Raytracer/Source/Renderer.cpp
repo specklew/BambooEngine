@@ -215,6 +215,9 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	{
 		for (const auto& model : m_scene->GetModels())
 		{
+			auto gpuAddress = model->m_modelWorldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+			m_d3d12CommandList->SetGraphicsRootConstantBufferView(1, gpuAddress);
+			
 			for (const auto& primitive : model->GetMeshes())
 			{
 				auto vertexBuffer = primitive->GetVertexBuffer();
@@ -225,7 +228,6 @@ void Renderer::Render(double elapsedTime, double totalTime)
 				m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 				m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-				m_d3d12CommandList->SetGraphicsRootConstantBufferView(1, model->m_modelWorldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress());
 				
 				// Assume first index and vertex are 0 ( buffers are only for one object )
 				m_d3d12CommandList->DrawIndexedInstanced(indexBuffer->GetIndexCount(), 1, 0, 0, 0);
@@ -272,7 +274,6 @@ void Renderer::CleanUp()
 	ImGui::DestroyContext();
 	
 	m_projectionMatrixConstantBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
-	//m_modelIndexConstantBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
 }
 
 void Renderer::OnResize()

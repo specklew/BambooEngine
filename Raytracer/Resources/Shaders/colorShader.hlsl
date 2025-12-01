@@ -27,12 +27,15 @@ struct VertexOut
 VertexOut vertex(VertexIn vin)
 {
     VertexOut vout;
-	
-    // Transform to world space.
-    float4 posW = mul(float4(vin.PosL, 1.0f), world);
     
+    // Transform to world space.
+
+    // TODO: Something must not be right here. The multiplication should be reversed? (curr: world * posL, should it be posL * world)
+    float4 posL = float4(vin.PosL, 1.0f);
+    vout.PosH = mul(world, posL);
+
     // Transform to homogeneous clip space.
-    vout.PosH = mul(posW, viewProj);
+    vout.PosH = mul(vout.PosH, viewProj);
     // Just pass vertex color into the pixel shader.
     //vout.Color = vin.Color;
     
