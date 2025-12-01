@@ -7,6 +7,7 @@ Camera::Camera(DirectX::XMFLOAT3 position, DirectX::XMFLOAT4 rotation) :
     m_position(position),
     m_rotation(rotation)
 {
+    UpdateMatrices();
 }
 
 void Camera::SetPosition(DirectX::XMFLOAT3 position)
@@ -18,6 +19,12 @@ void Camera::SetPosition(DirectX::XMFLOAT3 position)
 void Camera::SetRotation(DirectX::XMFLOAT4 rotation)
 {
     m_rotation = rotation;
+
+    // TODO: remove roll with quaternions properly
+    Vector3 euler = m_rotation.ToEuler();
+    euler.z = 0;
+    m_rotation = Quaternion::CreateFromYawPitchRoll(euler.y, euler.x, euler.z);
+    
     UpdateMatrices();
 }
 

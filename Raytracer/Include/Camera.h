@@ -4,8 +4,7 @@
 class Camera
 {
 public:
-    Camera() = default;
-    Camera(DirectX::XMFLOAT3 position, DirectX::XMFLOAT4 rotation);
+    Camera(DirectX::XMFLOAT3 position = DirectX::XMFLOAT3{0.0f, 0.0f, -10.0f}, DirectX::XMFLOAT4 rotation = DirectX::SimpleMath::Quaternion::Identity);
 
     void SetPosition(DirectX::XMFLOAT3 position);
     void SetRotation(DirectX::XMFLOAT4 rotation);
@@ -40,10 +39,10 @@ private:
 
     float m_fovYRadians = (DirectX::XM_PI / 180) * 60;
     float m_aspectRatio = 16.0f / 9.0f;
-    float m_nearZ = 0.1f;
+    float m_nearZ = 0.01f;
     float m_farZ = 1000.0f;
 
-    float m_speed = 10.0f;
+    float m_speed = 3.0f;
     
     DirectX::XMFLOAT4X4 m_viewMatrix = {};
     DirectX::XMFLOAT4X4 m_projectionMatrix = {};
