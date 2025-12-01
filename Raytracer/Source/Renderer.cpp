@@ -3,11 +3,9 @@
 #include "Renderer.h"
 
 #include <algorithm>
-#include <chrono>
 
 #include "AccelerationStructures.h"
 #include "Camera.h"
-#include "DescriptorHeapAllocator.h"
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
 #include "backends/imgui_impl_win32.h"
@@ -42,12 +40,6 @@ void Renderer::Initialize()
 
 	m_camera = std::make_shared<Camera>();
 	m_keyboardTracker = std::make_shared<DirectX::Keyboard::KeyboardStateTracker>();
-	
-	auto psh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.ps.shader"));
-	m_pixelShader = resourceManager.shaders.GetResource(psh).bytecode;
-	auto vsh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.vs.shader"));
-	m_vertexShader = resourceManager.shaders.GetResource(vsh).bytecode;
-
 	
 	SetupDeviceAndDebug();
 	CheckTearingSupport();
@@ -133,6 +125,11 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	{
 		m_camera->AddPosition(m_camera->GetRight() * static_cast<float>(elapsedTime) * -m_camera->GetSpeed());
 	}
+
+	if (key_state.F2)
+	{
+		OnShaderReload();
+	}
 	
 	using namespace DirectX;
 
@@ -216,11 +213,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	if (m_rasterize)
 	{
-		int index = 0;
 		for (const auto& model : m_scene->GetModels())
 		{
-			m_d3d12CommandList->SetGraphicsRootConstantBufferView(1, model->m_modelWorldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress());
-			
 			for (const auto& primitive : model->GetMeshes())
 			{
 				auto vertexBuffer = primitive->GetVertexBuffer();
@@ -231,7 +225,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 				m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 				m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-
+				m_d3d12CommandList->SetGraphicsRootConstantBufferView(1, model->m_modelWorldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress());
+				
 				// Assume first index and vertex are 0 ( buffers are only for one object )
 				m_d3d12CommandList->DrawIndexedInstanced(indexBuffer->GetIndexCount(), 1, 0, 0, 0);
 			}
@@ -689,6 +684,10 @@ void Renderer::CreateRasterizationRootSignature()
 
 void Renderer::CreatePipelineState()
 {
+	auto psh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.ps.shader"));
+	m_pixelShader = resourceManager.shaders.GetResource(psh).bytecode;
+	auto vsh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.vs.shader"));
+	m_vertexShader = resourceManager.shaders.GetResource(vsh).bytecode;
 	
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
 	desc.VS = {static_cast<BYTE*>(m_vertexShader->GetBufferPointer()), m_vertexShader->GetBufferSize()};
@@ -710,8 +709,10 @@ void Renderer::CreatePipelineState()
 	desc.SampleDesc.Quality = 0;
 	desc.DSVFormat = m_depthStencilFormat;
 
-	ThrowIfFailed(m_d3d12Device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_pipelineStateObject)));
-	m_pipelineStateObject->SetName(L"Default Pipeline State");
+	ComPtr<ID3D12PipelineState> pso;
+	ThrowIfFailed(m_d3d12Device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pso)));
+	pso->SetName(L"Default Pipeline State");
+	m_pipelineStateObject = pso;
 }
 
 void Renderer::SetViewport()
@@ -857,6 +858,25 @@ void Renderer::RenderImGui()
 	ImGui::ShowDemoWindow();
 
 	ImGui::Render();
+}
+
+void Renderer::OnShaderReload()
+{
+	spdlog::info("Reloading shaders...");
+	ResourceManager::Get().RecompileAllShaders();
+	
+	ThrowIfFailed(m_d3d12CommandList->Close());
+	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+
+	FlushCommandQueue();
+	
+	spdlog::info("Creating pipeline state for new shaders...");
+	CreatePipelineState();
+
+	FlushCommandQueue();
+	ResetCommandList();
+	spdlog::info("Shaders reloaded successfully.");
 }
 
 void Renderer::ToggleRasterization()

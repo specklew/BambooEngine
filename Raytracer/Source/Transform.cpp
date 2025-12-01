@@ -11,12 +11,12 @@ Transform::Transform(DirectX::SimpleMath::Vector3 position, DirectX::SimpleMath:
 DirectX::SimpleMath::Matrix Transform::GetMatrix() const
 {
     using DirectX::SimpleMath::Matrix;
-    
-    Matrix m;
 
-    m.Translation(position);
-    m += Matrix::CreateFromQuaternion(rotation);
-    m += Matrix::CreateScale(scale);
+    // Note: The order of transformations is Scale -> Rotate -> Translate
+    Matrix m = Matrix::Identity;
+    m *= Matrix::CreateScale(scale);
+    m *= Matrix::CreateFromQuaternion(rotation);
+    m *= Matrix::CreateTranslation(position * 10); // Scale up the position by a factor of 10
 
     return m;
 }

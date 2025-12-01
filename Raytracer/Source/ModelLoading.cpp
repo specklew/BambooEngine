@@ -352,6 +352,10 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
             float z = gltf_node.scale[2];
             current_node->SetScale({x, y, z});
         }
+        else
+        {
+            current_node->SetScale({1.0f, 1.0f, 1.0f});
+        }
     }
     // END - TODO
 

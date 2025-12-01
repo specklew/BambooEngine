@@ -75,6 +75,8 @@ private:
 
 	void InitializeImGui();
 	void RenderImGui();
+
+	void OnShaderReload();
 	
 	std::shared_ptr<RaytracePass> m_raytracePass;
 	std::shared_ptr<AccelerationStructures> m_accelerationStructures;
@@ -118,7 +120,6 @@ private:
 	std::shared_ptr<ConstantBuffer> m_modelIndexConstantBuffer;
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvCbvUavDescriptorHeap;
 	BYTE* m_mappedData = nullptr;
-	BYTE* m_modelData = nullptr;
 
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
 
