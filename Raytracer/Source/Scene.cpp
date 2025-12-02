@@ -38,3 +38,8 @@ void Scene::PrintDebugInfo()
     }
 #endif
 }
+
+void Scene::AddFallbackModel(const std::shared_ptr<Model>& model)
+{
+    m_models.push_back(model);
+}

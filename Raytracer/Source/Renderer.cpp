@@ -75,7 +75,7 @@ void Renderer::Initialize()
 	CreateDescriptorHeaps();
 	CreateWorldProjCBV();
 
-	m_scene = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb"));
+	m_scene = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb")); //resources/models/sponza/gltf/sponza.gltf
 	m_scene->PrintDebugInfo();
 	
 	CreateRasterizationRootSignature();
@@ -1061,6 +1061,11 @@ std::shared_ptr<Model> Renderer::InstantiateModel()
 
 	auto model = std::make_shared<Model>();
 	model->m_modelWorldMatrixBuffer = constantBuffer;
+
+	auto matrix = DirectX::XMMatrixIdentity();
+	DirectX::XMFLOAT4X4 modelWorldMatrix;
+	DirectX::XMStoreFloat4x4(&modelWorldMatrix, matrix);
+	model->UpdateConstantBuffer(modelWorldMatrix);
 
 	return model;
 }

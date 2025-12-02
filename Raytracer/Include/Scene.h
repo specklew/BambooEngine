@@ -11,6 +11,7 @@ public:
     [[nodiscard]] std::shared_ptr<SceneNode> GetRoot() const { return m_root; }
     [[nodiscard]] const std::vector<std::shared_ptr<Model>>& GetModels() const { return m_models; }
     void PrintDebugInfo();
+    void AddFallbackModel(const std::shared_ptr<Model>& model);
     
 private:
     friend class SceneNode;

@@ -9,7 +9,7 @@ void SceneNode::AddChild(const std::shared_ptr<SceneNode>& child)
     assert(child && "Child node cannot be null");
     assert(m_scene && "SceneNode must belong to a scene before adding children");
     child->m_scene = m_scene;
-    child->m_parent = m_parent;
+    child->m_parent = shared_from_this();
     m_children.push_back(child);
 }
 
@@ -54,5 +54,16 @@ SceneNode::SceneNode(const std::shared_ptr<SceneNode>& parent, const Transform& 
 void SceneNode::UpdateModelConstantBuffer() const
 {
     if (!m_model) return;
-    m_model->UpdateConstantBuffer(m_transform.GetMatrix4x4());
+
+    const DirectX::XMFLOAT4X4 model_matrix = TraverseParentMatrices();
+    m_model->UpdateConstantBuffer(model_matrix);
+}
+
+DirectX::SimpleMath::Matrix SceneNode::TraverseParentMatrices() const
+{
+    if (m_parent)
+    {
+        return m_transform.GetMatrix() * m_parent->TraverseParentMatrices();
+    }
+    return m_transform.GetMatrix();
 }

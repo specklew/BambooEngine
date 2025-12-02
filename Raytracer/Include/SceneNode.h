@@ -3,7 +3,7 @@
 
 class Model;
 
-class SceneNode
+class SceneNode : public std::enable_shared_from_this<SceneNode>
 {
 public:
     explicit SceneNode(const std::shared_ptr<SceneNode>& parent = nullptr, const Transform& transform = Transform());
@@ -28,6 +28,7 @@ private:
     friend class Scene;
 
     void UpdateModelConstantBuffer() const;
+    DirectX::SimpleMath::Matrix TraverseParentMatrices() const;
 
     std::shared_ptr<Scene> m_scene;
     std::shared_ptr<SceneNode> m_parent;

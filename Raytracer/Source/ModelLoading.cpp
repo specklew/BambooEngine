@@ -285,6 +285,76 @@ std::vector<std::shared_ptr<Primitive>> ModelLoading::LoadFullModel(Renderer& re
     return primitives;
 }
 
+static DirectX::SimpleMath::Vector3 ReadNodePosition(const tinygltf::Node& node)
+{
+    if (node.translation.size() == 3)
+    {
+        return {
+            static_cast<float>(node.translation[0]),
+            static_cast<float>(node.translation[1]),
+            static_cast<float>(node.translation[2])
+        };
+    }
+    return {0.0f, 0.0f, 0.0f};
+}
+
+static DirectX::SimpleMath::Quaternion ReadNodeRotation(const tinygltf::Node& node)
+{
+    if (node.rotation.size() == 4)
+    {
+        return {
+            static_cast<float>(node.rotation[0]),
+            static_cast<float>(node.rotation[1]),
+            static_cast<float>(node.rotation[2]),
+            static_cast<float>(node.rotation[3])
+        };
+    }
+    return {0.0f, 0.0f, 0.0f, 1.0f};
+}
+
+static DirectX::SimpleMath::Vector3 ReadNodeScale(const tinygltf::Node& node)
+{
+    if (node.scale.size() == 3)
+    {
+        return {
+            static_cast<float>(node.scale[0]),
+            static_cast<float>(node.scale[1]),
+            static_cast<float>(node.scale[2])
+        };
+    }
+    return {1.0f, 1.0f, 1.0f};
+}
+
+static void TraverseNode(const tinygltf::Model& model, int nodeIndex, std::shared_ptr<SceneNode> parentNode, Renderer& renderer)
+{
+    const tinygltf::Node& gltf_node = model.nodes[nodeIndex];
+    auto current_node = std::make_shared<SceneNode>();
+    parentNode->AddChild(current_node);
+    
+    if (gltf_node.mesh != 0)
+    {
+        auto node_mesh = model.meshes[gltf_node.mesh];
+        auto current_model = renderer.InstantiateModel();
+        
+        for (auto& primitive : node_mesh.primitives)
+        {
+            auto prim = LoadPrimitive(renderer, model, primitive);
+            current_model->AddMesh(prim);
+        }
+
+        current_node->AddModel(current_model);
+    }
+
+    current_node->SetPosition(ReadNodePosition(gltf_node));
+    current_node->SetRotation(ReadNodeRotation(gltf_node));
+    current_node->SetScale(ReadNodeScale(gltf_node));
+
+    for (auto child_index : gltf_node.children)
+    {
+        TraverseNode(model, child_index, current_node, renderer);
+    }
+}
+
 std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId& assetId)
 {
     tinygltf::Model model;
@@ -305,58 +375,33 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
     // TODO: Make this part recursive and extracted!!
     for (auto gltf_node_index : gltf_scene.nodes)
     {
-        std::shared_ptr<SceneNode> current_node = std::make_shared<SceneNode>();
-        sceneRoot->AddChild(current_node);
-        
-        auto gltf_node = model.nodes[gltf_node_index];
+        TraverseNode(model, gltf_node_index, sceneRoot, renderer);
+    }
 
-        if (gltf_node.mesh != 0)
+    if (scene->GetModels().empty())
+    {
+        if (model.nodes.size() == 1)
         {
-            auto node_mesh = model.meshes[gltf_node.mesh];
-            auto current_model = renderer.InstantiateModel();
-            
-            for (auto& primitive : node_mesh.primitives)
+            scene->GetRoot()->SetPosition(ReadNodePosition(model.nodes[0]));
+            scene->GetRoot()->SetRotation(ReadNodeRotation(model.nodes[0]));
+            scene->GetRoot()->SetScale(ReadNodeScale(model.nodes[0]));
+        }
+        
+        for (auto gltfModel : model.meshes)
+        {
+            for (auto& primitive : gltfModel.primitives)
             {
                 auto prim = LoadPrimitive(renderer, model, primitive);
-                current_model->AddMesh(prim);
+                auto fallback_model = renderer.InstantiateModel();
+                fallback_model->AddMesh(prim);
+
+                fallback_model->UpdateConstantBuffer(scene->GetRoot()->GetTransform().GetMatrix4x4());
+                
+                scene->AddFallbackModel(fallback_model);
             }
-
-            current_node->AddModel(current_model);
-        }
-
-        if (gltf_node.translation.size() > 0)
-        {
-            // May cause errors, but I'm not changing float precision to double.
-            float x = gltf_node.translation[0];
-            float y = gltf_node.translation[1];
-            float z = gltf_node.translation[2];
-
-            current_node->SetPosition({x, y, z});
-        }
-
-        if (gltf_node.rotation.size() > 0)
-        {
-
-            float x = gltf_node.rotation[0];
-            float y = gltf_node.rotation[1];
-            float z = gltf_node.rotation[2];
-            float w = gltf_node.rotation[3];
-            current_node->SetRotation({x, y, z, w});
-        }
-
-        if (gltf_node.scale.size() > 0)
-        {
-
-            float x = gltf_node.scale[0];
-            float y = gltf_node.scale[1];
-            float z = gltf_node.scale[2];
-            current_node->SetScale({x, y, z});
-        }
-        else
-        {
-            current_node->SetScale({1.0f, 1.0f, 1.0f});
         }
     }
+    
     // END - TODO
 
     return scene;
