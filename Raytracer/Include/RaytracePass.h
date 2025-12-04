@@ -58,12 +58,15 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_outputResource;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvUavHeap;
-
-    std::shared_ptr<nv_helpers_dx12::ShaderBindingTableGenerator> m_shaderBindingTableGenerator = {};
+    
     Microsoft::WRL::ComPtr<ID3D12Resource> m_shaderBindingTableStorage;
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbDescriptorHeap;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBuffer;
+
+    size_t m_rayGenEntrySize;
+    size_t m_missEntrySize;
+    size_t m_hitGroupEntrySize;
 };
