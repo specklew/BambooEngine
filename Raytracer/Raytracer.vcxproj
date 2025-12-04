@@ -289,10 +289,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Resources\Shaders\colorShader.hlsl" />
-    <None Include="Resources\Shaders\Raytracing\Common.hlsl" />
-    <None Include="Resources\Shaders\Raytracing\ClosestHit.hlsl" />
-    <None Include="Resources\Shaders\Raytracing\Miss.hlsl" />
-    <None Include="Resources\Shaders\Raytracing\RayGen.hlsl" />
+    <None Include="Resources\Shaders\raytracing.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
     <ClCompile Include="Source\Camera.cpp" />
@@ -377,6 +374,9 @@
     <Content Include="Resources\Models\Avocado\rm.dds" />
     <Content Include="Resources\Shaders\colorShader.ps.shader" />
     <Content Include="Resources\Shaders\colorShader.vs.shader" />
+    <Content Include="Resources\Shaders\raytracing.ch.shader" />
+    <Content Include="Resources\Shaders\raytracing.ms.shader" />
+    <Content Include="Resources\Shaders\raytracing.rg.shader" />
     <Content Include="Vendor\DXC\bin\dxcompiler.dll" />
     <Content Include="Vendor\DXC\bin\dxil.dll" />
     <Content Include="Vendor\DXC\lib\dxcompiler.lib" />

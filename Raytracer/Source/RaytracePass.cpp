@@ -5,7 +5,7 @@
 
 #include "AccelerationStructures.h"
 #include "DXRHelper.h"
-#include "RootSignatureGenerator.h"
+#include "Shader.h"
 #include "ShaderBindingTableGenerator.h"
 #include "Window.h"
 #include "ResourceManager/ResourceManager.h"
@@ -130,15 +130,18 @@ void RaytracePass::OnResize()
 void RaytracePass::InitializeRaytracingPipeline()
 {
     spdlog::debug("Initializing raytracing pipeline");
-    //nv_helpers_dx12::RayTracingPipelineGenerator pipeline(m_device.Get());
     CD3DX12_STATE_OBJECT_DESC raytracingPipeline{ D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE };
 
     auto rm = ResourceManager::Get();
 
     spdlog::debug("Loading raytracing shaders");
-    m_rayGenShaderBlob = nv_helpers_dx12::CompileShaderLibrary(L"resources/shaders/raytracing/raygen.hlsl"); 
-    m_missShaderBlob = nv_helpers_dx12::CompileShaderLibrary(L"resources/shaders/raytracing/miss.hlsl");
-    m_hitShaderBlob = nv_helpers_dx12::CompileShaderLibrary(L"resources/shaders/raytracing/closesthit.hlsl");
+
+    auto rayGenShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.rg.shader"));
+    m_rayGenShaderBlob = rm.shaders.GetResource(rayGenShader).bytecode;
+    auto missShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.ms.shader"));
+    m_missShaderBlob = rm.shaders.GetResource(missShader).bytecode;
+    auto hitShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.ch.shader"));
+    m_hitShaderBlob = rm.shaders.GetResource(hitShader).bytecode;
 
     // Creating raytracing pipeline state object
     // It is consisting of several subobjects, each defining a part of the pipeline
@@ -346,7 +349,7 @@ void RaytracePass::CreateRaytracingOutputBuffer()
 
     spdlog::debug("Creating commited raytracing output buffer resource");
     ThrowIfFailed(m_device->CreateCommittedResource(
-        &nv_helpers_dx12::kDefaultHeapProps,
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
         D3D12_HEAP_FLAG_NONE,
         &outputBufferDesc,
         D3D12_RESOURCE_STATE_COPY_SOURCE,
@@ -393,17 +396,28 @@ void RaytracePass::CreateShaderBindingTable()
     m_shaderBindingTableGenerator->AddMissProgram(m_missShaderName, {});
     m_shaderBindingTableGenerator->AddHitGroup(m_hitGroupName, {});
     
-    /*reinterpret_cast<void*>(m_vertexBuffer->GetGPUVirtualAddress()), reinterpret_cast<void*>(m_indexBuffer->GetGPUVirtualAddress())*/
-    
     uint32_t sbtSize = m_shaderBindingTableGenerator->ComputeSBTSize();
 
     spdlog::debug("Creating shader binding table resource");
-    m_shaderBindingTableStorage = nv_helpers_dx12::CreateBuffer(
-        m_device.Get(),
-        sbtSize,
-        D3D12_RESOURCE_FLAG_NONE,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nv_helpers_dx12::kUploadHeapProps);
+
+    D3D12_RESOURCE_DESC bufDesc;
+    bufDesc.Alignment = 0;
+    bufDesc.DepthOrArraySize = 1;
+    bufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    bufDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+    bufDesc.Format = DXGI_FORMAT_UNKNOWN;
+    bufDesc.Height = 1;
+    bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    bufDesc.MipLevels = 1;
+    bufDesc.SampleDesc.Count = 1;
+    bufDesc.SampleDesc.Quality = 0;
+    bufDesc.Width = sbtSize;
+    
+    ID3D12Resource* pBuffer;
+    ThrowIfFailed(m_device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &bufDesc,
+                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&pBuffer)));
+    
+    m_shaderBindingTableStorage = pBuffer;
     
     if (!m_shaderBindingTableStorage)
     {
