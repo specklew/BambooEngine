@@ -41,7 +41,10 @@ Resource::Resource(const Microsoft::WRL::ComPtr<ID3D12Device5>& device, const Mi
         m_clearValue = std::make_unique<D3D12_CLEAR_VALUE>(*clearValue);
     }
 
-    QueryFeatureSupport();
+    if (resource)
+    {
+        QueryFeatureSupport();
+    }
 }
 
 void Resource::QueryFeatureSupport()

@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+class ShaderBindingTable;
+
 namespace nv_helpers_dx12
 {
     class ShaderBindingTableGenerator;
@@ -58,15 +60,11 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_outputResource;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvUavHeap;
-    
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_shaderBindingTableStorage;
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbDescriptorHeap;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBuffer;
 
-    size_t m_rayGenEntrySize;
-    size_t m_missEntrySize;
-    size_t m_hitGroupEntrySize;
+    std::shared_ptr<ShaderBindingTable> m_shaderBindingTable;
 };

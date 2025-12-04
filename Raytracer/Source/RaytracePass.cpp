@@ -9,6 +9,7 @@
 #include "ShaderBindingTableGenerator.h"
 #include "Window.h"
 #include "ResourceManager/ResourceManager.h"
+#include "Resources/ShaderBindingTable.h"
 
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
@@ -53,30 +54,17 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
     }
 
     D3D12_DISPATCH_RAYS_DESC desc = {};
-
-    uint32_t rayGenerationSelectionSizeInBytes = m_rayGenEntrySize * 1; // One ray generation shader so entry * shader num = entry * 1 TODO: Create a structure for SBT buffer + description
-    desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTableStorage->GetGPUVirtualAddress();
-    desc.RayGenerationShaderRecord.SizeInBytes = rayGenerationSelectionSizeInBytes;
     
-    uint32_t missSelectionSizeInBytes = m_missEntrySize * 1; // One miss shader so entry * shader num = entry * 1
+    desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();
+    desc.RayGenerationShaderRecord.SizeInBytes = m_shaderBindingTable->GetRayGenEntrySize();
+    
     desc.MissShaderTable.StartAddress = desc.RayGenerationShaderRecord.StartAddress + desc.RayGenerationShaderRecord.SizeInBytes;
-    desc.MissShaderTable.StrideInBytes = missSelectionSizeInBytes;
-    desc.MissShaderTable.SizeInBytes = m_missEntrySize;
-
-    // !!! ALL OF THIS SHOULD HAPPEN IN THE SBT GENERATOR !!!
+    desc.MissShaderTable.StrideInBytes = m_shaderBindingTable->GetMissSectionSize();
+    desc.MissShaderTable.SizeInBytes = m_shaderBindingTable->GetMissEntrySize();
     
-    // Start addresses must be aligned to D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT
-    // and strides (basically shader record sizes) must be aligned to D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT
-    //desc.MissShaderTable.StartAddress = Align(desc.MissShaderTable.StartAddress, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-    //desc.MissShaderTable.StrideInBytes = Align(desc.MissShaderTable.StrideInBytes, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT); 
-    
-    uint32_t hitGroupsSelectionSize = m_hitGroupEntrySize * 1; // One shader is in the hit group so entry * shader num = entry * 1
     desc.HitGroupTable.StartAddress = desc.MissShaderTable.StartAddress + desc.MissShaderTable.StrideInBytes;
-    desc.HitGroupTable.StrideInBytes = hitGroupsSelectionSize;
-    desc.HitGroupTable.SizeInBytes = m_hitGroupEntrySize;
-    
-    //desc.HitGroupTable.StartAddress = Align(desc.HitGroupTable.StartAddress, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-    //desc.HitGroupTable.StrideInBytes = Align(desc.HitGroupTable.StrideInBytes, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT); 
+    desc.HitGroupTable.StrideInBytes = m_shaderBindingTable->GetHitSectionSize();
+    desc.HitGroupTable.SizeInBytes = m_shaderBindingTable->GetHitEntrySize();
 
     desc.Width = Window::Get().GetWidth();
     desc.Height = Window::Get().GetHeight();
@@ -386,77 +374,14 @@ void RaytracePass::CreateShaderBindingTable()
     spdlog::info("Creating shader binding table");
     
     D3D12_GPU_DESCRIPTOR_HANDLE srvUavHeapHandle = m_srvUavHeap->GetGPUDescriptorHandleForHeapStart();
-
     void* heapPtr = reinterpret_cast<void*>(srvUavHeapHandle.ptr);
-    std::vector rayGenParameters = {heapPtr};
-    std::vector<void*> missParameters = {};
-    std::vector<void*> hitGroupParameters = {};
-
-    auto idSize = D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT;
-    auto rayGenParamsSize = 8 * rayGenParameters.size();
-    auto missParamsSize = 8 * missParameters.size();
-    auto hitGroupParamsSize = 8 * hitGroupParameters.size();
-
-    m_rayGenEntrySize = Align(idSize + rayGenParamsSize, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-    m_missEntrySize = Align(idSize + missParamsSize, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-    m_hitGroupEntrySize = Align(idSize + hitGroupParamsSize, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
-
-    auto sbtSize = Align(m_rayGenEntrySize + m_missEntrySize + m_hitGroupEntrySize, 256); // Align to match the 256 bytes req for Buffers
     
-    spdlog::info("Creating shader binding table resource");
+    SBTDescriptor sbt_desc = {};
+    sbt_desc.RayGenShaders.push_back({m_rayGenShaderName, {heapPtr}});
+    sbt_desc.MissShaders.push_back({m_missShaderName, {}});
+    sbt_desc.HitShaders.push_back({m_hitGroupName, {}});
 
-    D3D12_RESOURCE_DESC bufDesc;
-    bufDesc.Alignment = 0;
-    bufDesc.DepthOrArraySize = 1;
-    bufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    bufDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-    bufDesc.Format = DXGI_FORMAT_UNKNOWN;
-    bufDesc.Height = 1;
-    bufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    bufDesc.MipLevels = 1;
-    bufDesc.SampleDesc.Count = 1;
-    bufDesc.SampleDesc.Quality = 0;
-    bufDesc.Width = sbtSize;
-    
-    ID3D12Resource* pBuffer;
-    ThrowIfFailed(m_device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &bufDesc,
-                                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&pBuffer)));
-
-    pBuffer->SetName(L"SBT Buffer");
-    m_shaderBindingTableStorage = pBuffer;
-
-    if (!m_shaderBindingTableStorage)
-    {
-        throw std::logic_error("Could not allocate shader binding table resource");
-    }
-    
-    auto rayGenId = m_rtStateObjectProperties->GetShaderIdentifier(m_rayGenShaderName.c_str());
-    auto missId = m_rtStateObjectProperties->GetShaderIdentifier(m_missShaderName.c_str());
-    auto hitGroupId = m_rtStateObjectProperties->GetShaderIdentifier(m_hitGroupName.c_str());
-    
-    if (!rayGenId || !missId || !hitGroupId)
-    {
-        throw std::logic_error("Could not get shader identifiers for SBT");
-    }
-    
-    spdlog::info("Adding shaders to shader binding table");
-
-    BYTE* mappedData;
-    ThrowIfFailed(m_shaderBindingTableStorage->Map(0, nullptr, reinterpret_cast<void**>(&mappedData)));
-    
-    memcpy(mappedData, rayGenId, idSize);
-    memcpy(mappedData + idSize, rayGenParameters.data(), rayGenParamsSize);
-    mappedData += m_rayGenEntrySize;
-    
-    memcpy(mappedData, missId, idSize);
-    memcpy(mappedData + idSize, missParameters.data(), missParamsSize);
-    mappedData += m_missEntrySize;
-
-    memcpy(mappedData, hitGroupId, idSize);
-    memcpy(mappedData + idSize, hitGroupParameters.data(), hitGroupParamsSize);
-    mappedData += m_hitGroupEntrySize;
-
-    m_shaderBindingTableStorage->Unmap(0, nullptr);
+    m_shaderBindingTable = std::make_shared<ShaderBindingTable>(m_device, m_rtStateObjectProperties, sbt_desc);
 
     spdlog::info("SBT Buffer has been populated with SBT entries successfully");
 }

@@ -120,6 +120,7 @@
     <ClInclude Include="Include\Resources\ConstantBuffer.h" />
     <ClInclude Include="Include\Resources\IndexBuffer.h" />
     <ClInclude Include="Include\Resources\Resource.h" />
+    <ClInclude Include="Include\Resources\ShaderBindingTable.h" />
     <ClInclude Include="Include\Resources\VertexBuffer.h" />
     <ClInclude Include="Include\Scene.h" />
     <ClInclude Include="Include\SceneNode.h" />
@@ -290,6 +291,7 @@
   <ItemGroup>
     <None Include="Resources\Shaders\colorShader.hlsl" />
     <None Include="Resources\Shaders\raytracing.hlsl" />
+    <ClCompile Include="Include\Resources\ShaderBindingTable.cpp" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
     <ClCompile Include="Source\Camera.cpp" />

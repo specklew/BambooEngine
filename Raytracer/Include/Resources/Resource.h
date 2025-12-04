@@ -40,7 +40,6 @@ protected:
     D3D12_FEATURE_DATA_FORMAT_SUPPORT m_formatSupport;
     std::unique_ptr<D3D12_CLEAR_VALUE> m_clearValue;
     std::wstring m_resourceName;
-
-private:
+    
     void QueryFeatureSupport();
 };
