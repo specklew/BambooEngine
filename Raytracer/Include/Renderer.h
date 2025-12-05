@@ -6,6 +6,7 @@
 #include "InputElements.h"
 #include "Keyboard.h"
 
+struct AccelerationStructureBuffers;
 class Scene;
 class Model;
 class ConstantBuffer;
@@ -129,6 +130,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipelineStateObject;
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS;
+	std::vector<std::shared_ptr<AccelerationStructureBuffers>> m_BLASBuffers;
 	
 	UINT m_frameIndex = 0;
 	UINT64 m_fenceValue = 0;

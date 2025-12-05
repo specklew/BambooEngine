@@ -790,18 +790,43 @@ void Renderer::SetupAccelerationStructures()
 {
 	spdlog::debug("Setting up acceleration structures");
 	m_accelerationStructures = std::make_shared<AccelerationStructures>();
-
-	auto vertexBuffer = m_primitives[0]->GetVertexBuffer();
-	auto indexBuffer = m_primitives[0]->GetIndexBuffer();
 	
-	AccelerationStructureBuffers bottomLevelBuffers = m_accelerationStructures->CreateBottomLevelAS(
-		m_d3d12Device.Get(),
-		m_d3d12CommandList.Get(),
-		{{vertexBuffer->GetUnderlyingResource(), vertexBuffer->GetVertexCount()}},
-		{{indexBuffer->GetUnderlyingResource(), indexBuffer->GetIndexCount()}});
+	for (auto model : m_scene->GetModels())
+	{
+		std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> vertex_buffers;
+		std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> index_buffers;
 
-	auto instance = std::pair(bottomLevelBuffers.p_result, DirectX::XMMatrixIdentity());
-	m_accelerationStructures->GetInstances().push_back(instance);
+		// TODO: There is duplicated work here. We should iterate over the list of all primitives and then create instances in TLAS over the models.
+		for (auto prim : model->GetMeshes())
+		{
+
+			std::pair<ComPtr<ID3D12Resource>, uint32_t> vertex_pair = {
+				prim->GetVertexBuffer()->GetUnderlyingResource(),
+				prim->GetVertexBuffer()->GetVertexCount()
+			};
+			
+			std::pair<ComPtr<ID3D12Resource>, uint32_t> index_pair = {
+				prim->GetIndexBuffer()->GetUnderlyingResource(),
+				prim->GetIndexBuffer()->GetIndexCount()
+			};
+			
+			vertex_buffers.emplace_back(vertex_pair);
+			index_buffers.emplace_back(index_pair);
+		}
+
+		AccelerationStructureBuffers bottomLevelBuffers = m_accelerationStructures->CreateBottomLevelAS(
+			m_d3d12Device.Get(),
+			m_d3d12CommandList.Get(),
+			vertex_buffers,
+			index_buffers);
+		
+		m_BLASBuffers.emplace_back(std::make_shared<AccelerationStructureBuffers>(bottomLevelBuffers));
+
+		DirectX::XMMATRIX worldMatrix = DirectX::XMLoadFloat4x4(&model->m_modelWorldMatrix);
+		auto instance = std::pair(bottomLevelBuffers.p_result, worldMatrix);
+		m_accelerationStructures->GetInstances().emplace_back(instance);
+	}
+	
 	m_accelerationStructures->CreateTopLevelAS(
 		m_d3d12Device.Get(), m_d3d12CommandList.Get(), m_accelerationStructures->GetInstances(), false); // TODO: handle the instances properly
 
@@ -810,8 +835,6 @@ void Renderer::SetupAccelerationStructures()
 	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
 	FlushCommandQueue();
-
-	m_bottomLevelAS = bottomLevelBuffers.p_result;	// TODO: Store BLAS in the acceleration structure
 }
 
 void Renderer::InitializeImGui()

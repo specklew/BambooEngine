@@ -6,7 +6,6 @@
 #include "AccelerationStructures.h"
 #include "DXRHelper.h"
 #include "Shader.h"
-#include "ShaderBindingTableGenerator.h"
 #include "Window.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Resources/ShaderBindingTable.h"

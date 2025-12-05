@@ -1,12 +1,6 @@
 ﻿#pragma once
 
 class ShaderBindingTable;
-
-namespace nv_helpers_dx12
-{
-    class ShaderBindingTableGenerator;
-}
-
 class AccelerationStructures;
 
 class RaytracePass

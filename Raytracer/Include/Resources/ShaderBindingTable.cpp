@@ -37,7 +37,7 @@ size_t ShaderBindingTable::CalculateEntrySize(std::vector<SBTEntry>& entries)
     }
     
     size_t entry_size = EntryIDSize + max_parameters * sizeof(void*);
-
+    
     entry_size = Align(entry_size, D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT);
 
     return entry_size;
