@@ -325,33 +325,27 @@ static DirectX::SimpleMath::Vector3 ReadNodeScale(const tinygltf::Node& node)
     return {1.0f, 1.0f, 1.0f};
 }
 
-static void TraverseNode(const tinygltf::Model& model, int nodeIndex, std::shared_ptr<SceneNode> parentNode, Renderer& renderer)
+static void TraverseNode(Renderer& renderer, const tinygltf::Model& model, SceneBuilder& sceneBuilder, int nodeIndex, std::shared_ptr<SceneNode> parentNode)
 {
     const tinygltf::Node& gltf_node = model.nodes[nodeIndex];
     auto current_node = std::make_shared<SceneNode>();
-    parentNode->AddChild(current_node);
     
     if (gltf_node.mesh != 0)
     {
-        auto node_mesh = model.meshes[gltf_node.mesh];
-        auto current_model = renderer.InstantiateModel();
-        
-        for (auto& primitive : node_mesh.primitives)
-        {
-            auto prim = LoadPrimitive(renderer, model, primitive);
-            current_model->AddMesh(prim);
-        }
-
-        current_node->AddModel(current_model);
+        auto gameObject = renderer.InstantiateGameObject();
+        sceneBuilder.AddGameObject(gameObject, sceneBuilder.GetModel(gltf_node.mesh));
+        current_node->AddGameObject(gameObject);
     }
 
     current_node->SetPosition(ReadNodePosition(gltf_node));
     current_node->SetRotation(ReadNodeRotation(gltf_node));
     current_node->SetScale(ReadNodeScale(gltf_node));
 
+    sceneBuilder.AddChild(parentNode, current_node);
+    
     for (auto child_index : gltf_node.children)
     {
-        TraverseNode(model, child_index, current_node, renderer);
+        TraverseNode(renderer, model, sceneBuilder, child_index, current_node);
     }
 }
 
@@ -362,47 +356,54 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
 
     assert(succeeded && "Failed to load model");
     assert(model.scenes.size() > 0 && "Model has no scenes!");
-    
-    auto scene = std::make_shared<Scene>();
-    scene->Initialize(); // TODO: I hate this initialization, but shared_from_this needs to be called after something that happens during initialization.
-    auto sceneRoot = scene->GetRoot();
+
+    auto scene_builder = SceneBuilder();
+
+    for (auto gltf_model : model.meshes)
+    {
+        auto current_model = std::make_shared<Model>();
+        for (auto& primitive : gltf_model.primitives)
+        {
+            auto prim = LoadPrimitive(renderer, model, primitive);
+            current_model->AddMesh(prim);
+        }
+        scene_builder.AddModel(current_model);
+    }
     
     auto gltf_scene = model.scenes[model.defaultScene];
 
     spdlog::debug("Scene nodes in glTF scene: {}", gltf_scene.nodes.size());
     spdlog::debug("Model nodes in glTF model: {}", model.nodes.size());
-    
-    // TODO: Make this part recursive and extracted!!
+
     for (auto gltf_node_index : gltf_scene.nodes)
     {
-        TraverseNode(model, gltf_node_index, sceneRoot, renderer);
+        TraverseNode(renderer, model, scene_builder, gltf_node_index, scene_builder.GetRoot());
     }
 
-    if (scene->GetModels().empty())
+    // Fallback behaviour
+    if (scene_builder.GetGameObjects().empty())
     {
         if (model.nodes.size() == 1)
         {
-            scene->GetRoot()->SetPosition(ReadNodePosition(model.nodes[0]));
-            scene->GetRoot()->SetRotation(ReadNodeRotation(model.nodes[0]));
-            scene->GetRoot()->SetScale(ReadNodeScale(model.nodes[0]));
+            scene_builder.GetRoot()->SetPosition(ReadNodePosition(model.nodes[0]));
+            scene_builder.GetRoot()->SetRotation(ReadNodeRotation(model.nodes[0]));
+            scene_builder.GetRoot()->SetScale(ReadNodeScale(model.nodes[0]));
         }
         
+        int model_index = 0;
         for (auto gltfModel : model.meshes)
         {
-            for (auto& primitive : gltfModel.primitives)
-            {
-                auto prim = LoadPrimitive(renderer, model, primitive);
-                auto fallback_model = renderer.InstantiateModel();
-                fallback_model->AddMesh(prim);
+            auto current_node = std::make_shared<SceneNode>();
+            auto gameObject = renderer.InstantiateGameObject();
+            scene_builder.AddGameObject(gameObject, scene_builder.GetModel(model_index));
+            current_node->AddGameObject(gameObject);
 
-                fallback_model->UpdateConstantBuffer(scene->GetRoot()->GetTransform().GetMatrix4x4());
-                
-                scene->AddFallbackModel(fallback_model);
-            }
+            scene_builder.AddChild(scene_builder.GetRoot(), current_node);
+            
+            model_index++;
         }
     }
     
-    // END - TODO
 
-    return scene;
-}
+    return scene_builder.Build();
+} 

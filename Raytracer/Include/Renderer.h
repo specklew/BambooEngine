@@ -6,6 +6,7 @@
 #include "InputElements.h"
 #include "Keyboard.h"
 
+class GameObject;
 struct AccelerationStructureBuffers;
 class Scene;
 class Model;
@@ -39,7 +40,7 @@ public:
 	void ToggleRasterization();
 
 	std::shared_ptr<Primitive> CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
-	std::shared_ptr<Model> InstantiateModel();
+	std::shared_ptr<GameObject> InstantiateGameObject();
 
 private:
 	void SetupDeviceAndDebug();
@@ -130,7 +131,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipelineStateObject;
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS;
-	std::vector<std::shared_ptr<AccelerationStructureBuffers>> m_BLASBuffers;
+	std::unordered_map<std::shared_ptr<Model>, std::shared_ptr<AccelerationStructureBuffers>> m_modelsBLASes;
 	
 	UINT m_frameIndex = 0;
 	UINT64 m_fenceValue = 0;

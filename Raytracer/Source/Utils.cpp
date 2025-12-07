@@ -73,3 +73,36 @@ namespace RenderingUtils
 		return defaultBuffer;
 	}
 }
+
+DirectX::XMFLOAT4X4 MathUtils::XMFloat4x4Identity()
+{
+	DirectX::XMFLOAT4X4 result;
+	XMStoreFloat4x4(&result, DirectX::XMMatrixIdentity());
+	return result;
+}
+
+void MathUtils::PrintMatrix(const DirectX::XMFLOAT4X4& matrix)
+{
+	spdlog::info("Printing Matrix:");
+	for (const auto row : matrix.m)
+	{
+		spdlog::info("| {:>8.4} {:>8.4} {:>8.4} {:>8.4} |",
+		             row[0],
+		             row[1],
+		             row[2],
+		             row[3]);
+	}
+}
+
+void MathUtils::PrintMatrix(const DirectX::XMMATRIX& matrix)
+{
+	spdlog::info("Printing Matrix:");
+	for (int i = 0; i < 4; i++)
+	{
+		spdlog::info("| {:>8.4} {:>8.4} {:>8.4} {:>8.4} |",
+		             matrix.r[i].m128_f32[0],
+		             matrix.r[i].m128_f32[1],
+		             matrix.r[i].m128_f32[2],
+		             matrix.r[i].m128_f32[3]);
+	}
+}

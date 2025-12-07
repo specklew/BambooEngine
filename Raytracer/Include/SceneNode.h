@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "Transform.h"
 
+class GameObject;
 class Model;
 
 class SceneNode : public std::enable_shared_from_this<SceneNode>
@@ -10,11 +11,11 @@ public:
     
     [[nodiscard]] std::shared_ptr<SceneNode> GetParent() const { return m_parent; }
     [[nodiscard]] const std::vector<std::shared_ptr<SceneNode>>& GetChildren() const { return m_children; }
-    [[nodiscard]] std::shared_ptr<Model> GetModel() const { return m_model; }
+    [[nodiscard]] std::shared_ptr<GameObject> GetGameObject() const { return m_gameObject; }
     [[nodiscard]] const Transform& GetTransform() const { return m_transform; }
 
     void AddChild(const std::shared_ptr<SceneNode>& child);
-    void AddModel(const std::shared_ptr<Model> & model);
+    void AddGameObject(const std::shared_ptr<GameObject> & gameObject);
     
     // Not sure if I should leave these as const references? TODO: Check
     void SetPosition(const DirectX::SimpleMath::Vector3& position);
@@ -23,16 +24,15 @@ public:
     void SetScale(const DirectX::SimpleMath::Vector3& scale);
 
     //TODO: Add move functions
-    
+
 private:
-    friend class Scene;
+    friend class SceneBuilder;
 
     void UpdateModelConstantBuffer() const;
     DirectX::SimpleMath::Matrix TraverseParentMatrices() const;
-
-    std::shared_ptr<Scene> m_scene;
+    
     std::shared_ptr<SceneNode> m_parent;
     std::vector<std::shared_ptr<SceneNode>> m_children;
-    std::shared_ptr<Model> m_model;
+    std::shared_ptr<GameObject> m_gameObject;
     Transform m_transform;
 };

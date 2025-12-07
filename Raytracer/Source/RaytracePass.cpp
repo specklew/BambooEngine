@@ -36,8 +36,6 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
 
 void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget)
 {
-    spdlog::debug("Executing raytracing pass");
-
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
     
     std::vector heaps = {m_srvUavHeap.Get()};

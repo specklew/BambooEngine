@@ -1,23 +1,36 @@
 ﻿#include "pch.h"
 #include "Scene.h"
 
+#include "GameObject.h"
 #include "Model.h"
 #include "Primitive.h"
 #include "SceneNode.h"
+#include "Utils.h"
 #include "Resources/IndexBuffer.h"
 #include "Resources/VertexBuffer.h"
 
-Scene::Scene()
+SceneBuilder::SceneBuilder()
 {
     m_root = std::make_shared<SceneNode>();
 }
 
-void Scene::Initialize()
+void SceneBuilder::AddGameObject(const std::shared_ptr<GameObject>& gameObject, const std::shared_ptr<Model>& model)
 {
-    m_root->m_scene = shared_from_this();
+    gameObject->m_model = model;
+    m_gameObjects.push_back(gameObject);
 }
 
-void Scene::PrintDebugInfo()
+void SceneBuilder::AddModel(const std::shared_ptr<Model>& model)
+{
+    m_models.push_back(model);
+}
+
+void SceneBuilder::AddChild(const std::shared_ptr<SceneNode>& parent, const std::shared_ptr<SceneNode>& child)
+{
+    parent->AddChild(child);
+}
+
+void SceneBuilder::PrintDebugInfo()
 {
 #if _DEBUG
     spdlog::debug("Scene Debug Info:");
@@ -36,10 +49,36 @@ void Scene::PrintDebugInfo()
             
         }
     }
+
+    for (int i = 0; i < m_gameObjects.size(); i++)
+    {
+        auto gameObject = m_gameObjects[i];
+        spdlog::debug("GameObject {} uses Model with {} meshes.", i, gameObject->GetModel()->GetMeshes().size());
+        MathUtils::PrintMatrix(gameObject->GetWorldFloat4X4());
+    }
 #endif
 }
 
-void Scene::AddFallbackModel(const std::shared_ptr<Model>& model)
+std::shared_ptr<Scene> SceneBuilder::Build()
 {
-    m_models.push_back(model);
+    assert(!m_isBuilt && "Scene has already been built");
+    m_isBuilt = true;
+
+    PrintDebugInfo();
+    UpdateMatricesInNodesRecursively(m_root);
+    
+    Scene scene;
+    scene.m_gameObjects = std::move(m_gameObjects);
+    scene.m_models = std::move(m_models);
+    scene.m_root = m_root;
+    return std::make_shared<Scene>(std::move(scene));
+}
+
+void SceneBuilder::UpdateMatricesInNodesRecursively(const std::shared_ptr<SceneNode>& node)
+{
+    node->UpdateModelConstantBuffer();
+    for (const auto& child : node->GetChildren())
+    {
+        UpdateMatricesInNodesRecursively(child);
+    }
 }

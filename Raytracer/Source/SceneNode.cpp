@@ -1,23 +1,19 @@
 ﻿#include "pch.h"
 #include "SceneNode.h"
 
-#include "Model.h"
-#include "Scene.h"
+#include "GameObject.h"
 
 void SceneNode::AddChild(const std::shared_ptr<SceneNode>& child)
 {
     assert(child && "Child node cannot be null");
-    assert(m_scene && "SceneNode must belong to a scene before adding children");
-    child->m_scene = m_scene;
     child->m_parent = shared_from_this();
     m_children.push_back(child);
 }
 
-void SceneNode::AddModel(const std::shared_ptr<Model>& model)
+void SceneNode::AddGameObject(const std::shared_ptr<GameObject> & gameObject)
 {
-    assert(model && "Model node cannot be null");
-    m_model = model;
-    m_scene->m_models.emplace_back(m_model);
+    assert(gameObject && "Model node cannot be null");
+    m_gameObject = gameObject;
 }
 
 void SceneNode::SetPosition(const DirectX::SimpleMath::Vector3& position)
@@ -53,10 +49,10 @@ SceneNode::SceneNode(const std::shared_ptr<SceneNode>& parent, const Transform& 
 
 void SceneNode::UpdateModelConstantBuffer() const
 {
-    if (!m_model) return;
+    if (!m_gameObject) return;
 
     const DirectX::XMFLOAT4X4 model_matrix = TraverseParentMatrices();
-    m_model->UpdateConstantBuffer(model_matrix);
+    m_gameObject->UpdateWorldMatrix(model_matrix);
 }
 
 DirectX::SimpleMath::Matrix SceneNode::TraverseParentMatrices() const
