@@ -228,6 +228,18 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     return renderer.CreatePrimitive(vertices, indices);
 }
 
+std::vector<std::shared_ptr<Scene>> ModelLoading::LoadAllScenes(Renderer& renderer)
+{
+    std::vector<std::shared_ptr<Scene>> scenes;
+    
+    for (const std::string& scenePath : scenePaths)
+    {
+        scenes.push_back(LoadScene(renderer, AssetId(scenePath.c_str(), scenePath.size())));
+    }
+
+    return std::move(scenes);
+}
+
 std::shared_ptr<Primitive> ModelLoading::LoadModel(Renderer& renderer, const AssetId& assetId)
 {
     tinygltf::Model model;

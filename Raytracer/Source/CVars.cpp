@@ -517,7 +517,7 @@ CVarType CVarSystemImpl::GetCVarType(StringId hash)
 
 CVarParameter* CVarSystemImpl::InitCVar(const char* name, const char* description)
 {
-	const StringId nameHash = StringId::New(name);
+	const StringId nameHash = StringId(name);
 	m_savedCVars[nameHash] = CVarParameter{};
 
 	CVarParameter& newParam = m_savedCVars[nameHash];
@@ -818,7 +818,7 @@ void CVarSystemImpl::EditParameter(CVarParameter* p, float textWidth)
             break;
         case CVarType::Enum:
 	        {
-		        const StringId hash = StringId::New(p->name);
+		        const StringId hash = StringId(p->name);
         		CVarEnum* enumCVar = CVarSystem::Get()->GetEnumCVar(hash);
 				
         		if (!enumCVar || enumCVar->names.empty()) 

@@ -51,6 +51,9 @@ struct StringId
 
 	explicit StringId(StringHash hash) : m_hash(hash) {} // TODO : construction cleanup
 	explicit StringId() : m_hash(StringHash()) {}
+	explicit StringId(const char* sz);
+	explicit StringId(const char* sz, size_t len);
+	explicit StringId(std::string_view str);
 
 private:
 	static bool Exists(StringId id);

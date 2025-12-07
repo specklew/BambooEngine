@@ -154,6 +154,6 @@ private:
 	std::shared_ptr<DirectX::Keyboard::KeyboardStateTracker> m_keyboardTracker;
 
 	int m_currentModelCBVIndex = 0;
-
-	std::shared_ptr<Scene> m_scene;
+	
+	std::vector<std::shared_ptr<Scene>> m_loadedScenes;
 };

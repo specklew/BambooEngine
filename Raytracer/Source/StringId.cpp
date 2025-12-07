@@ -155,6 +155,18 @@ std::string_view StringId::GetUnderlyingString() const
 	return strView; // Note : this object is only valid until the underlying storage relocates. Do not store this. Copy this away if needed.
 }
 
+StringId::StringId(const char* sz) : StringId(sz, const_strlen(sz))
+{
+}
+
+StringId::StringId(const char* sz, size_t len)
+{
+	m_hash = StringHash(sz, len);
+}
+StringId::StringId(std::string_view str) : StringId(str.data(), str.size())
+{
+}
+
 bool StringId::Exists(StringId id)
 {
 	return IsRegistered(id);

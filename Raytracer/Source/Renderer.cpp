@@ -34,7 +34,10 @@
 
 using namespace Microsoft::WRL;
 
-static AutoCVarInt g_scene("scene.renderedScene", "The scene ID to render", 0, CVarFlags::None, 0, 10);
+static AutoCVarEnum g_initialScene(
+	"renderer.initialScene",
+	"Specifies which scene to load on startup.",
+	ModelLoading::LOADED_SCENES::A_BEAUTIFUL_GAME);
 
 auto& resourceManager = ResourceManager::Get();
 
@@ -79,8 +82,7 @@ void Renderer::Initialize()
 	CreateDescriptorHeaps();
 	CreateWorldProjCBV();
 
-	//m_scene = ModelLoading::LoadScene(*this, AssetId("resources/models/sponza/gltf/sponza.gltf"));
-	m_scene = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb"));
+	m_loadedScenes = ModelLoading::LoadAllScenes(*this);
 	
 	CreateRasterizationRootSignature();
 
@@ -217,7 +219,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	if (m_rasterize)
 	{
-		for (const auto& go : m_scene->GetGameObjects())
+		for (const auto& go : m_loadedScenes[g_initialScene.Get()]->GetGameObjects())
 		{
 			auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
 			m_d3d12CommandList->SetGraphicsRootConstantBufferView(1, gpuAddress);
@@ -771,7 +773,7 @@ void Renderer::SetupAccelerationStructures()
 	spdlog::debug("Setting up acceleration structures");
 	m_accelerationStructures = std::make_shared<AccelerationStructures>();
 	
-	for (auto model : m_scene->GetModels())
+	for (auto model : m_loadedScenes[0]->GetModels())
 	{
 		std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> vertex_buffers;
 		std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> index_buffers;
@@ -803,7 +805,7 @@ void Renderer::SetupAccelerationStructures()
 		m_modelsBLASes.emplace(model, std::make_shared<AccelerationStructureBuffers>(bottomLevelBuffers));
 	}
 
-	for (auto go : m_scene->GetGameObjects())
+	for (auto go : m_loadedScenes[0]->GetGameObjects())
 	{
 		auto model = go->GetModel();
 		auto blasIt = m_modelsBLASes.find(model);
