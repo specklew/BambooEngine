@@ -23,3 +23,5 @@
 #include <dxgidebug.h>
 
 #include <spdlog/spdlog.h>
+
+#include "CVars.h"

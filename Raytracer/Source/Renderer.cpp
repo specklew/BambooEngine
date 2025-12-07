@@ -34,6 +34,8 @@
 
 using namespace Microsoft::WRL;
 
+static AutoCVarInt g_scene("scene.renderedScene", "The scene ID to render", 0, CVarFlags::None, 0, 10);
+
 auto& resourceManager = ResourceManager::Get();
 
 void Renderer::Initialize()
@@ -868,9 +870,8 @@ void Renderer::RenderImGui()
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
-
-	// TODO: Define the UI here.
-	ImGui::ShowDemoWindow();
+	
+	CVarSystem::Get()->DrawImguiEditor();
 
 	ImGui::Render();
 }
