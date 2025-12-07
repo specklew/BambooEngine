@@ -1,7 +1,7 @@
 ﻿#include "pch.h"
-#include "ShaderBindingTable.h"
+#include "Resources/ShaderBindingTable.h"
 
-#include "Helpers.h"
+#include "Utils/Utils.h"
 
 static constexpr size_t EntryIDSize = D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT;
 

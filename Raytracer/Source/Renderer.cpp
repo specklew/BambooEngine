@@ -6,26 +6,24 @@
 
 #include "AccelerationStructures.h"
 #include "Camera.h"
-#include "CVars.h"
-#include "GameObject.h"
+#include "Utils/CVars.h"
+#include "SceneResources/GameObject.h"
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
 #include "backends/imgui_impl_win32.h"
 
-#include "Helpers.h"
 #include "InputElements.h"
-#include "Model.h"
-#include "ModelLoading.h"
-#include "Primitive.h"
+#include "SceneResources/ModelLoading.h"
+#include "SceneResources/Primitive.h"
 #include "RaytracePass.h"
-#include "Scene.h"
+#include "SceneResources/Scene.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
-#include "Utils.h"
 #include "Window.h"
 #include "Resources/ConstantBuffer.h"
 #include "Resources/IndexBuffer.h"
 #include "Resources/VertexBuffer.h"
+#include "SceneResources/Model.h"
 #include "tinygltf/tiny_gltf.h"
 
 #ifdef _DEBUG
@@ -149,11 +147,11 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 	struct ObjectConstants
 	{
-		XMFLOAT4X4 ViewProj = Math::Identity4x4();
-		XMFLOAT4X4 View = Math::Identity4x4();
-		XMFLOAT4X4 Projection = Math::Identity4x4();
-		XMFLOAT4X4 ViewInverse = Math::Identity4x4();
-		XMFLOAT4X4 ProjectionInverse = Math::Identity4x4();
+		XMFLOAT4X4 ViewProj = MathUtils::XMFloat4x4Identity();
+		XMFLOAT4X4 View = MathUtils::XMFloat4x4Identity();
+		XMFLOAT4X4 Projection = MathUtils::XMFloat4x4Identity();
+		XMFLOAT4X4 ViewInverse = MathUtils::XMFloat4x4Identity();
+		XMFLOAT4X4 ProjectionInverse = MathUtils::XMFloat4x4Identity();
 	};
 	
 	ObjectConstants constants;

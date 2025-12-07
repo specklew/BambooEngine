@@ -2,9 +2,9 @@
 #include <vector>
 
 #include "Constants.h"
-#include "Helpers.h"
 #include "InputElements.h"
 #include "Keyboard.h"
+#include "Utils/Utils.h"
 
 class GameObject;
 struct AccelerationStructureBuffers;
@@ -145,7 +145,7 @@ private:
 	float m_phi = DirectX::XM_PIDIV4;
 	float m_radius = 5.0f;
 	
-	DirectX::XMFLOAT4X4 m_world = Math::Identity4x4();
+	DirectX::XMFLOAT4X4 m_world = MathUtils::XMFloat4x4Identity();
 
 	std::vector<std::shared_ptr<Primitive>> m_primitives;
 

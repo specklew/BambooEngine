@@ -1,5 +1,5 @@
 ﻿#include "pch.h"
-#include "Model.h"
+#include "SceneResources/Model.h"
 
 void Model::AddMesh(const std::shared_ptr<Primitive>& mesh)
 {

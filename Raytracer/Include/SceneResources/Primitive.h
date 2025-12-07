@@ -2,8 +2,6 @@
 
 #include "pch.h"
 
-#include "Helpers.h"
-
 class VertexBuffer;
 class IndexBuffer;
 

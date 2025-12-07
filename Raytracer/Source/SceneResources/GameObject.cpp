@@ -1,7 +1,7 @@
 ﻿#include "pch.h"
-#include "GameObject.h"
+#include "SceneResources/GameObject.h"
 
-#include "Utils.h"
+#include "Utils/Utils.h"
 #include "Resources/ConstantBuffer.h"
 
 GameObject::GameObject(const std::shared_ptr<Model>& model, const std::shared_ptr<ConstantBuffer>& modelWorldMatrixBuffer)

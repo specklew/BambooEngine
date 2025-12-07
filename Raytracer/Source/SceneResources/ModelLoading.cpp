@@ -1,16 +1,16 @@
 ﻿#include "pch.h"
-#include "ModelLoading.h"
+#include "SceneResources/ModelLoading.h"
 
 #include <filesystem>
 #include <tinygltf/tiny_gltf.h>
 #include <spdlog/spdlog.h>
 
 #include "InputElements.h"
-#include "Model.h"
-#include "Primitive.h"
+#include "SceneResources/Model.h"
+#include "SceneResources/Primitive.h"
 #include "Renderer.h"
-#include "Scene.h"
-#include "SceneNode.h"
+#include "SceneResources/Scene.h"
+#include "SceneResources/SceneNode.h"
 #include "ResourceManager/ResourceManagerTypes.h"
 #include "tinygltf/tiny_gltf.h"
 

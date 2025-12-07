@@ -1,7 +1,7 @@
 ﻿#pragma once
 #include <filesystem>
 
-#include "StringId.h"
+#include "Resources/StringId.h"
 
 template<typename IndexType>
 struct ResourceHandle

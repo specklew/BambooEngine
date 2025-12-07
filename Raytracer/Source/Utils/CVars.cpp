@@ -1,12 +1,12 @@
 ﻿#include "pch.h"
-#include "CVars.h"
+#include "Utils/CVars.h"
 #include <unordered_map>
 #include <algorithm>
 #include <shared_mutex>
 
 #include "imgui.h"
 #include "imgui/misc/cpp/imgui_stdlib.h"
-#include "StringId.h"
+#include "Resources/StringId.h"
 
 class CVarParameter
 {

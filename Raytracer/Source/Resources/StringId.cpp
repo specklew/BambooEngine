@@ -1,5 +1,5 @@
 ﻿#include "pch.h"
-#include "StringId.h"
+#include "Resources/StringId.h"
 
 struct StorageView
 {

@@ -3,7 +3,7 @@
 
 #include "BottomLevelASGenerator.h"
 #include "DXRHelper.h"
-#include "Helpers.h"
+#include "Utils/Utils.h"
 #include "InputElements.h"
 #include "TopLevelASGenerator.h"
 

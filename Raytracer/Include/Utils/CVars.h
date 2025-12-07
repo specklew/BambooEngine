@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "StringId.h"
+#include "Resources/StringId.h"
 #include "magic_enum/magic_enum.hpp"
 
 class CVarParameter;

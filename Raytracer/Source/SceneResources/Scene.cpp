@@ -1,13 +1,14 @@
 ﻿#include "pch.h"
-#include "Scene.h"
+#include "SceneResources/Scene.h"
 
-#include "GameObject.h"
+#include "SceneResources/GameObject.h"
 #include "Model.h"
-#include "Primitive.h"
-#include "SceneNode.h"
-#include "Utils.h"
 #include "Resources/IndexBuffer.h"
 #include "Resources/VertexBuffer.h"
+#include "SceneResources/Model.h"
+#include "SceneResources/Primitive.h"
+#include "SceneResources/SceneNode.h"
+#include "Utils/Utils.h"
 
 SceneBuilder::SceneBuilder()
 {

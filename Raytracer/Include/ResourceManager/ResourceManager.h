@@ -1,5 +1,5 @@
 ﻿#pragma once
-#include "Helpers.h"
+#include "Utils/Utils.h"
 #include "ResourceManagerTypes.h"
 
 struct Shader;

@@ -1,5 +1,5 @@
 ﻿#include "pch.h"
-#include "Random.h"
+#include "Utils/Random.h"
 
 namespace RaytracerRandom
 {

@@ -1,7 +1,7 @@
 ﻿#include "pch.h"
-#include "SceneNode.h"
+#include "SceneResources/SceneNode.h"
 
-#include "GameObject.h"
+#include "SceneResources/GameObject.h"
 
 void SceneNode::AddChild(const std::shared_ptr<SceneNode>& child)
 {

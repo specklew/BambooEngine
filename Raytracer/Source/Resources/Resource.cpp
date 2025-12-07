@@ -1,7 +1,7 @@
 ﻿#include "pch.h"
 #include "Resources/Resource.h"
 
-#include "Helpers.h"
+#include "Utils/Utils.h"
 
 bool Resource::CheckFormatSupport(D3D12_FORMAT_SUPPORT1 formatSupport1) const
 {

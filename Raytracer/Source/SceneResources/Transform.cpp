@@ -1,5 +1,5 @@
 ﻿#include "pch.h"
-#include "Transform.h"
+#include "SceneResources/Transform.h"
 
 Transform::Transform(DirectX::SimpleMath::Vector3 position, DirectX::SimpleMath::Quaternion rotation, DirectX::SimpleMath::Vector3 scale) :
     position(position),
