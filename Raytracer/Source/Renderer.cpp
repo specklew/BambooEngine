@@ -37,8 +37,6 @@ static AutoCVarEnum g_initialScene(
 	"Specifies which scene to load on startup.",
 	ModelLoading::LOADED_SCENES::A_BEAUTIFUL_GAME);
 
-auto& resourceManager = ResourceManager::Get();
-
 void Renderer::Initialize()
 {
 	spdlog::info("Initializing renderer...");
@@ -665,10 +663,12 @@ void Renderer::CreateRasterizationRootSignature()
 
 void Renderer::CreatePipelineState()
 {
-	auto psh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.ps.shader"));
-	m_pixelShader = resourceManager.shaders.GetResource(psh).bytecode;
-	auto vsh = resourceManager.GetOrLoadShader(AssetId("resources/shaders/colorShader.vs.shader"));
-	m_vertexShader = resourceManager.shaders.GetResource(vsh).bytecode;
+	auto& rm = ResourceManager::Get();
+	
+	auto psh = rm.GetOrLoadShader(AssetId("resources/shaders/colorShader.ps.shader"));
+	m_pixelShader = rm.shaders.GetResource(psh).bytecode;
+	auto vsh = rm.GetOrLoadShader(AssetId("resources/shaders/colorShader.vs.shader"));
+	m_vertexShader = rm.shaders.GetResource(vsh).bytecode;
 	
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
 	desc.VS = {static_cast<BYTE*>(m_vertexShader->GetBufferPointer()), m_vertexShader->GetBufferSize()};
@@ -889,6 +889,7 @@ void Renderer::OnShaderReload()
 	
 	spdlog::info("Creating pipeline state for new shaders...");
 	CreatePipelineState();
+	m_raytracePass->OnShaderReload();
 
 	FlushCommandQueue();
 	ResetCommandList();

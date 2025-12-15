@@ -111,22 +111,17 @@ void RaytracePass::OnResize()
     CreateShaderResourceHeap();
 }
 
+void RaytracePass::OnShaderReload()
+{
+    InitializeRaytracingPipeline();
+    CreateShaderBindingTable();
+}
+
 void RaytracePass::InitializeRaytracingPipeline()
 {
     spdlog::debug("Initializing raytracing pipeline");
     CD3DX12_STATE_OBJECT_DESC raytracingPipeline{ D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE };
-
-    auto rm = ResourceManager::Get();
-
-    spdlog::debug("Loading raytracing shaders");
-
-    auto rayGenShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.rg.shader"));
-    m_rayGenShaderBlob = rm.shaders.GetResource(rayGenShader).bytecode;
-    auto missShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.ms.shader"));
-    m_missShaderBlob = rm.shaders.GetResource(missShader).bytecode;
-    auto hitShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.ch.shader"));
-    m_hitShaderBlob = rm.shaders.GetResource(hitShader).bytecode;
-
+    
     // Creating raytracing pipeline state object
     // It is consisting of several subobjects, each defining a part of the pipeline
     // 1. Ray generation shader DXIL
@@ -137,7 +132,8 @@ void RaytracePass::InitializeRaytracingPipeline()
     // 6. Shader configuration (payload size, attribute size)
     // 7. Pipeline configuration (max recursion depth)
     
-
+    CreateRootSignatures();
+    
     spdlog::debug("Adding raytracing shaders DXIL to pipeline");
 
     // 1. Ray generation shader DXIL
@@ -176,12 +172,6 @@ void RaytracePass::InitializeRaytracingPipeline()
         hitGroup->SetHitGroupExport(m_hitGroupName.c_str());
         hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
     }
-    
-    spdlog::debug("Creating raytracing root signatures");
-    CreateRayGenSignature();
-    CreateMissSignature();
-    CreateHitSignature();
-    CreateGlobalRootSignature();
     
     // 5. Root signature associations
     spdlog::debug("Associating root signatures with pipeline");
@@ -235,6 +225,26 @@ void RaytracePass::InitializeRaytracingPipeline()
 
     ThrowIfFailed(m_device->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&m_rtStateObject)));
     ThrowIfFailed(m_rtStateObject->QueryInterface(IID_PPV_ARGS(&m_rtStateObjectProperties)));
+}
+
+void RaytracePass::CreateRootSignatures()
+{
+    auto& rm = ResourceManager::Get();
+
+    spdlog::debug("Loading raytracing shaders");
+
+    auto rayGenShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.rg.shader"));
+    m_rayGenShaderBlob = rm.shaders.GetResource(rayGenShader).bytecode;
+    auto missShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.ms.shader"));
+    m_missShaderBlob = rm.shaders.GetResource(missShader).bytecode;
+    auto hitShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.ch.shader"));
+    m_hitShaderBlob = rm.shaders.GetResource(hitShader).bytecode;
+
+    spdlog::debug("Creating raytracing root signatures");
+    CreateRayGenSignature();
+    CreateMissSignature();
+    CreateHitSignature();
+    CreateGlobalRootSignature();
 }
 
 void RaytracePass::CreateRayGenSignature()

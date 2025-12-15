@@ -51,8 +51,9 @@ void RayGen() {
     ray.TMax = 1000;
 
     TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
-  
-    gOutput[launchIndex] = payload.colorAndDistance;
+
+    float3 color = payload.colorAndDistance.xyz * (1 - (payload.colorAndDistance.w / 1)); 
+    gOutput[launchIndex] = float4(color, 1.f);
 }
 
 [shader("miss")]
@@ -82,5 +83,5 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attrib)
     //BTriVertex[indices[vertId + 1]].color * barycentrics.y +
     //BTriVertex[indices[vertId + 2]].color * barycentrics.z;
   
-    payload.colorAndDistance = float4(barycentrics.x,barycentrics.y,barycentrics.z, 0); 
+    payload.colorAndDistance = float4(barycentrics.x,barycentrics.y,barycentrics.z, RayTCurrent()); 
 }

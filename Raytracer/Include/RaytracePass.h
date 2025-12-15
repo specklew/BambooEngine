@@ -17,10 +17,12 @@ public:
     void Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget);
     void Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj);
     void OnResize();
+    void OnShaderReload();
     
 private:
     void InitializeRaytracingPipeline();
-    
+
+    void CreateRootSignatures();
     void CreateRayGenSignature();
     void CreateMissSignature();
     void CreateHitSignature();
