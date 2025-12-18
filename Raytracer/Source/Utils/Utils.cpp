@@ -2,23 +2,35 @@
 #include "Utils/Utils.h"
 #include <comdef.h>
 
+#include "Renderer.h"
+
 void ThrowIfFailed(HRESULT hr)
 {
-   if (FAILED(hr))
-   {
-      spdlog::dump_backtrace();
-      
-      _com_error error(hr);
-      LPCTSTR errMsg = error.ErrorMessage();
-      std::wstring w;
-      w = errMsg;
-      std::string errorMessage = std::string(w.begin(), w.end()); // magic here
-      spdlog::error("Verification of HR failed with code: {}", hr);
-      spdlog::error("Error message: {}", errorMessage);
-      
-      throw std::runtime_error(errorMessage);
-   }
+	if (FAILED(hr))
+	{
+		spdlog::dump_backtrace();
 
+		_com_error error(hr);
+		LPCTSTR errMsg = error.ErrorMessage();
+		std::wstring w;
+		w = errMsg;
+		std::string errorMessage = std::string(w.begin(), w.end()); // magic here
+		spdlog::error("Verification of HR failed with code: {}", hr);
+		spdlog::error("Error message: {}", errorMessage);
+
+		if (hr == 2289696773)
+		{
+			//DEVICE REMOVED
+			spdlog::error("ERROR caused by DEVICE REMOVED. TRANSLATING...");
+			_com_error deviceRemovedErr(Renderer::g_d3d12Device->GetDeviceRemovedReason());
+			LPCTSTR deviceRemovedMsg = deviceRemovedErr.ErrorMessage();
+			std::wstring w2 = deviceRemovedMsg;
+			std::string deviceRemovedError = std::string(w2.begin(), w2.end());
+			spdlog::error("REASON: {}", deviceRemovedError);
+		}
+		
+   		throw std::runtime_error(errorMessage);
+	}
 }
 
 std::string ConvertWcharToString(const wchar_t* wstr)

@@ -23,6 +23,8 @@ class DescriptorHeapAllocator;
 class RaytracePass;
 class AccelerationStructures;
 
+
+
 class Renderer
 {
 public:
@@ -42,6 +44,8 @@ public:
 	std::shared_ptr<Primitive> CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 	std::shared_ptr<GameObject> InstantiateGameObject();
 
+	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_d3d12Device;
+	
 private:
 	void SetupDeviceAndDebug();
 	void CreateCommandQueue();
@@ -73,6 +77,9 @@ private:
 	bool CheckTearingSupport();
 	bool CheckRayTracingSupport() const;
 
+	void ExtractBLASesFromSceneModels(const Scene& scene, AccelerationStructures& accelerationStructures);
+	void CreateTLASForScene(const Scene& scene, AccelerationStructures& accelerationStructures);
+	
 	void SetupAccelerationStructures();
 
 	void InitializeImGui();
@@ -81,7 +88,7 @@ private:
 	void OnShaderReload();
 	
 	std::shared_ptr<RaytracePass> m_raytracePass;
-	std::shared_ptr<AccelerationStructures> m_accelerationStructures;
+	std::vector<std::shared_ptr<AccelerationStructures>> m_accelerationStructures;
 	
 	bool m_tearingSupport = false;
 	bool m_rasterize = true;
@@ -93,7 +100,6 @@ private:
 
 	Microsoft::WRL::ComPtr<ID3D12InfoQueue> m_infoQueue;
 	
-	Microsoft::WRL::ComPtr<ID3D12Device5> m_d3d12Device;
 	Microsoft::WRL::ComPtr<IDXGIFactory6> m_dxgiFactory;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue;
 	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_d3d12CommandAllocators[Constants::Graphics::NUM_FRAMES];
@@ -144,6 +150,8 @@ private:
 	float m_theta = 1.5f * DirectX::XM_PI;
 	float m_phi = DirectX::XM_PIDIV4;
 	float m_radius = 5.0f;
+
+	int previousScene;
 	
 	DirectX::XMFLOAT4X4 m_world = MathUtils::XMFloat4x4Identity();
 

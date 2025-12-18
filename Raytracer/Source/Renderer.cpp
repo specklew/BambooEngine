@@ -32,7 +32,7 @@
 
 using namespace Microsoft::WRL;
 
-static AutoCVarEnum g_initialScene(
+static AutoCVarEnum g_currentScene(
 	"renderer.initialScene",
 	"Specifies which scene to load on startup.",
 	ModelLoading::LOADED_SCENES::A_BEAUTIFUL_GAME);
@@ -94,7 +94,7 @@ void Renderer::Initialize()
 	SetupAccelerationStructures();
 
 	m_raytracePass = std::make_shared<RaytracePass>();
-	m_raytracePass->Initialize(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures, m_vertexBuffer, m_indexBuffer, m_srvCbvUavDescriptorHeap);
+	m_raytracePass->Initialize(g_d3d12Device, m_d3d12CommandList, m_accelerationStructures, m_vertexBuffer, m_indexBuffer, m_srvCbvUavDescriptorHeap);
 
 	spdlog::info("Renderer initialized successfully.");
 
@@ -162,6 +162,20 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	memcpy(&m_mappedData[0], &constants, sizeof(constants));
 
 	m_raytracePass->Update(view, viewProj);
+
+	if (previousScene != g_currentScene.Get())
+	{
+		m_raytracePass->OnSceneChange(g_currentScene.Get());
+		previousScene = g_currentScene.Get();
+
+		ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
+		m_d3d12CommandList->Close();
+		commandLists[0] = m_d3d12CommandList.Get();
+		m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+
+		FlushCommandQueue();
+		ResetCommandList();
+	}
 }
 
 void Renderer::Render(double elapsedTime, double totalTime)
@@ -215,7 +229,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	if (m_rasterize)
 	{
-		for (const auto& go : m_loadedScenes[g_initialScene.Get()]->GetGameObjects())
+		for (const auto& go : m_loadedScenes[g_currentScene.Get()]->GetGameObjects())
 		{
 			auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
 			m_d3d12CommandList->SetGraphicsRootConstantBufferView(1, gpuAddress);
@@ -238,7 +252,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	}
 	else
 	{
-		m_accelerationStructures->CreateTopLevelAS(m_d3d12Device, m_d3d12CommandList, m_accelerationStructures->GetInstances(), true);
+		m_accelerationStructures[g_currentScene.Get()]->CreateTopLevelAS(g_d3d12Device, m_d3d12CommandList, m_accelerationStructures[g_currentScene.Get()]->GetInstances(), true);
 		m_raytracePass->Render(backBuffer);
 	}
 
@@ -280,7 +294,7 @@ void Renderer::CleanUp()
 
 void Renderer::OnResize()
 {
-	assert(m_d3d12Device && "Attempted to resize window without device.");
+	assert(g_d3d12Device && "Attempted to resize window without device.");
 	assert(m_dxgiSwapChain && "Attempted to resize window without swap chain.");
 	
 	auto& window = Window::Get();
@@ -304,7 +318,7 @@ void Renderer::OnResize()
 	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
 	{
 		ThrowIfFailed(m_dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
-		m_d3d12Device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
+		g_d3d12Device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
 		rtvHandle.Offset(1, m_rtvDescriptorSize);
 	}
 	
@@ -386,7 +400,7 @@ void Renderer::SetupDeviceAndDebug()
 
 	if (ComPtr<IDXGIAdapter4> dxgiAdapter = GetHardwareAdapter())
 	{
-		m_d3d12Device = GetDeviceForAdapter(dxgiAdapter);
+		g_d3d12Device = GetDeviceForAdapter(dxgiAdapter);
 	}
 }
 
@@ -397,20 +411,20 @@ void Renderer::CreateCommandQueue()
 	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
-	ThrowIfFailed(m_d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_d3d12CommandQueue)));
+	ThrowIfFailed(g_d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_d3d12CommandQueue)));
 }
 
 void Renderer::CreateCommandAllocators()
 {
 	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
 	{
-		ThrowIfFailed(m_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_d3d12CommandAllocators[i])));
+		ThrowIfFailed(g_d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_d3d12CommandAllocators[i])));
 	}
 }
 
 void Renderer::CreateFence()
 {
-	ThrowIfFailed(m_d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_d3d12Fence)));
+	ThrowIfFailed(g_d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_d3d12Fence)));
 
 	m_fenceValue++;
 
@@ -456,7 +470,7 @@ void Renderer::CreateSwapChain()
 
 void Renderer::CreateCommandList()
 {
-	ThrowIfFailed(m_d3d12Device->CreateCommandList(
+	ThrowIfFailed(g_d3d12Device->CreateCommandList(
 		0,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
 		m_d3d12CommandAllocators[m_frameIndex].Get(),
@@ -479,9 +493,9 @@ void Renderer::CreateRTVDescriptorHeap()
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 
-	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_d3d12RTVDescriptorHeap)));
+	ThrowIfFailed(g_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_d3d12RTVDescriptorHeap)));
 
-	m_rtvDescriptorSize = m_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+	m_rtvDescriptorSize = g_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 }
 
 void Renderer::CreateRenderTargetViews()
@@ -491,7 +505,7 @@ void Renderer::CreateRenderTargetViews()
 	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
 	{
 		ThrowIfFailed(m_dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
-		m_d3d12Device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
+		g_d3d12Device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
 
 		rtvHandle.ptr += m_rtvDescriptorSize;
 	}
@@ -519,7 +533,7 @@ void Renderer::CreateDepthStencilView()
 	
 	CD3DX12_HEAP_PROPERTIES heapProp(D3D12_HEAP_TYPE_DEFAULT);
 	
-	ThrowIfFailed(m_d3d12Device->CreateCommittedResource(
+	ThrowIfFailed(g_d3d12Device->CreateCommittedResource(
 		&heapProp,
 		D3D12_HEAP_FLAG_NONE,
 		&desc,
@@ -533,7 +547,7 @@ void Renderer::CreateDepthStencilView()
 	viewDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
 	viewDesc.Texture2D.MipSlice = 0;
 	
-	m_d3d12Device->CreateDepthStencilView(
+	g_d3d12Device->CreateDepthStencilView(
 		m_depthStencilBuffer.Get(),
 		&viewDesc,
 		m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
@@ -554,31 +568,31 @@ void Renderer::CreateDSVDescriptorHeap()
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	desc.NodeMask = 0;
 
-	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(
+	ThrowIfFailed(g_d3d12Device->CreateDescriptorHeap(
 		&desc,
 		IID_PPV_ARGS(&m_d3d12DSVDescriptorHeap)));
 }
 
 void Renderer::CreateDescriptorHeaps()
 {
-	///	|							|								|					|							|
-	///	|	SRV IMGUI TEXTURE (1)	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (1)	|	TEXTURES (MAX_TEXTURE)	|
-	///	|							|								|					|							|
+	///	|							|								|							|							|
+	///	|	SRV IMGUI TEXTURE (1)	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (MAX_SCENES)	|	TEXTURES (MAX_TEXTURE)	|
+	///	|							|								|							|							|
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_OBJECTS + Constants::Graphics::MAX_TEXTURES;
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Engine::MAX_SCENES + Constants::Graphics::MAX_TEXTURES;
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
-	ThrowIfFailed(m_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_srvCbvUavDescriptorHeap)));
+	ThrowIfFailed(g_d3d12Device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_srvCbvUavDescriptorHeap)));
 }
 
 void Renderer::CreateWorldProjCBV()
 {
 	ComPtr<ID3D12Resource> cbvUav;
 	
-	m_d3d12Device->CreateCommittedResource(
+	g_d3d12Device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,
 		&CD3DX12_RESOURCE_DESC::Buffer(256 * 5),
@@ -586,7 +600,7 @@ void Renderer::CreateWorldProjCBV()
 		nullptr,
 		IID_PPV_ARGS(&cbvUav));
 
-	m_projectionMatrixConstantBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, cbvUav);
+	m_projectionMatrixConstantBuffer = std::make_shared<ConstantBuffer>(g_d3d12Device, cbvUav);
 	m_projectionMatrixConstantBuffer->SetResourceName(L"Camera and World Proj CBV Resource");
 	
 	ThrowIfFailed(m_projectionMatrixConstantBuffer->GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData)));
@@ -596,12 +610,12 @@ void Renderer::CreateWorldProjCBV()
 	cbvDesc.SizeInBytes = Align(256ULL * 5, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
 
 	auto descriptorDesc = m_srvCbvUavDescriptorHeap->GetDesc();
-	auto increment = m_d3d12Device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
+	auto increment = g_d3d12Device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
 
 	D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle;
 	cbvHandle.ptr = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr + increment;
 	
-	m_d3d12Device->CreateConstantBufferView(&cbvDesc, cbvHandle);
+	g_d3d12Device->CreateConstantBufferView(&cbvDesc, cbvHandle);
 }
 
 void Renderer::CreateRasterizationRootSignature()
@@ -654,7 +668,7 @@ void Renderer::CreateRasterizationRootSignature()
 	}
 	ThrowIfFailed(hr);
 	
-	ThrowIfFailed(m_d3d12Device->CreateRootSignature(
+	ThrowIfFailed(g_d3d12Device->CreateRootSignature(
 		0,
 		serializedRootSignature->GetBufferPointer(),
 		serializedRootSignature->GetBufferSize(),
@@ -691,7 +705,7 @@ void Renderer::CreatePipelineState()
 	desc.DSVFormat = m_depthStencilFormat;
 
 	ComPtr<ID3D12PipelineState> pso;
-	ThrowIfFailed(m_d3d12Device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pso)));
+	ThrowIfFailed(g_d3d12Device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pso)));
 	pso->SetName(L"Default Pipeline State");
 	m_pipelineStateObject = pso;
 }
@@ -755,7 +769,7 @@ bool Renderer::CheckRayTracingSupport() const
 	spdlog::info("Checking ray tracing support...");
 	
 	D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-	ThrowIfFailed(m_d3d12Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
+	ThrowIfFailed(g_d3d12Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
 	if (options5.RaytracingTier < D3D12_RAYTRACING_TIER_1_0)
 	{
 		spdlog::error("Ray tracing not supported!");
@@ -766,17 +780,13 @@ bool Renderer::CheckRayTracingSupport() const
 	return true;
 }
 
-void Renderer::SetupAccelerationStructures()
+void Renderer::ExtractBLASesFromSceneModels(const Scene& scene, AccelerationStructures& accelerationStructures)
 {
-	spdlog::debug("Setting up acceleration structures");
-	m_accelerationStructures = std::make_shared<AccelerationStructures>();
-	
-	for (auto model : m_loadedScenes[0]->GetModels())
+	for (auto model : scene.GetModels())
 	{
 		std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> vertex_buffers;
 		std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> index_buffers;
-
-		// TODO: There is duplicated work here. We should iterate over the list of all primitives and then create instances in TLAS over the models.
+		
 		for (auto prim : model->GetMeshes())
 		{
 
@@ -794,16 +804,19 @@ void Renderer::SetupAccelerationStructures()
 			index_buffers.emplace_back(index_pair);
 		}
 
-		AccelerationStructureBuffers bottomLevelBuffers = m_accelerationStructures->CreateBottomLevelAS(
-			m_d3d12Device.Get(),
+		AccelerationStructureBuffers bottomLevelBuffers = accelerationStructures.CreateBottomLevelAS(
+			g_d3d12Device.Get(),
 			m_d3d12CommandList.Get(),
 			vertex_buffers,
 			index_buffers);
 
 		m_modelsBLASes.emplace(model, std::make_shared<AccelerationStructureBuffers>(bottomLevelBuffers));
 	}
+}
 
-	for (auto go : m_loadedScenes[0]->GetGameObjects())
+void Renderer::CreateTLASForScene(const Scene& scene, AccelerationStructures& accelerationStructures)
+{
+	for (auto go : scene.GetGameObjects())
 	{
 		auto model = go->GetModel();
 		auto blasIt = m_modelsBLASes.find(model);
@@ -811,17 +824,29 @@ void Renderer::SetupAccelerationStructures()
 		{
 			DirectX::XMMATRIX worldMatrix = DirectX::XMLoadFloat4x4(&go->m_worldMatrix);
 			auto instance = std::pair(blasIt->second->p_result, worldMatrix);
-			m_accelerationStructures->GetInstances().emplace_back(instance);
+			accelerationStructures.GetInstances().emplace_back(instance);
 		}
 		else
 		{
 			spdlog::warn("Model for GameObject not found in BLASes map during TLAS setup.");
 		}
 	}
+
+	accelerationStructures.CreateTopLevelAS(g_d3d12Device.Get(), m_d3d12CommandList.Get(), accelerationStructures.GetInstances(), false);
+}
+
+void Renderer::SetupAccelerationStructures()
+{
+	spdlog::debug("Setting up acceleration structures");
 	
-	
-	m_accelerationStructures->CreateTopLevelAS(
-		m_d3d12Device.Get(), m_d3d12CommandList.Get(), m_accelerationStructures->GetInstances(), false); // TODO: handle the instances properly
+	for (auto scene : m_loadedScenes)
+	{
+		spdlog::debug("Setting up AS for scene: {}", scene->GetName());
+		auto accelerationStructures = std::make_shared<AccelerationStructures>();
+		ExtractBLASesFromSceneModels(*scene, *accelerationStructures);
+		CreateTLASForScene(*scene, *accelerationStructures);
+		m_accelerationStructures.emplace_back(accelerationStructures);
+	}
 
 	spdlog::debug("Executing command list with BLAS generation");
 	m_d3d12CommandList->Close();
@@ -851,7 +876,7 @@ void Renderer::InitializeImGui()
 	ImGui_ImplWin32_Init(Window::Get().GetHandle());
 	
 	ImGui_ImplDX12_InitInfo init_info = {};
-	init_info.Device = m_d3d12Device.Get();
+	init_info.Device = g_d3d12Device.Get();
 	init_info.CommandQueue = m_d3d12CommandQueue.Get();
 	init_info.NumFramesInFlight = Constants::Graphics::NUM_FRAMES;
 	init_info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -911,8 +936,8 @@ std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& 
 	memcpy(cpuVertex, vertices.data(), vertices.size() * sizeof(Vertex));
 	memcpy(cpuIndex, indices.data(), indices.size() * sizeof(uint32_t));
 	
-	auto vertex_buffer_resource = RenderingUtils::CreateDefaultBuffer(m_d3d12Device.Get(), m_d3d12CommandList.Get(), cpuVertex, vertices.size() * sizeof(Vertex), vertex_upload_buffer);
-	auto index_buffer_resource = RenderingUtils::CreateDefaultBuffer(m_d3d12Device.Get(), m_d3d12CommandList.Get(), cpuIndex, indices.size() * sizeof(uint32_t), index_upload_buffer);
+	auto vertex_buffer_resource = RenderingUtils::CreateDefaultBuffer(g_d3d12Device.Get(), m_d3d12CommandList.Get(), cpuVertex, vertices.size() * sizeof(Vertex), vertex_upload_buffer);
+	auto index_buffer_resource = RenderingUtils::CreateDefaultBuffer(g_d3d12Device.Get(), m_d3d12CommandList.Get(), cpuIndex, indices.size() * sizeof(uint32_t), index_upload_buffer);
 	
 	// Need to be closed and executed to create buffers before the upload buffers go out of scope.
 	m_d3d12CommandList->Close();
@@ -934,8 +959,8 @@ std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& 
 	// There was a unique fence value for each allocator (frame) and somehow it was not being updated properly. TODO: Check out why was that for the next iteration of the engine.
 	ResetCommandList();
 
-	auto vertex_buffer = std::make_shared<VertexBuffer>(m_d3d12Device, vertex_buffer_resource, static_cast<UINT>(vertices.size()), sizeof(Vertex));
-	auto index_buffer = std::make_shared<IndexBuffer>(m_d3d12Device, index_buffer_resource, static_cast<UINT>(indices.size()), DXGI_FORMAT_R32_UINT);
+	auto vertex_buffer = std::make_shared<VertexBuffer>(g_d3d12Device, vertex_buffer_resource, static_cast<UINT>(vertices.size()), sizeof(Vertex));
+	auto index_buffer = std::make_shared<IndexBuffer>(g_d3d12Device, index_buffer_resource, static_cast<UINT>(indices.size()), DXGI_FORMAT_R32_UINT);
 
 	auto primitive = std::make_shared<Primitive>(vertex_buffer, index_buffer);
 
@@ -998,7 +1023,7 @@ ComPtr<ID3D12Device5> Renderer::GetDeviceForAdapter(ComPtr<IDXGIAdapter1> adapte
 ComPtr<ID3D12Resource> Renderer::CreateDefaultBuffer(const void* initData, UINT64 byteSize, ComPtr<ID3D12Resource> &uploadBuffer)
 {
 	
-	ThrowIfFailed(m_d3d12Device->CreateCommittedResource(
+	ThrowIfFailed(g_d3d12Device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 		D3D12_HEAP_FLAG_NONE,
 		&CD3DX12_RESOURCE_DESC::Buffer(byteSize),
@@ -1009,7 +1034,7 @@ ComPtr<ID3D12Resource> Renderer::CreateDefaultBuffer(const void* initData, UINT6
 	uploadBuffer->SetName(L"IntermediateUploadBuffer");
 	ComPtr<ID3D12Resource> defaultBuffer;
 
-	ThrowIfFailed(m_d3d12Device->CreateCommittedResource(
+	ThrowIfFailed(g_d3d12Device->CreateCommittedResource(
 		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
 		D3D12_HEAP_FLAG_NONE,
 		&CD3DX12_RESOURCE_DESC::Buffer(byteSize),
@@ -1048,7 +1073,7 @@ std::shared_ptr<GameObject> Renderer::InstantiateGameObject()
 {
 	ComPtr<ID3D12Resource> buffer;
 	
-	m_d3d12Device->CreateCommittedResource(
+	g_d3d12Device->CreateCommittedResource(
 	&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
 	D3D12_HEAP_FLAG_NONE,
 	&CD3DX12_RESOURCE_DESC::Buffer(256),
@@ -1056,7 +1081,7 @@ std::shared_ptr<GameObject> Renderer::InstantiateGameObject()
 	nullptr,
 	IID_PPV_ARGS(&buffer));
 
-	auto constantBuffer = std::make_shared<ConstantBuffer>(m_d3d12Device, buffer);
+	auto constantBuffer = std::make_shared<ConstantBuffer>(g_d3d12Device, buffer);
 	constantBuffer->SetResourceName(L"Model CBV Resource");
 
 	auto game_object = std::make_shared<GameObject>();

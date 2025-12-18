@@ -12,7 +12,7 @@
 
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
-                              std::shared_ptr<AccelerationStructures> accelerationStructures,
+                              std::vector<std::shared_ptr<AccelerationStructures>> accelerationStructures,
                               Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
                               Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer,
                               Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> cbvSrvUavHeap)
@@ -115,6 +115,12 @@ void RaytracePass::OnShaderReload()
 {
     InitializeRaytracingPipeline();
     CreateShaderBindingTable();
+}
+
+void RaytracePass::OnSceneChange(int sceneNum)
+{
+    m_sceneNum = sceneNum;
+    CreateShaderResourceHeap();
 }
 
 void RaytracePass::InitializeRaytracingPipeline()
@@ -362,15 +368,15 @@ void RaytracePass::CreateShaderResourceHeap()
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     m_device->CreateUnorderedAccessView(m_outputResource.Get(), nullptr, &uavDesc, srvHandle);
-
-    srvHandle.ptr += m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
+    
+    srvHandle.ptr += increment;
+        
     spdlog::debug("Creating SRV for top level acceleration structure");
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = DXGI_FORMAT_UNKNOWN;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.RaytracingAccelerationStructure.Location = m_accelerationStructures->GetTopLevelAS().p_result->GetGPUVirtualAddress();
+    srvDesc.RaytracingAccelerationStructure.Location = m_accelerationStructures[m_sceneNum]->GetTopLevelAS().p_result->GetGPUVirtualAddress();
     m_device->CreateShaderResourceView(nullptr, &srvDesc, srvHandle);
 
     // CBV for camera is already created in CreateConstantCameraBuffer() in Renderer

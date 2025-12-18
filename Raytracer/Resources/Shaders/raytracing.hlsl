@@ -52,7 +52,7 @@ void RayGen() {
 
     TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
 
-    float3 color = payload.colorAndDistance.xyz * (1 - (payload.colorAndDistance.w / 1)); 
+    float3 color = payload.colorAndDistance.xyz; 
     gOutput[launchIndex] = float4(color, 1.f);
 }
 

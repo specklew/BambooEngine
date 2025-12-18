@@ -9,7 +9,7 @@ public:
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList, 
-        std::shared_ptr<AccelerationStructures> accelerationStructures,
+        std::vector<std::shared_ptr<AccelerationStructures>> accelerationStructures,
         Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
         Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer,
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvUavHeap);
@@ -18,6 +18,7 @@ public:
     void Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj);
     void OnResize();
     void OnShaderReload();
+    void OnSceneChange(int sceneNum);
     
 private:
     void InitializeRaytracingPipeline();
@@ -33,7 +34,7 @@ private:
     void CreateShaderBindingTable();
     
     // Properties
-    std::shared_ptr<AccelerationStructures> m_accelerationStructures;
+    std::vector<std::shared_ptr<AccelerationStructures>> m_accelerationStructures;
     
     Microsoft::WRL::ComPtr<ID3D12Device5> m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
@@ -63,4 +64,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBuffer;
 
     std::shared_ptr<ShaderBindingTable> m_shaderBindingTable;
+    
+    int m_sceneNum;
 };

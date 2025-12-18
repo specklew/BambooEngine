@@ -31,6 +31,11 @@ void SceneBuilder::AddChild(const std::shared_ptr<SceneNode>& parent, const std:
     parent->AddChild(child);
 }
 
+void SceneBuilder::SetName(const std::string& name)
+{
+    m_name = name;
+}
+
 void SceneBuilder::PrintDebugInfo()
 {
 #if _DEBUG
@@ -72,6 +77,7 @@ std::shared_ptr<Scene> SceneBuilder::Build()
     scene.m_gameObjects = std::move(m_gameObjects);
     scene.m_models = std::move(m_models);
     scene.m_root = m_root;
+    scene.m_name = m_name;
     return std::make_shared<Scene>(std::move(scene));
 }
 

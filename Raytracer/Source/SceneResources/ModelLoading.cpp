@@ -371,6 +371,8 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
 
     auto scene_builder = SceneBuilder();
 
+    scene_builder.SetName(assetId.AsString());
+    
     for (auto gltf_model : model.meshes)
     {
         auto current_model = std::make_shared<Model>();
