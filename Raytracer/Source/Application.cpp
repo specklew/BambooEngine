@@ -16,7 +16,7 @@ void Application::Run()
 
 	m_keyboard = std::make_unique<DirectX::Keyboard>();
 	
-	Window::Create(m_hInstance, { 0, 0, 800, 600 }, this);
+	Window::Create(m_hInstance, { 0, 0, 1280, 720 }, this);
 	
 	m_renderer->Initialize();
 	m_ready = true;

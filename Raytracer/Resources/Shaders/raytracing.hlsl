@@ -50,7 +50,7 @@ void RayGen() {
     ray.TMin = 0.001;
     ray.TMax = 1000;
 
-    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 0, 0, ray, payload);
 
     float3 color = payload.colorAndDistance.xyz; 
     gOutput[launchIndex] = float4(color, 1.f);
@@ -82,6 +82,6 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attrib)
     //float3 hitColor = BTriVertex[indices[vertId + 0]].color * barycentrics.x +
     //BTriVertex[indices[vertId + 1]].color * barycentrics.y +
     //BTriVertex[indices[vertId + 2]].color * barycentrics.z;
-  
+    
     payload.colorAndDistance = float4(barycentrics.x,barycentrics.y,barycentrics.z, RayTCurrent()); 
 }

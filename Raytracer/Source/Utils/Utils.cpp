@@ -203,10 +203,10 @@ DirectX::XMFLOAT4X4 MathUtils::XMFloat4x4Identity()
 
 void MathUtils::PrintMatrix(const DirectX::XMFLOAT4X4& matrix)
 {
-	spdlog::info("Printing Matrix:");
+	spdlog::debug("ix:");
 	for (const auto row : matrix.m)
 	{
-		spdlog::info("| {:>8.4} {:>8.4} {:>8.4} {:>8.4} |",
+		spdlog::debug("| {:>8.4} {:>8.4} {:>8.4} {:>8.4} |",
 		             row[0],
 		             row[1],
 		             row[2],
@@ -216,10 +216,10 @@ void MathUtils::PrintMatrix(const DirectX::XMFLOAT4X4& matrix)
 
 void MathUtils::PrintMatrix(const DirectX::XMMATRIX& matrix)
 {
-	spdlog::info("Printing Matrix:");
+	spdlog::debug("ix:");
 	for (int i = 0; i < 4; i++)
 	{
-		spdlog::info("| {:>8.4} {:>8.4} {:>8.4} {:>8.4} |",
+		spdlog::debug("| {:>8.4} {:>8.4} {:>8.4} {:>8.4} |",
 		             matrix.r[i].m128_f32[0],
 		             matrix.r[i].m128_f32[1],
 		             matrix.r[i].m128_f32[2],

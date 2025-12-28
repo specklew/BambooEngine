@@ -32,10 +32,8 @@
 
 using namespace Microsoft::WRL;
 
-static AutoCVarEnum g_currentScene(
-	"renderer.initialScene",
-	"Specifies which scene to load on startup.",
-	ModelLoading::LOADED_SCENES::A_BEAUTIFUL_GAME);
+static AutoCVarEnum g_currentScene("renderer.initialScene", "Specifies which scene to load on startup.", ModelLoading::LOADED_SCENES::A_BEAUTIFUL_GAME);
+static AutoCVarFloat g_cameraSpeed("renderer.camera.speed", "Specifies the base speed of camera", 1.0f, CVarFlags::EditDrag, 1.0f, 20.0f);
 
 void Renderer::Initialize()
 {
@@ -103,29 +101,38 @@ void Renderer::Initialize()
 	FlushCommandQueue();
 	ResetCommandList();
 }
-
+float speedMultiplier = 1.0f;
 void Renderer::Update(double elapsedTime, double totalTime)
 {
 	auto key_state = DirectX::Keyboard::Get().GetState();
 
+	if (key_state.LeftShift || key_state.RightShift)
+	{
+		if (speedMultiplier < 100.0f) speedMultiplier *= 1.002f;
+	}
+	else
+	{
+		speedMultiplier = 1.0f;
+	}
+	
 	if (key_state.W)
 	{
-		m_camera->AddPosition(m_camera->GetForward() * static_cast<float>(elapsedTime) * m_camera->GetSpeed());
+		m_camera->AddPosition(m_camera->GetForward() * static_cast<float>(elapsedTime) * g_cameraSpeed.Get() * speedMultiplier);
 	}
 
 	if (key_state.S)
 	{
-		m_camera->AddPosition(m_camera->GetForward() * static_cast<float>(elapsedTime) * -m_camera->GetSpeed());
+		m_camera->AddPosition(m_camera->GetForward() * static_cast<float>(elapsedTime) * -g_cameraSpeed.Get() * speedMultiplier);
 	}
 
 	if (key_state.D)
 	{
-		m_camera->AddPosition(m_camera->GetRight() * static_cast<float>(elapsedTime) * m_camera->GetSpeed());
+		m_camera->AddPosition(m_camera->GetRight() * static_cast<float>(elapsedTime) * g_cameraSpeed.Get() * speedMultiplier);
 	}
 
 	if (key_state.A)
 	{
-		m_camera->AddPosition(m_camera->GetRight() * static_cast<float>(elapsedTime) * -m_camera->GetSpeed());
+		m_camera->AddPosition(m_camera->GetRight() * static_cast<float>(elapsedTime) * -g_cameraSpeed.Get() * speedMultiplier);
 	}
 
 	if (key_state.F2)
@@ -252,7 +259,6 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	}
 	else
 	{
-		m_accelerationStructures[g_currentScene.Get()]->CreateTopLevelAS(g_d3d12Device, m_d3d12CommandList, m_accelerationStructures[g_currentScene.Get()]->GetInstances(), true);
 		m_raytracePass->Render(backBuffer);
 	}
 

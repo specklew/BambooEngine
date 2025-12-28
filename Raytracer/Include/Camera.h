@@ -27,8 +27,6 @@ public:
     [[nodiscard]] DirectX::SimpleMath::Vector3 GetForward() const { return m_forward; }
     [[nodiscard]] DirectX::SimpleMath::Vector3 GetRight() const { return m_right; }
     [[nodiscard]] DirectX::SimpleMath::Vector3 GetUp() const { return m_up; }
-
-    [[nodiscard]] float GetSpeed() const { return m_speed; }
     
 private:
     DirectX::SimpleMath::Vector3 m_position = {0.0f, 0.0f, -10.0f};
@@ -41,8 +39,6 @@ private:
     float m_aspectRatio = 16.0f / 9.0f;
     float m_nearZ = 0.1f;
     float m_farZ = 1000.0f;
-
-    float m_speed = 3.0f;
     
     DirectX::XMFLOAT4X4 m_viewMatrix = {};
     DirectX::XMFLOAT4X4 m_projectionMatrix = {};

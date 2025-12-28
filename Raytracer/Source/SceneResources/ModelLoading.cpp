@@ -137,7 +137,7 @@ static void ExtractIndices(tinygltf::Model& model, std::vector<uint32_t>& outInd
 static void ExtractIndices(const tinygltf::Model& model, const tinygltf::Primitive& primitive, std::vector<uint32_t>& outIndices)
 {
     assert(primitive.indices >= 0 && "Failed loading glTF model. Mesh primitive must have indices");
-
+    
     const auto& accessor = model.accessors[primitive.indices];
     const auto& buffer_view = model.bufferViews[accessor.bufferView];
     const auto& buffer = model.buffers[buffer_view.buffer];
@@ -342,7 +342,7 @@ static void TraverseNode(Renderer& renderer, const tinygltf::Model& model, Scene
     const tinygltf::Node& gltf_node = model.nodes[nodeIndex];
     auto current_node = std::make_shared<SceneNode>();
     
-    if (gltf_node.mesh != 0)
+    if (gltf_node.mesh > 0)
     {
         auto gameObject = renderer.InstantiateGameObject();
         sceneBuilder.AddGameObject(gameObject, sceneBuilder.GetModel(gltf_node.mesh));
@@ -382,6 +382,12 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
             current_model->AddMesh(prim);
         }
         scene_builder.AddModel(current_model);
+    }
+
+    if (model.defaultScene < 0)
+    {
+        spdlog::warn("Failed to load defaultScene from model: {}, defaulting to 0.", assetId.AsString());
+        model.defaultScene = 0;
     }
     
     auto gltf_scene = model.scenes[model.defaultScene];
