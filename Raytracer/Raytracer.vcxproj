@@ -120,6 +120,7 @@
     <ClInclude Include="Include\Resources\StringId.h" />
     <ClInclude Include="Include\Resources\VertexBuffer.h" />
     <ClInclude Include="Include\SceneResources\GameObject.h" />
+    <ClInclude Include="Include\SceneResources\Material.h" />
     <ClInclude Include="Include\SceneResources\Model.h" />
     <ClInclude Include="Include\SceneResources\ModelLoading.h" />
     <ClInclude Include="Include\SceneResources\Primitive.h" />
@@ -319,6 +320,7 @@
     <ClCompile Include="Source\Resources\StringId.cpp"/>
     <ClCompile Include="Source\Resources\VertexBuffer.cpp" />
     <ClCompile Include="Source\SceneResources\GameObject.cpp"/>
+    <ClCompile Include="Source\SceneResources\Material.cpp"/>
     <ClCompile Include="Source\SceneResources\Model.cpp"/>
     <ClCompile Include="Source\SceneResources\ModelLoading.cpp"/>
     <ClCompile Include="Source\SceneResources\Scene.cpp"/>

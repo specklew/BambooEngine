@@ -240,63 +240,6 @@ std::vector<std::shared_ptr<Scene>> ModelLoading::LoadAllScenes(Renderer& render
     return std::move(scenes);
 }
 
-std::shared_ptr<Primitive> ModelLoading::LoadModel(Renderer& renderer, const AssetId& assetId)
-{
-    tinygltf::Model model;
-    bool succeeded = LoadTinyGLTFModel(assetId.AsPath(), model);
-
-    assert(succeeded && "Failed to load model");
-    
-    // TODO: Support more.
-    if (model.meshes.size() != 1)
-    {
-        spdlog::error("The engine is currently limited to loading models with exactly one mesh. The model at path {} has {} meshes.", assetId.AsString(), model.meshes.size());
-        assert(false && "Failed to load model. Only one mesh per model is supported.");
-    }
-
-    if (model.meshes[0].primitives.size() != 1)
-    {
-        spdlog::error("The engine is currently limited to loading models with exactly one primitive per mesh. The model at path {} has {} primitives in its first mesh.", assetId.AsString(), model.meshes[0].primitives.size());
-        assert(false && "Failed to load model. Only one primitive per mesh is supported.");
-    }
-
-    std::vector<Vertex> vertices = {};
-    std::vector<uint32_t> indices = {};
-
-    ExtractVertices(model, vertices);
-    ExtractIndices(model, indices);
-    
-    assert(vertices.size() < INT_MAX);
-    assert(indices.size() < INT_MAX);
-    
-    // Here we would normally calculate tangents and AABB.
-
-    return renderer.CreatePrimitive(vertices, indices);
-}
-
-std::vector<std::shared_ptr<Primitive>> ModelLoading::LoadFullModel(Renderer& renderer, const AssetId& assetId)
-{
-    tinygltf::Model model;
-    bool succeeded = LoadTinyGLTFModel(assetId.AsPath(), model);
-
-    assert(succeeded && "Failed to load model");
-    
-    std::vector<std::shared_ptr<Primitive>> primitives;
-    
-    for (auto& mesh : model.meshes)
-    {
-        for (auto& primitive : mesh.primitives)
-        {
-            auto prim = LoadPrimitive(renderer, model, primitive);
-            primitives.push_back(prim);
-        }
-    }
-
-    spdlog::info("Loaded model at path {} with {} meshes and {} primitives.", assetId.AsString(), model.meshes.size(), primitives.size());
-    
-    return primitives;
-}
-
 static DirectX::SimpleMath::Vector3 ReadNodePosition(const tinygltf::Node& node)
 {
     if (node.translation.size() == 3)
@@ -363,6 +306,8 @@ static void TraverseNode(Renderer& renderer, const tinygltf::Model& model, Scene
 
 std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId& assetId)
 {
+    spdlog::info("Loading scene {}", assetId.AsString());
+    
     tinygltf::Model model;
     bool succeeded = LoadTinyGLTFModel(assetId.AsPath(), model);
 

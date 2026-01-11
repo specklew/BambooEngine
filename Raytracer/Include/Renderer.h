@@ -6,6 +6,7 @@
 #include "Keyboard.h"
 #include "Utils/Utils.h"
 
+struct Material;
 class GameObject;
 struct AccelerationStructureBuffers;
 class Scene;
@@ -155,8 +156,6 @@ private:
 	
 	DirectX::XMFLOAT4X4 m_world = MathUtils::XMFloat4x4Identity();
 
-	std::vector<std::shared_ptr<Primitive>> m_primitives;
-
 	std::shared_ptr<Camera> m_camera;
 
 	std::shared_ptr<DirectX::Keyboard::KeyboardStateTracker> m_keyboardTracker;
@@ -164,4 +163,6 @@ private:
 	int m_currentModelCBVIndex = 0;
 	
 	std::vector<std::shared_ptr<Scene>> m_loadedScenes;
+
+	std::shared_ptr<Material> m_material;
 };

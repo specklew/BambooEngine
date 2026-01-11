@@ -23,6 +23,7 @@
 #include "Resources/ConstantBuffer.h"
 #include "Resources/IndexBuffer.h"
 #include "Resources/VertexBuffer.h"
+#include "SceneResources/Material.h"
 #include "SceneResources/Model.h"
 #include "tinygltf/tiny_gltf.h"
 
@@ -54,8 +55,6 @@ void Renderer::Initialize()
 	
 	CreateCommandList();
 	ResetCommandList();
-
-	m_primitives = ModelLoading::LoadFullModel(*this, AssetId("resources/models/abeautifulgame.glb"));
 	
 	CreateRTVDescriptorHeap();
 	CreateRenderTargetViews();
@@ -77,6 +76,9 @@ void Renderer::Initialize()
 	CreateWorldProjCBV();
 
 	m_loadedScenes = ModelLoading::LoadAllScenes(*this);
+
+	m_material = std::make_shared<Material>();
+	m_material->data.albedoColor = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
 	
 	CreateRasterizationRootSignature();
 

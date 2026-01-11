@@ -6,9 +6,9 @@ ConstantBuffer::ConstantBuffer(const Microsoft::WRL::ComPtr<ID3D12Device5>& devi
     m_sizeInBytes = GetUnderlyingResource()->GetDesc().Width;
 }
 
-void ConstantBuffer::MapDataToWholeBuffer(DirectX::XMFLOAT4X4** data) const
+void ConstantBuffer::MapDataToWholeBuffer(void** data) const
 {
-    GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(data));
+    GetUnderlyingResource()->Map(0, nullptr, data);
 }
 
 void ConstantBuffer::Unmap() const
