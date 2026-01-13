@@ -6,7 +6,7 @@ struct Material
 {
     Material();
     
-    std::shared_ptr<ConstantBuffer> materialBuffer;
+    std::shared_ptr<ConstantBuffer> m_materialBuffer;
 
     struct MaterialData
     {
@@ -16,5 +16,7 @@ struct Material
         // roughness texture
         // maybe fresnel?
         // material transform - affine transform of material UVs - will I use it??
-    } data;
+    } m_data;
+
+    MaterialData* m_pData;
 };

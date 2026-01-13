@@ -16,11 +16,10 @@ Material::Material()
         nullptr,
         IID_PPV_ARGS(&materialResource));
     
-    materialBuffer = std::make_shared<ConstantBuffer>(Renderer::g_d3d12Device.Get(), materialResource);
+    m_materialBuffer = std::make_shared<ConstantBuffer>(Renderer::g_d3d12Device.Get(), materialResource);
 
-    materialBuffer->SetResourceName(L"Material Constant Buffer");
+    m_materialBuffer->SetResourceName(L"Material Constant Buffer");
 
-    auto mapped_data = &data;
-    const auto data_ptr = reinterpret_cast<void**>(&mapped_data);
-    materialBuffer->MapDataToWholeBuffer(data_ptr);
+    m_pData = &m_data;
+    m_materialBuffer->MapDataToWholeBuffer(reinterpret_cast<void**>(&m_pData));
 }

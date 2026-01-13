@@ -22,9 +22,8 @@ void GameObject::UpdateWorldMatrix() const
 {
     auto data_bucket = DirectX::XMFLOAT4X4{};
     DirectX::XMFLOAT4X4* mapped_data = &data_bucket;
-    void** data_ptr = reinterpret_cast<void**>(&data_bucket);
     
-    m_worldMatrixBuffer->MapDataToWholeBuffer(data_ptr);
+    m_worldMatrixBuffer->MapDataToWholeBuffer(reinterpret_cast<void**>(&mapped_data));
     memcpy(&mapped_data[0], &m_worldMatrix, sizeof(DirectX::XMFLOAT4X4));
     m_worldMatrixBuffer->Unmap();
 }
