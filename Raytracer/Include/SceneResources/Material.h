@@ -5,6 +5,7 @@ class ConstantBuffer;
 struct Material
 {
     Material();
+    void UpdateMaterial();
     
     std::shared_ptr<ConstantBuffer> m_materialBuffer;
 
@@ -18,5 +19,6 @@ struct Material
         // material transform - affine transform of material UVs - will I use it??
     } m_data;
 
-    MaterialData* m_pData;
+private:
+    MaterialData m_mappedData;
 };

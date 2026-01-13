@@ -25,7 +25,6 @@ void Application::Run()
 
 	m_ready = false;
 	m_renderer->CleanUp();
-	m_renderer.reset();
 
 	ResourceManager::Get().ReleaseResources();
 	//ReportLiveObjects();

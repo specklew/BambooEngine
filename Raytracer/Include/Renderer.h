@@ -42,7 +42,7 @@ public:
 	
 	void ToggleRasterization();
 
-	std::shared_ptr<Primitive> CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+	std::shared_ptr<Primitive> CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const std::shared_ptr<Material>& material = nullptr);
 	std::shared_ptr<GameObject> InstantiateGameObject();
 
 	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_d3d12Device;

@@ -12,6 +12,7 @@
 #include "SceneResources/Scene.h"
 #include "SceneResources/SceneNode.h"
 #include "ResourceManager/ResourceManagerTypes.h"
+#include "SceneResources/Material.h"
 #include "tinygltf/tiny_gltf.h"
 
 static void ExtractVertices(tinygltf::Model& model, std::vector<Vertex>& outVertices)
@@ -225,7 +226,17 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     
     // Here we would normally calculate tangents and AABB.
 
-    return renderer.CreatePrimitive(vertices, indices);
+    std::shared_ptr<Material> material = std::make_shared<Material>();
+
+    float random = RaytracerRandom::g_random->GetRandomFloat();
+        
+    material->m_data.albedoColor.x = random;
+    material->m_data.albedoColor.y = random;
+    material->m_data.albedoColor.z = random;
+    material->m_data.albedoColor.w = 1.0f;
+    material->UpdateMaterial();
+    
+    return renderer.CreatePrimitive(vertices, indices, material);
 }
 
 std::vector<std::shared_ptr<Scene>> ModelLoading::LoadAllScenes(Renderer& renderer)

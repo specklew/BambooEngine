@@ -78,7 +78,7 @@ void Renderer::Initialize()
 	m_loadedScenes = ModelLoading::LoadAllScenes(*this);
 
 	m_material = std::make_shared<Material>();
-	m_material->data.albedoColor = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
+	m_material->m_data.albedoColor = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
 	
 	CreateRasterizationRootSignature();
 
@@ -245,6 +245,9 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			
 			for (const auto& primitive : go->GetModel()->GetMeshes())
 			{
+				gpuAddress = primitive->m_material->m_materialBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+				m_d3d12CommandList->SetGraphicsRootConstantBufferView(2, gpuAddress);
+				
 				auto vertexBuffer = primitive->GetVertexBuffer();
 				auto indexBuffer = primitive->GetIndexBuffer();
 	
@@ -628,7 +631,9 @@ void Renderer::CreateWorldProjCBV()
 
 void Renderer::CreateRasterizationRootSignature()
 {
-	CD3DX12_ROOT_PARAMETER rootParameters[2];
+	constexpr int num_params = 3;
+	
+	CD3DX12_ROOT_PARAMETER rootParameters[num_params];
 	
 	D3D12_DESCRIPTOR_RANGE cbvRange;
 	cbvRange.BaseShaderRegister = 0;
@@ -655,9 +660,10 @@ void Renderer::CreateRasterizationRootSignature()
 	
 	rootParameters[0].InitAsDescriptorTable(3, ranges);
 	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer
+	rootParameters[2].InitAsConstantBufferView(2);
 
 	CD3DX12_ROOT_SIGNATURE_DESC desc = {};
-	desc.NumParameters = 2;
+	desc.NumParameters = num_params;
 	desc.pParameters = rootParameters;
 	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
@@ -934,7 +940,7 @@ void Renderer::ToggleRasterization()
 	m_rasterize = !m_rasterize;
 }
 
-std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const std::shared_ptr<Material>& material)
 {
 	ComPtr<ID3D12Resource> vertex_upload_buffer;
 	ComPtr<ID3D12Resource> index_upload_buffer;
@@ -970,7 +976,7 @@ std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& 
 	auto vertex_buffer = std::make_shared<VertexBuffer>(g_d3d12Device, vertex_buffer_resource, static_cast<UINT>(vertices.size()), sizeof(Vertex));
 	auto index_buffer = std::make_shared<IndexBuffer>(g_d3d12Device, index_buffer_resource, static_cast<UINT>(indices.size()), DXGI_FORMAT_R32_UINT);
 
-	auto primitive = std::make_shared<Primitive>(vertex_buffer, index_buffer);
+	auto primitive = std::make_shared<Primitive>(vertex_buffer, index_buffer, material);
 
 	AssertFreeClear(&cpuVertex);
 	AssertFreeClear(&cpuIndex);

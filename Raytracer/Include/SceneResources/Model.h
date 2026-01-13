@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+struct Material;
 class ConstantBuffer;
 struct Primitive;
 

@@ -12,6 +12,11 @@ cbuffer ModelTransforms : register(b1)
     float4x4 world;
 }
 
+cbuffer Material : register(b2)
+{
+    float4 ambient;
+}
+
 struct VertexIn
 {
     float3 PosL  : POSITION;
@@ -44,5 +49,5 @@ VertexOut vertex(VertexIn vin)
 
 float4 pixel(VertexOut pin) : SV_Target
 {
-    return float4(1,1,1,1)/*pin.Color*/;
+    return ambient/*pin.Color*/;
 }

@@ -19,7 +19,12 @@ Material::Material()
     m_materialBuffer = std::make_shared<ConstantBuffer>(Renderer::g_d3d12Device.Get(), materialResource);
 
     m_materialBuffer->SetResourceName(L"Material Constant Buffer");
+}
 
-    m_pData = &m_data;
-    m_materialBuffer->MapDataToWholeBuffer(reinterpret_cast<void**>(&m_pData));
+void Material::UpdateMaterial()
+{
+    auto p_data = &m_mappedData;
+    m_materialBuffer->MapDataToWholeBuffer(reinterpret_cast<void**>(&p_data));
+    memcpy(p_data, &m_data, sizeof(MaterialData));
+    m_materialBuffer->Unmap();
 }
