@@ -50,7 +50,7 @@ void RayGen() {
     ray.TMin = 0.001;
     ray.TMax = 1000;
 
-    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 0, 0, ray, payload);
+    TraceRay(SceneBVH, RAY_FLAG_NONE, ~0, 0, 0, 0, ray, payload);
 
     float3 color = payload.colorAndDistance.xyz; 
     gOutput[launchIndex] = float4(color, 1.f);

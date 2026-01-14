@@ -152,8 +152,8 @@ static void ExtractIndices(const tinygltf::Model& model, const tinygltf::Primiti
             for (int i = 0; i < accessor.count; i+=3)
             {
                 outIndices.push_back(rawIndices[i]);
-                outIndices.push_back(rawIndices[i+1]);
                 outIndices.push_back(rawIndices[i+2]);
+                outIndices.push_back(rawIndices[i+1]);
             }
 
             break;
@@ -166,8 +166,8 @@ static void ExtractIndices(const tinygltf::Model& model, const tinygltf::Primiti
             for (int i = 0; i < accessor.count; i+=3)
             {
                 outIndices.push_back(rawIndices[i]);
-                outIndices.push_back(rawIndices[i+1]);
                 outIndices.push_back(rawIndices[i+2]);
+                outIndices.push_back(rawIndices[i+1]);
             }
             break;
         }
