@@ -3,6 +3,7 @@
 #include <comdef.h>
 
 #include "Renderer.h"
+#include "tinygltf/tiny_gltf.h"
 
 void ThrowIfFailed(HRESULT hr)
 {
@@ -128,7 +129,7 @@ namespace RenderingUtils
 
     ComPtr<ID3D12Resource> CreateDefaultBuffer(
 		ID3D12Device* device,
-		ID3D12GraphicsCommandList* cmdList,
+		ID3D12GraphicsCommandList* commandList,
 		const void* initData,
 		const UINT64 byteSize,
 		ComPtr<ID3D12Resource>& uploadBuffer)
@@ -176,14 +177,14 @@ namespace RenderingUtils
 			const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(defaultBuffer.Get(),
 				D3D12_RESOURCE_STATE_COMMON,
 				D3D12_RESOURCE_STATE_COPY_DEST);
-			cmdList->ResourceBarrier(1, &barrier);
+			commandList->ResourceBarrier(1, &barrier);
 		}
-		UpdateSubresources<1>(cmdList, defaultBuffer.Get(), uploadBuffer.Get(), 0, 0, 1, &subResourceData);
+		UpdateSubresources<1>(commandList, defaultBuffer.Get(), uploadBuffer.Get(), 0, 0, 1, &subResourceData);
 		{
 			const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(defaultBuffer.Get(),
 				D3D12_RESOURCE_STATE_COPY_DEST,
 				D3D12_RESOURCE_STATE_GENERIC_READ);
-			cmdList->ResourceBarrier(1, &barrier);
+			commandList->ResourceBarrier(1, &barrier);
 		}
 		// Note: uploadBuffer has to be kept alive after the above function
 		// calls because the command list has not been executed yet that
@@ -192,6 +193,82 @@ namespace RenderingUtils
 		// has been executed.
 		return defaultBuffer;
 	}
+
+	ComPtr<ID3D12Resource> CreateDefaultTexture(
+		ID3D12Device* device,
+		ID3D12GraphicsCommandList* commandList,
+		const tinygltf::Image& image,
+		ComPtr<ID3D12Resource>& uploadBuffer)
+    {
+		spdlog::debug("Creating default texture resource.");
+    	
+	    ComPtr<ID3D12Resource> defaultTexture;
+	    {
+		    const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+	    	const auto textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, image.width, image.height, 1, 1);
+
+	    	ThrowIfFailed(device->CreateCommittedResource(
+				&heapProperties,
+				D3D12_HEAP_FLAG_NONE,
+				&textureDesc,
+				D3D12_RESOURCE_STATE_COPY_DEST,
+				nullptr,
+				IID_PPV_ARGS(&defaultTexture)));
+	    }
+    	
+    	D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
+    	UINT rowCount;
+    	UINT64 rowSize;
+    	UINT64 size;
+    	auto desc = defaultTexture->GetDesc();
+
+    	device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, &rowCount, &rowSize, &size);
+	    
+	    {
+		    const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	    	const auto textureDesc = CD3DX12_RESOURCE_DESC::Buffer(size);
+
+	    	ThrowIfFailed(device->CreateCommittedResource(
+	    		&heapProperties,
+	    		D3D12_HEAP_FLAG_NONE,
+	    		&textureDesc,
+	    		D3D12_RESOURCE_STATE_GENERIC_READ,
+	    		nullptr,
+	    		IID_PPV_ARGS(&uploadBuffer)));
+	    }
+
+    	void* pData;
+    	ThrowIfFailed(uploadBuffer->Map(0, nullptr, &pData));
+
+    	for (auto i = 0; i < rowCount; i++)
+    	{
+    		memcpy(
+    			static_cast<uint8_t*>(pData) + rowSize * i,
+    			&image.image[0] + image.width * image.component * i,
+    			image.width * image.component);
+    	}
+
+    	D3D12_TEXTURE_COPY_LOCATION defaultCopyLocation = {};
+    	defaultCopyLocation.pResource = defaultTexture.Get();
+    	defaultCopyLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    	defaultCopyLocation.SubresourceIndex = 0;
+
+    	D3D12_TEXTURE_COPY_LOCATION uploadCopyLocation = {};
+    	uploadCopyLocation.pResource = uploadBuffer.Get();
+    	uploadCopyLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    	uploadCopyLocation.PlacedFootprint = footprint;
+
+    	commandList->CopyTextureRegion(&defaultCopyLocation, 0, 0, 0, &uploadCopyLocation, nullptr);
+
+    	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+		    defaultTexture.Get(),
+		    D3D12_RESOURCE_STATE_COPY_DEST,
+		    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+
+		commandList->ResourceBarrier(1, &barrier);
+    	
+    	return defaultTexture;
+    }
 }
 
 DirectX::XMFLOAT4X4 MathUtils::XMFloat4x4Identity()

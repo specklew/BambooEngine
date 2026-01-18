@@ -1,3 +1,12 @@
+#define MAX_TEXTURES 256
+
+SamplerState gsamPointWrap : register(s0);
+SamplerState gsamPointClamp : register(s1);
+SamplerState gsamLinearWrap : register(s2);
+SamplerState gsamLinearClamp : register(s3);
+SamplerState gsamAnisotropicWrap : register(s4);
+SamplerState gsamAnisotropicClamp : register(s5);
+
 cbuffer CameraParams : register(b0)
 {
     float4x4 viewProj;
@@ -15,7 +24,10 @@ cbuffer ModelTransforms : register(b1)
 cbuffer Material : register(b2)
 {
     float4 ambient;
+    uint textureIndex;
 }
+
+Texture2D gAlbedoTextures[MAX_TEXTURES] : register(t1, space0);
 
 struct VertexIn
 {
@@ -49,5 +61,10 @@ VertexOut vertex(VertexIn vin)
 
 float4 pixel(VertexOut pin) : SV_Target
 {
-    return ambient/*pin.Color*/;
+    float4 textureAlbedo = float4(1,1,1,1);
+    if (textureIndex != -1)
+    {
+        textureAlbedo = gAlbedoTextures[textureIndex].Sample(gsamLinearWrap, float2(0.9f, 0.1f));
+    }
+    return ambient * textureAlbedo/*pin.Color*/;
 }

@@ -6,6 +6,7 @@
 #include "Keyboard.h"
 #include "Utils/Utils.h"
 
+class Texture;
 struct Material;
 class GameObject;
 struct AccelerationStructureBuffers;
@@ -43,9 +44,11 @@ public:
 	void ToggleRasterization();
 
 	std::shared_ptr<Primitive> CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const std::shared_ptr<Material>& material = nullptr);
+	std::shared_ptr<Texture> CreateTextureFromGLTF(const tinygltf::Image& image);
 	std::shared_ptr<GameObject> InstantiateGameObject();
 
 	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_d3d12Device;
+	inline static int g_textureIndex = 0; 
 	
 private:
 	void SetupDeviceAndDebug();
@@ -83,10 +86,14 @@ private:
 	
 	void SetupAccelerationStructures();
 
+	void CreateTextureSRV(const std::shared_ptr<Texture>& texture);
+
 	void InitializeImGui();
 	void RenderImGui();
 
 	void OnShaderReload();
+
+	std::array<const CD3DX12_STATIC_SAMPLER_DESC, Constants::Graphics::STATIC_SAMPLERS_COUNT> GetStaticSamplers();
 	
 	std::shared_ptr<RaytracePass> m_raytracePass;
 	std::vector<std::shared_ptr<AccelerationStructures>> m_accelerationStructures;
@@ -165,4 +172,5 @@ private:
 	std::vector<std::shared_ptr<Scene>> m_loadedScenes;
 
 	std::shared_ptr<Material> m_material;
+	std::vector<std::shared_ptr<Texture>> m_textures = std::vector<std::shared_ptr<Texture>>();
 };

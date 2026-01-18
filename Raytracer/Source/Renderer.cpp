@@ -22,6 +22,7 @@
 #include "Window.h"
 #include "Resources/ConstantBuffer.h"
 #include "Resources/IndexBuffer.h"
+#include "Resources/Texture.h"
 #include "Resources/VertexBuffer.h"
 #include "SceneResources/Material.h"
 #include "SceneResources/Model.h"
@@ -656,16 +657,27 @@ void Renderer::CreateRasterizationRootSignature()
 	tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	tlasRange.OffsetInDescriptorsFromTableStart = 3;
 
-	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange};
+	D3D12_DESCRIPTOR_RANGE textureRange;
+	textureRange.BaseShaderRegister = 1;
+	textureRange.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
+	textureRange.RegisterSpace = 0;
+	textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	textureRange.OffsetInDescriptorsFromTableStart = 4;
+
+	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, textureRange};
 	
-	rootParameters[0].InitAsDescriptorTable(3, ranges);
+	rootParameters[0].InitAsDescriptorTable(4, ranges);
 	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer
 	rootParameters[2].InitAsConstantBufferView(2);
 
+	auto static_samplers = GetStaticSamplers();
+	
 	CD3DX12_ROOT_SIGNATURE_DESC desc = {};
 	desc.NumParameters = num_params;
 	desc.pParameters = rootParameters;
 	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+	desc.NumStaticSamplers = static_samplers.size();
+	desc.pStaticSamplers = static_samplers.data();
 
 	ComPtr<ID3DBlob> serializedRootSignature = nullptr;
 	ComPtr<ID3DBlob> errorBlob = nullptr;
@@ -869,6 +881,38 @@ void Renderer::SetupAccelerationStructures()
 	FlushCommandQueue();
 }
 
+void Renderer::CreateTextureSRV(const std::shared_ptr<Texture>& texture)
+{
+	assert(texture && "Passed texture cannot be null!");
+	assert(texture->GetUnderlyingResource() && "Texture resources cannot be null!");
+
+	spdlog::debug("Setting up texture SRV");
+
+	const auto& resource = texture->GetUnderlyingResource();
+	const auto& desc = resource->GetDesc();
+	
+	D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+	if (desc.DepthOrArraySize == 1)
+	{
+		srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		srv_desc.Texture2D.MostDetailedMip = 0;
+		srv_desc.Texture2D.ResourceMinLODClamp = 0.0f;
+		srv_desc.Texture2D.MipLevels = desc.MipLevels;
+	}
+	else
+	{
+		spdlog::error("Texture 2D array functionality is not yet supported!");
+		// TODO: In case that texture is a TEXTURE 2D ARRAY
+	}
+	srv_desc.Format = desc.Format;
+	srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; // TODO: Check what this does and why default is best here.
+
+	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	handle.Offset(4 + texture->GetTextureIndex(),  g_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+
+	g_d3d12Device->CreateShaderResourceView(resource.Get(), &srv_desc, handle);
+}
+
 void Renderer::InitializeImGui()
 {
 	// Make process DPI aware and get main monitor scale
@@ -935,6 +979,56 @@ void Renderer::OnShaderReload()
 	spdlog::info("Shaders reloaded successfully.");
 }
 
+std::array<const CD3DX12_STATIC_SAMPLER_DESC, Constants::Graphics::STATIC_SAMPLERS_COUNT> Renderer::GetStaticSamplers()
+{
+	// Apps usually only need a handful of samplers. So just define them
+	// all up front and keep them available as part of the root signature.
+
+	const CD3DX12_STATIC_SAMPLER_DESC pointWrap(
+		0, // shaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_POINT, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP, // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP, // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
+	const CD3DX12_STATIC_SAMPLER_DESC pointClamp(
+		1, // shaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_POINT, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP); // addressW
+	const CD3DX12_STATIC_SAMPLER_DESC linearWrap(
+		2, // shaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_LINEAR, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP, // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP, // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
+	const CD3DX12_STATIC_SAMPLER_DESC linearClamp(
+		3, // shaderRegister
+		D3D12_FILTER_MIN_MAG_MIP_LINEAR, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP); // addressW
+	const CD3DX12_STATIC_SAMPLER_DESC anisotropicWrap(
+		4, // shaderRegister
+		D3D12_FILTER_ANISOTROPIC, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP, // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP, // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_WRAP, // addressW
+		0.0f, // mipLODBias
+		8); // maxAnisotropy
+	const CD3DX12_STATIC_SAMPLER_DESC anisotropicClamp(
+		5, // shaderRegister
+		D3D12_FILTER_ANISOTROPIC, // filter
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // addressU
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // addressV
+		D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // addressW
+		0.0f, // mipLODBias
+		8); // maxAnisotropy
+	;
+
+	return { pointWrap, pointClamp, linearWrap, linearClamp, anisotropicWrap, anisotropicClamp };
+}
+
 void Renderer::ToggleRasterization()
 {
 	m_rasterize = !m_rasterize;
@@ -982,6 +1076,26 @@ std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& 
 	AssertFreeClear(&cpuIndex);
 	
 	return primitive;
+}
+
+std::shared_ptr<Texture> Renderer::CreateTextureFromGLTF(const tinygltf::Image& image)
+{
+	ComPtr<ID3D12Resource> upload_buffer;
+
+	auto texture_resource = RenderingUtils::CreateDefaultTexture(g_d3d12Device.Get(), m_d3d12CommandList.Get(), image, upload_buffer);
+
+	std::shared_ptr<Texture> texture = std::make_shared<Texture>(g_d3d12Device, texture_resource);
+	CreateTextureSRV(texture);
+
+	m_d3d12CommandList->Close();
+	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	FlushCommandQueue();
+	ResetCommandList();
+
+	m_textures.push_back(texture);
+	
+	return texture;
 }
 
 ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)

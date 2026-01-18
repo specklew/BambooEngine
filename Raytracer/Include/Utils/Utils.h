@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "tinygltf/tiny_gltf.h"
 
 void ThrowIfFailed(HRESULT hr);
 std::string ConvertWcharToString(const wchar_t* wstr);
@@ -13,9 +14,15 @@ namespace RenderingUtils
 {
     Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBuffer(
         ID3D12Device* device,
-        ID3D12GraphicsCommandList* cmdList,
+        ID3D12GraphicsCommandList* commandList,
         const void* initData,
         UINT64 byteSize,
+        Microsoft::WRL::ComPtr<ID3D12Resource>& uploadBuffer);
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultTexture(
+        ID3D12Device* device,
+        ID3D12GraphicsCommandList* commandList,
+        const tinygltf::Image& image,
         Microsoft::WRL::ComPtr<ID3D12Resource>& uploadBuffer);
 }
 

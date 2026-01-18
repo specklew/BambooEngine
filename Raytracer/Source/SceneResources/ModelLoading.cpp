@@ -228,6 +228,16 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
 
     std::shared_ptr<Material> material = std::make_shared<Material>();
 
+    if (!model.materials.empty())
+    {
+        if (int albedo_index = model.materials[primitive.material].pbrMetallicRoughness.baseColorTexture.index; albedo_index >= 0)
+        {
+            const tinygltf::Image albedoImage = model.images[model.textures[albedo_index].source];
+            material->m_albedoTexture = renderer.CreateTextureFromGLTF(albedoImage);
+            material->UpdateMaterial();
+        }
+    }
+
     float random = RaytracerRandom::g_random->GetRandomFloat();
         
     material->m_data.albedoColor.x = random;
@@ -324,7 +334,7 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
 
     assert(succeeded && "Failed to load model");
     assert(model.scenes.size() > 0 && "Model has no scenes!");
-
+    
     auto scene_builder = SceneBuilder();
 
     scene_builder.SetName(assetId.AsString());
