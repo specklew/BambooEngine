@@ -362,7 +362,7 @@ void RaytracePass::CreateShaderResourceHeap()
     D3D12_CPU_DESCRIPTOR_HANDLE srvHandle;
 
     auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
-    srvHandle.ptr = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart().ptr + 2 * increment; // IMGUI | CBV | UAV <- ptr
+    srvHandle.ptr = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart().ptr + 2 * increment; // IMGUI | World CBV | UAV <- ptr
     
     spdlog::debug("Creating UAV for raytracing output buffer");
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
