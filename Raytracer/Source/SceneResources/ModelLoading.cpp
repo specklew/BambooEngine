@@ -15,51 +15,18 @@
 #include "SceneResources/Material.h"
 #include "tinygltf/tiny_gltf.h"
 
-static void ExtractVertices(tinygltf::Model& model, std::vector<Vertex>& outVertices)
-{
-    tinygltf::Primitive& primitive = model.meshes[0].primitives[0];
-
-    const bool has_position = primitive.attributes.find("POSITION") != primitive.attributes.end();
-    assert(has_position && "Mesh primitive must have POSITION attribute");
-
-    const float* positions = nullptr;
-    size_t vertex_count = 0;
-    
-    // POSITION
-    {
-        const tinygltf::Accessor& accessor = model.accessors[primitive.attributes["POSITION"]];
-        const tinygltf::BufferView& buffer_view = model.bufferViews[accessor.bufferView];
-        const tinygltf::Buffer& buffer = model.buffers[buffer_view.buffer];
-
-        positions = reinterpret_cast<const float*>(&buffer.data[buffer_view.byteOffset + accessor.byteOffset]);
-        assert(positions && "Failed to extract vertices from glTF model. The POSITION attribute is null.");
-        
-        // Each accessor for attributes has the same count.
-        vertex_count = accessor.count;
-    }
-
-    // PROCESS
-
-    for (size_t i = 0; i < vertex_count; i++)
-    {
-        Vertex vertex{};
-
-        // Inverting Y and Z to convert from right-handed to left-handed coordinate system. https://stackoverflow.com/questions/16986017/how-do-i-make-blender-operate-in-left-hand
-        vertex.Pos.x = positions[i * 3 + 0];
-        vertex.Pos.y = positions[i * 3 + 1];
-        vertex.Pos.z = positions[i * 3 + 2];
-
-        outVertices.push_back(vertex);
-    }
-}
-
 static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& primitive, std::vector<Vertex>& outVertices)
 {
     const bool has_position = primitive.attributes.find("POSITION") != primitive.attributes.end();
+    const bool has_normal = primitive.attributes.find("NORMAL") != primitive.attributes.end();
+    const bool has_tex_coords = primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end();
     assert(has_position && "Mesh primitive must have POSITION attribute");
 
     const float* positions = nullptr;
+    const float* texCoords = nullptr;
     size_t vertex_count = 0;
+
+
     
     // POSITION
     {
@@ -74,6 +41,16 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
         vertex_count = accessor.count;
     }
 
+    //TEXTURE COORDINATES
+    if (has_tex_coords)
+    {
+        const tinygltf::Accessor& accessor = model.accessors[primitive.attributes["TEXCOORD_0"]];
+        const tinygltf::BufferView& buffer_view = model.bufferViews[accessor.bufferView];
+        const tinygltf::Buffer& buffer = model.buffers[buffer_view.buffer];
+
+        texCoords = reinterpret_cast<const float*>(&buffer.data[buffer_view.byteOffset + accessor.byteOffset]);
+    }
+
     // PROCESS
 
     for (size_t i = 0; i < vertex_count; i++)
@@ -85,53 +62,16 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
         vertex.Pos.y = positions[i * 3 + 1];
         vertex.Pos.z = positions[i * 3 + 2];
 
+        vertex.Normal = DirectX::XMFLOAT3{0, 1, 0};
+        vertex.Tex0 = DirectX::XMFLOAT2{0,0};
+
+        if (has_tex_coords)
+        {
+            vertex.Tex0.x = texCoords[i * 2 + 0];
+            vertex.Tex0.y = texCoords[i * 2 + 1];
+        }
+
         outVertices.push_back(vertex);
-    }
-}
-
-static void ExtractIndices(tinygltf::Model& model, std::vector<uint32_t>& outIndices)
-{
-    tinygltf::Primitive& primitive = model.meshes[0].primitives[0];
-
-    assert(primitive.indices >= 0 && "Failed loading glTF model. Mesh primitive must have indices");
-
-    const auto& accessor = model.accessors[primitive.indices];
-    const auto& buffer_view = model.bufferViews[accessor.bufferView];
-    const auto& buffer = model.buffers[buffer_view.buffer];
-    
-    switch (accessor.componentType)
-    {
-        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-        {
-            const uint16_t* rawIndices = reinterpret_cast<const uint16_t*>(&buffer.data[buffer_view.byteOffset + accessor.byteOffset]);
-            outIndices.reserve(accessor.count);
-            for (int i = 0; i < accessor.count; i+=3)
-            {
-                outIndices.push_back(rawIndices[i]);
-                outIndices.push_back(rawIndices[i+1]);
-                outIndices.push_back(rawIndices[i+2]);
-            }
-
-            break;
-        }
-
-        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-        {
-            const uint32_t* rawIndices = reinterpret_cast<const uint32_t*>(&buffer.data[buffer_view.byteOffset + accessor.byteOffset]);
-            outIndices.reserve(accessor.count);
-            for (int i = 0; i < accessor.count; i+=3)
-            {
-                outIndices.push_back(rawIndices[i]);
-                outIndices.push_back(rawIndices[i+1]);
-                outIndices.push_back(rawIndices[i+2]);
-            }
-            break;
-        }
-        default:
-        {
-            assert("False: Unsupported index component type");
-            break;            
-        }
     }
 }
 
@@ -237,14 +177,6 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
             material->UpdateMaterial();
         }
     }
-
-    float random = RaytracerRandom::g_random->GetRandomFloat();
-        
-    material->m_data.albedoColor.x = random;
-    material->m_data.albedoColor.y = random;
-    material->m_data.albedoColor.z = random;
-    material->m_data.albedoColor.w = 1.0f;
-    material->UpdateMaterial();
     
     return renderer.CreatePrimitive(vertices, indices, material);
 }

@@ -27,23 +27,35 @@ cbuffer Material : register(b2)
     uint textureIndex;
 }
 
+cbuffer PassConstants : register(b3)
+{
+    float uvX;
+    float uvY;
+}
+
 Texture2D gAlbedoTextures[MAX_TEXTURES] : register(t1, space0);
 
 struct VertexIn
 {
     float3 PosL  : POSITION;
+    float3 NormalL : NORMAL;
+    float2 TexCoord : TEXCOORD;
     //float4 Color : COLOR;
 };
 
 struct VertexOut
 {
     float4 PosH  : SV_POSITION;
-    //float4 Color : COLOR;
+    float3 NormalW : NORMAL;
+    float2 TexCoord : TEXCOORD;
 };
 
 VertexOut vertex(VertexIn vin)
 {
     VertexOut vout;
+
+    vout.NormalW = vin.NormalL;
+    vout.TexCoord = vin.TexCoord;
     
     // Transform to world space.
 
@@ -64,7 +76,7 @@ float4 pixel(VertexOut pin) : SV_Target
     float4 textureAlbedo = float4(1,1,1,1);
     if (textureIndex != -1)
     {
-        textureAlbedo = gAlbedoTextures[textureIndex].Sample(gsamLinearWrap, float2(0.9f, 0.1f));
+        textureAlbedo = gAlbedoTextures[textureIndex].Sample(gsamLinearWrap, pin.TexCoord + float2(uvX, uvY));
     }
     return ambient * textureAlbedo/*pin.Color*/;
 }

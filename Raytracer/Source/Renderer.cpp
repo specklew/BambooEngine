@@ -27,6 +27,7 @@
 #include "SceneResources/Material.h"
 #include "SceneResources/Model.h"
 #include "tinygltf/tiny_gltf.h"
+#include "Utils/PassConstants.h"
 
 #ifdef _DEBUG
 #define ENABLE_GPU_BASED_VALIDATION 1
@@ -36,6 +37,8 @@ using namespace Microsoft::WRL;
 
 static AutoCVarEnum g_currentScene("renderer.initialScene", "Specifies which scene to load on startup.", ModelLoading::LOADED_SCENES::A_BEAUTIFUL_GAME);
 static AutoCVarFloat g_cameraSpeed("renderer.camera.speed", "Specifies the base speed of camera", 1.0f, CVarFlags::EditDrag, 1.0f, 20.0f);
+static AutoCVarFloat g_uvCoordX("renderer.uv.x", "Texture uv x offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
+static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 
 void Renderer::Initialize()
 {
@@ -80,6 +83,8 @@ void Renderer::Initialize()
 
 	m_material = std::make_shared<Material>();
 	m_material->m_data.albedoColor = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
+
+	m_passConstants = std::make_shared<PassConstants>();
 	
 	CreateRasterizationRootSignature();
 
@@ -186,6 +191,10 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		FlushCommandQueue();
 		ResetCommandList();
 	}
+
+	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
+	m_passConstants->data.uvCoordY = g_uvCoordY.Get();
+	m_passConstants->Map();
 }
 
 void Renderer::Render(double elapsedTime, double totalTime)
@@ -239,6 +248,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	if (m_rasterize)
 	{
+		m_d3d12CommandList->SetGraphicsRootConstantBufferView(3, m_passConstants->GetGpuVirtualAddress());
+		
 		for (const auto& go : m_loadedScenes[g_currentScene.Get()]->GetGameObjects())
 		{
 			auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
@@ -632,7 +643,7 @@ void Renderer::CreateWorldProjCBV()
 
 void Renderer::CreateRasterizationRootSignature()
 {
-	constexpr int num_params = 3;
+	constexpr int num_params = 4;
 	
 	CD3DX12_ROOT_PARAMETER rootParameters[num_params];
 	
@@ -668,7 +679,8 @@ void Renderer::CreateRasterizationRootSignature()
 	
 	rootParameters[0].InitAsDescriptorTable(4, ranges);
 	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer
-	rootParameters[2].InitAsConstantBufferView(2);
+	rootParameters[2].InitAsConstantBufferView(2); // Material buffer
+	rootParameters[3].InitAsConstantBufferView(3); // Pass constants
 
 	auto static_samplers = GetStaticSamplers();
 	

@@ -6,6 +6,7 @@
 #include "Keyboard.h"
 #include "Utils/Utils.h"
 
+class PassConstants;
 class Texture;
 struct Material;
 class GameObject;
@@ -173,4 +174,6 @@ private:
 
 	std::shared_ptr<Material> m_material;
 	std::vector<std::shared_ptr<Texture>> m_textures = std::vector<std::shared_ptr<Texture>>();
+
+	std::shared_ptr<PassConstants> m_passConstants;
 };
