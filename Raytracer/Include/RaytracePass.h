@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+class Scene;
 class ShaderBindingTable;
 class AccelerationStructures;
 
@@ -8,17 +9,15 @@ class RaytracePass
 public:
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
-        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList, 
-        std::vector<std::shared_ptr<AccelerationStructures>> accelerationStructures,
-        Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
-        Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer,
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
+        std::shared_ptr<Scene> initialScene,
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvUavHeap);
     
     void Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget);
     void Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj);
     void OnResize();
     void OnShaderReload();
-    void OnSceneChange(int sceneNum);
+    void OnSceneChange(std::shared_ptr<Scene> scene);
     
 private:
     void InitializeRaytracingPipeline();
@@ -34,7 +33,7 @@ private:
     void CreateShaderBindingTable();
     
     // Properties
-    std::vector<std::shared_ptr<AccelerationStructures>> m_accelerationStructures;
+    //std::vector<std::shared_ptr<AccelerationStructures>> m_accelerationStructures;
     
     Microsoft::WRL::ComPtr<ID3D12Device5> m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
@@ -60,10 +59,7 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbDescriptorHeap;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBuffer;
-
     std::shared_ptr<ShaderBindingTable> m_shaderBindingTable;
     
-    int m_sceneNum;
+    std::shared_ptr<Scene> m_currentScene;
 };

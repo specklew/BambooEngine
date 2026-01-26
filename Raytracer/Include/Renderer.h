@@ -48,6 +48,8 @@ public:
 	std::shared_ptr<Texture> CreateTextureFromGLTF(const tinygltf::Image& image);
 	std::shared_ptr<GameObject> InstantiateGameObject();
 
+	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> GetCommandList() const { return m_d3d12CommandList; }
+
 	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_d3d12Device;
 	inline static int g_textureIndex = 0; 
 	
@@ -123,16 +125,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_d3d12RenderTargets[Constants::Graphics::NUM_FRAMES];
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_d3d12DSVDescriptorHeap;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_depthStencilBuffer;
-
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBuffer;
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_vertexBufferUploader;
-	D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-	D3D12_VERTEX_BUFFER_VIEW m_vertexBuffers[1];
-
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBuffer;
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_indexBufferUploader;
-	D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
-
+	
 	std::shared_ptr<ConstantBuffer> m_projectionMatrixConstantBuffer;
 	std::shared_ptr<ConstantBuffer> m_modelIndexConstantBuffer;
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvCbvUavDescriptorHeap;
@@ -170,7 +163,7 @@ private:
 
 	int m_currentModelCBVIndex = 0;
 	
-	std::vector<std::shared_ptr<Scene>> m_loadedScenes;
+	std::shared_ptr<Scene> m_scene;
 
 	std::shared_ptr<Material> m_material;
 	std::vector<std::shared_ptr<Texture>> m_textures = std::vector<std::shared_ptr<Texture>>();

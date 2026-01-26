@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+class AccelerationStructures;
 class AssetId;
 class Renderer;
 struct Primitive;
@@ -15,6 +16,7 @@ public:
     [[nodiscard]] const std::vector<std::shared_ptr<Model>>& GetModels() const { return m_models; }
     [[nodiscard]] const std::vector<std::shared_ptr<GameObject>>& GetGameObjects() const { return m_gameObjects; }
     [[nodiscard]] const std::string& GetName() const { return m_name; }
+    [[nodiscard]] std::shared_ptr<AccelerationStructures> GetAccelerationStructures() { return m_rtRepresentation; }
     
 private:
     friend class SceneBuilder;
@@ -24,6 +26,8 @@ private:
     std::shared_ptr<SceneNode> m_root;
     std::vector<std::shared_ptr<GameObject>> m_gameObjects;
     std::vector<std::shared_ptr<Model>> m_models;
+
+    std::shared_ptr<AccelerationStructures> m_rtRepresentation;
 
 };
 
@@ -35,10 +39,13 @@ public:
     void AddModel(const std::shared_ptr<Model>& model);
     void AddChild(const std::shared_ptr<SceneNode>& parent, const std::shared_ptr<SceneNode>& child);
     void SetName(const std::string& name);
+    void SetAccelerationStructures(const std::shared_ptr<AccelerationStructures>& accelerationStructures);
+    void UpdateMatrices();
 
     std::shared_ptr<SceneNode> GetRoot() const { return m_root; }
     std::vector<std::shared_ptr<GameObject>> GetGameObjects() const { return m_gameObjects; }
     std::shared_ptr<Model> GetModel(const int index) const { return m_models[index]; }
+    std::vector<std::shared_ptr<Model>> GetModels() const { return m_models; }
 
     void PrintDebugInfo();
     
@@ -52,6 +59,8 @@ private:
     std::vector<std::shared_ptr<GameObject>> m_gameObjects;
     std::vector<std::shared_ptr<Model>> m_models;
     std::shared_ptr<SceneNode> m_root;
+
+    std::shared_ptr<AccelerationStructures> m_rtRepresentation;
 
     bool m_isBuilt = false;
 };

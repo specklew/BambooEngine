@@ -79,7 +79,8 @@ void Renderer::Initialize()
 	CreateDescriptorHeaps();
 	CreateWorldProjCBV();
 
-	m_loadedScenes = ModelLoading::LoadAllScenes(*this);
+	m_scene = ModelLoading::LoadScene(*this, AssetId(ModelLoading::ScenePath(ModelLoading::A_BEAUTIFUL_GAME)));
+	previousScene = g_currentScene.Get();
 
 	m_material = std::make_shared<Material>();
 	m_material->m_data.albedoColor = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
@@ -93,19 +94,19 @@ void Renderer::Initialize()
 	m_d3d12CommandList->Close();
 	commandLists[0] = m_d3d12CommandList.Get();
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-	
 	FlushCommandQueue();
 	ResetCommandList();
-	
-	SetupAccelerationStructures();
 
 	m_raytracePass = std::make_shared<RaytracePass>();
-	m_raytracePass->Initialize(g_d3d12Device, m_d3d12CommandList, m_accelerationStructures, m_vertexBuffer, m_indexBuffer, m_srvCbvUavDescriptorHeap);
+	m_raytracePass->Initialize(g_d3d12Device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap);
 
 	spdlog::info("Renderer initialized successfully.");
 
 	InitializeImGui();
 	
+	m_d3d12CommandList->Close();
+	commandLists[0] = m_d3d12CommandList.Get();
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
 	FlushCommandQueue();
 	ResetCommandList();
 }
@@ -180,7 +181,11 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 	if (previousScene != g_currentScene.Get())
 	{
-		m_raytracePass->OnSceneChange(g_currentScene.Get());
+		spdlog::info("Scene has been changed. Loading: {}", ModelLoading::ScenePath(g_currentScene.Get()));
+		
+		m_scene = ModelLoading::LoadScene(*this, AssetId(ModelLoading::ScenePath(g_currentScene.Get())));
+		
+		m_raytracePass->OnSceneChange(m_scene);
 		previousScene = g_currentScene.Get();
 
 		ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
@@ -250,7 +255,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	{
 		m_d3d12CommandList->SetGraphicsRootConstantBufferView(3, m_passConstants->GetGpuVirtualAddress());
 		
-		for (const auto& go : m_loadedScenes[g_currentScene.Get()]->GetGameObjects())
+		for (const auto& go : m_scene->GetGameObjects())
 		{
 			auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
 			m_d3d12CommandList->SetGraphicsRootConstantBufferView(1, gpuAddress);
@@ -877,14 +882,14 @@ void Renderer::SetupAccelerationStructures()
 {
 	spdlog::debug("Setting up acceleration structures");
 	
-	for (auto scene : m_loadedScenes)
+	/*for (auto scene : m_loadedScenes)
 	{
 		spdlog::debug("Setting up AS for scene: {}", scene->GetName());
 		auto accelerationStructures = std::make_shared<AccelerationStructures>();
 		ExtractBLASesFromSceneModels(*scene, *accelerationStructures);
 		CreateTLASForScene(*scene, *accelerationStructures);
 		m_accelerationStructures.emplace_back(accelerationStructures);
-	}
+	}*/
 
 	spdlog::debug("Executing command list with BLAS generation");
 	m_d3d12CommandList->Close();

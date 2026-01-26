@@ -78,6 +78,8 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attrib)
     float3 barycentrics = 
     float3(1.f - attrib.bary.x - attrib.bary.y, attrib.bary.x, attrib.bary.y);
     
+    //const VertexAttributes vertexAttrib = GetVertexAttributes(PrimitiveIndex(), barycentrics);
+    
     //uint vertId = 3 * PrimitiveIndex();
     //float3 hitColor = BTriVertex[indices[vertId + 0]].color * barycentrics.x +
     //BTriVertex[indices[vertId + 1]].color * barycentrics.y +

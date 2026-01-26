@@ -5,6 +5,7 @@
 #include <tinygltf/tiny_gltf.h>
 #include <spdlog/spdlog.h>
 
+#include "AccelerationStructures.h"
 #include "InputElements.h"
 #include "SceneResources/Model.h"
 #include "SceneResources/Primitive.h"
@@ -12,6 +13,9 @@
 #include "SceneResources/Scene.h"
 #include "SceneResources/SceneNode.h"
 #include "ResourceManager/ResourceManagerTypes.h"
+#include "Resources/IndexBuffer.h"
+#include "Resources/VertexBuffer.h"
+#include "SceneResources/GameObject.h"
 #include "SceneResources/Material.h"
 #include "tinygltf/tiny_gltf.h"
 
@@ -257,6 +261,65 @@ static void TraverseNode(Renderer& renderer, const tinygltf::Model& model, Scene
     }
 }
 
+static std::shared_ptr<AccelerationStructures> BuildAccelerationStructures(const Renderer& renderer, const SceneBuilder& scene)
+{
+    using Microsoft::WRL::ComPtr;
+    
+    std::unordered_map<std::shared_ptr<Model>, std::shared_ptr<AccelerationStructureBuffers>> modelBLASes;
+    std::shared_ptr<AccelerationStructures> as = std::make_shared<AccelerationStructures>();
+
+    for (auto model : scene.GetModels())
+    {
+        std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> vertex_buffers;
+        std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> index_buffers;
+		
+        for (auto prim : model->GetMeshes())
+        {
+
+            std::pair<ComPtr<ID3D12Resource>, uint32_t> vertex_pair = {
+                prim->GetVertexBuffer()->GetUnderlyingResource(),
+                prim->GetVertexBuffer()->GetVertexCount()
+            };
+			
+            std::pair<ComPtr<ID3D12Resource>, uint32_t> index_pair = {
+                prim->GetIndexBuffer()->GetUnderlyingResource(),
+                prim->GetIndexBuffer()->GetIndexCount()
+            };
+			
+            vertex_buffers.emplace_back(vertex_pair);
+            index_buffers.emplace_back(index_pair);
+        }
+
+        AccelerationStructureBuffers bottomLevelBuffers = as->CreateBottomLevelAS(
+            renderer.g_d3d12Device.Get(),
+            renderer.GetCommandList(),
+            vertex_buffers,
+            index_buffers);
+
+        modelBLASes.emplace(model, std::make_shared<AccelerationStructureBuffers>(bottomLevelBuffers));
+    }
+    
+    for (auto go : scene.GetGameObjects())
+    {
+        auto model = go->GetModel();
+        auto blasIt = modelBLASes.find(model);
+        if (blasIt != modelBLASes.end())
+        {
+            DirectX::XMMATRIX worldMatrix = DirectX::XMLoadFloat4x4(&go->GetWorldFloat4X4());
+            auto instance = std::pair(blasIt->second->p_result, worldMatrix);
+            as->GetInstances().emplace_back(instance);
+        }
+        else
+        {
+            spdlog::warn("Model for GameObject not found in BLASes map during TLAS setup.");
+        }
+    }
+
+    as->CreateTopLevelAS(Renderer::g_d3d12Device.Get(), renderer.GetCommandList().Get(), as->GetInstances(), false);
+
+    return as;
+}
+
 std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId& assetId)
 {
     spdlog::info("Loading scene {}", assetId.AsString());
@@ -321,7 +384,9 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
             model_index++;
         }
     }
-    
 
+    scene_builder.UpdateMatrices(); // Needs to be done before TLAS building for instances to have the correct positions.
+    scene_builder.SetAccelerationStructures(BuildAccelerationStructures(renderer, scene_builder));
+    
     return scene_builder.Build();
 } 

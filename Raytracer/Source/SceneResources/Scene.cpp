@@ -36,6 +36,16 @@ void SceneBuilder::SetName(const std::string& name)
     m_name = name;
 }
 
+void SceneBuilder::SetAccelerationStructures(const std::shared_ptr<AccelerationStructures>& accelerationStructures)
+{
+    m_rtRepresentation = accelerationStructures;
+}
+
+void SceneBuilder::UpdateMatrices()
+{
+    UpdateMatricesInNodesRecursively(m_root);
+}
+
 void SceneBuilder::PrintDebugInfo()
 {
 #if _DEBUG
@@ -78,6 +88,8 @@ std::shared_ptr<Scene> SceneBuilder::Build()
     scene.m_models = std::move(m_models);
     scene.m_root = m_root;
     scene.m_name = m_name;
+    scene.m_rtRepresentation = m_rtRepresentation;
+    
     return std::make_shared<Scene>(std::move(scene));
 }
 

@@ -9,22 +9,19 @@
 #include "Window.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Resources/ShaderBindingTable.h"
+#include "SceneResources/Scene.h"
 
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
-                              std::vector<std::shared_ptr<AccelerationStructures>> accelerationStructures,
-                              Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer,
-                              Microsoft::WRL::ComPtr<ID3D12Resource> indexBuffer,
+                              std::shared_ptr<Scene> initialScene,
                               Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> cbvSrvUavHeap)
 {
     spdlog::info("Initializing raytracer pass...");
     
     m_device = device;
     m_commandList = commandList;
-    m_accelerationStructures = accelerationStructures;
-    m_vertexBuffer = vertexBuffer;
-    m_indexBuffer = indexBuffer;
     m_srvUavHeap = cbvSrvUavHeap;
+    m_currentScene = initialScene;
 
     InitializeRaytracingPipeline();
     CreateRaytracingOutputBuffer();
@@ -117,9 +114,9 @@ void RaytracePass::OnShaderReload()
     CreateShaderBindingTable();
 }
 
-void RaytracePass::OnSceneChange(int sceneNum)
+void RaytracePass::OnSceneChange(std::shared_ptr<Scene> scene)
 {
-    m_sceneNum = sceneNum;
+    m_currentScene = scene;
     CreateShaderResourceHeap();
 }
 
@@ -376,7 +373,7 @@ void RaytracePass::CreateShaderResourceHeap()
     srvDesc.Format = DXGI_FORMAT_UNKNOWN;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.RaytracingAccelerationStructure.Location = m_accelerationStructures[m_sceneNum]->GetTopLevelAS().p_result->GetGPUVirtualAddress();
+    srvDesc.RaytracingAccelerationStructure.Location = m_currentScene->GetAccelerationStructures()->GetTopLevelAS().p_result->GetGPUVirtualAddress();
     m_device->CreateShaderResourceView(nullptr, &srvDesc, srvHandle);
 
     // CBV for camera is already created in CreateConstantCameraBuffer() in Renderer
