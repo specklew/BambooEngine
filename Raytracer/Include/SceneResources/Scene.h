@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+class IndexBuffer;
 class AccelerationStructures;
 class AssetId;
 class Renderer;
@@ -28,6 +29,7 @@ private:
     std::vector<std::shared_ptr<Model>> m_models;
 
     std::shared_ptr<AccelerationStructures> m_rtRepresentation;
+    std::shared_ptr<IndexBuffer> m_allIndicesBuffer;
 
 };
 

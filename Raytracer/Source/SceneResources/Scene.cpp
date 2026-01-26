@@ -86,9 +86,9 @@ std::shared_ptr<Scene> SceneBuilder::Build()
     Scene scene;
     scene.m_gameObjects = std::move(m_gameObjects);
     scene.m_models = std::move(m_models);
-    scene.m_root = m_root;
-    scene.m_name = m_name;
-    scene.m_rtRepresentation = m_rtRepresentation;
+    scene.m_root = std::move(m_root);
+    scene.m_name = std::move(m_name);
+    scene.m_rtRepresentation = std::move(m_rtRepresentation);
     
     return std::make_shared<Scene>(std::move(scene));
 }
