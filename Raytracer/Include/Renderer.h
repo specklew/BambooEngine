@@ -6,6 +6,8 @@
 #include "Keyboard.h"
 #include "Utils/Utils.h"
 
+class IndexBuffer;
+class VertexBuffer;
 class PassConstants;
 class Texture;
 struct Material;
@@ -43,8 +45,9 @@ public:
 	void OnKeyDown(unsigned long long btnState) const;
 	
 	void ToggleRasterization();
+	void ExecuteCommandsAndReset();
 
-	std::shared_ptr<Primitive> CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const std::shared_ptr<Material>& material = nullptr);
+	std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> Renderer::CreateSceneResources(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 	std::shared_ptr<Texture> CreateTextureFromGLTF(const tinygltf::Image& image);
 	std::shared_ptr<GameObject> InstantiateGameObject();
 
@@ -83,9 +86,6 @@ private:
 	
 	bool CheckTearingSupport();
 	bool CheckRayTracingSupport() const;
-
-	void ExtractBLASesFromSceneModels(const Scene& scene, AccelerationStructures& accelerationStructures);
-	void CreateTLASForScene(const Scene& scene, AccelerationStructures& accelerationStructures);
 	
 	void SetupAccelerationStructures();
 

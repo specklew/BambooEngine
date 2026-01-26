@@ -13,11 +13,10 @@
 #include "SceneResources/Scene.h"
 #include "SceneResources/SceneNode.h"
 #include "ResourceManager/ResourceManagerTypes.h"
-#include "Resources/IndexBuffer.h"
-#include "Resources/VertexBuffer.h"
 #include "SceneResources/GameObject.h"
 #include "SceneResources/Material.h"
-#include "tinygltf/tiny_gltf.h"
+#include "Resources/IndexBuffer.h"
+#include "Resources/VertexBuffer.h"
 
 static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& primitive, std::vector<Vertex>& outVertices)
 {
@@ -155,7 +154,7 @@ static bool LoadTinyGLTFModel(const std::filesystem::path &path, tinygltf::Model
     return true;
 }
 
-static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygltf::Model& model, tinygltf::Primitive& primitive)
+static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygltf::Model& model, tinygltf::Primitive& primitive, std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices)
 {
     assert(primitive.indices >= 0 && "Failed loading glTF model. Mesh primitive must have indices");
 
@@ -181,8 +180,26 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
             material->UpdateMaterial();
         }
     }
+
+    auto index_view = BufferView();
+    index_view.buffer = nullptr;
+    index_view.count = indices.size();
+    index_view.offset = outIndices.size();
+    index_view.offsetBytes = outIndices.size() * sizeof(uint32_t);
+    index_view.size = indices.size() * sizeof(uint32_t);
+
+    auto vertex_view = BufferView();
+    vertex_view.buffer = nullptr;
+    vertex_view.count = vertices.size();
+    vertex_view.offset = outVertices.size();
+    vertex_view.offsetBytes = outVertices.size() * sizeof(Vertex);
+    vertex_view.size = vertices.size() * sizeof(Vertex);
+
+    // Need to be done here after buffer views to have correct offset.
+    outVertices.insert(outVertices.end(), vertices.begin(), vertices.end());
+    outIndices.insert(outIndices.end(), indices.begin(), indices.end());
     
-    return renderer.CreatePrimitive(vertices, indices, material);
+    return std::make_shared<Primitive>(vertex_view, index_view, material);
 }
 
 std::vector<std::shared_ptr<Scene>> ModelLoading::LoadAllScenes(Renderer& renderer)
@@ -270,24 +287,13 @@ static std::shared_ptr<AccelerationStructures> BuildAccelerationStructures(const
 
     for (auto model : scene.GetModels())
     {
-        std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> vertex_buffers;
-        std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> index_buffers;
+        std::vector<BufferView> vertex_buffers;
+        std::vector<BufferView> index_buffers;
 		
         for (auto prim : model->GetMeshes())
         {
-
-            std::pair<ComPtr<ID3D12Resource>, uint32_t> vertex_pair = {
-                prim->GetVertexBuffer()->GetUnderlyingResource(),
-                prim->GetVertexBuffer()->GetVertexCount()
-            };
-			
-            std::pair<ComPtr<ID3D12Resource>, uint32_t> index_pair = {
-                prim->GetIndexBuffer()->GetUnderlyingResource(),
-                prim->GetIndexBuffer()->GetIndexCount()
-            };
-			
-            vertex_buffers.emplace_back(vertex_pair);
-            index_buffers.emplace_back(index_pair);
+            vertex_buffers.emplace_back(prim->GetVertexView());
+            index_buffers.emplace_back(prim->GetIndexView());
         }
 
         AccelerationStructureBuffers bottomLevelBuffers = as->CreateBottomLevelAS(
@@ -333,16 +339,36 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
     auto scene_builder = SceneBuilder();
 
     scene_builder.SetName(assetId.AsString());
+
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
     
     for (auto gltf_model : model.meshes)
     {
         auto current_model = std::make_shared<Model>();
+        
         for (auto& primitive : gltf_model.primitives)
         {
-            auto prim = LoadPrimitive(renderer, model, primitive);
+            auto prim = LoadPrimitive(renderer, model, primitive, vertices, indices);
             current_model->AddMesh(prim);
         }
+        
         scene_builder.AddModel(current_model);
+    }
+
+    auto vertex_index_pair = renderer.CreateSceneResources(vertices, indices);
+    auto vertex_buffer = vertex_index_pair.first;
+    auto index_buffer = vertex_index_pair.second;
+    scene_builder.SetVertexBuffer(vertex_buffer);
+    scene_builder.SetIndexBuffer(index_buffer);
+
+    for (auto gltf_model : scene_builder.GetModels())
+    {
+        for (auto prim : gltf_model->GetMeshes())
+        {
+            prim->m_vertexBufferOffset.buffer = std::static_pointer_cast<Buffer>(vertex_buffer);
+            prim->m_indexBufferOffset.buffer = std::static_pointer_cast<Buffer>(index_buffer);
+        }
     }
 
     if (model.defaultScene < 0)

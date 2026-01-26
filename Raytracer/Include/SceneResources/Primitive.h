@@ -3,18 +3,17 @@
 #include "pch.h"
 
 #include "Material.h"
+#include "Resources/BufferView.h"
 
 class VertexBuffer;
 class IndexBuffer;
 
 struct Primitive
 {
-    // Primitive uses std::move to take ownership of the buffers.
-    Primitive (std::shared_ptr<VertexBuffer> vertexBuffer, std::shared_ptr<IndexBuffer> indexBuffer, std::shared_ptr<Material> material = nullptr)
-        : m_vertexBuffer(std::move(vertexBuffer)), m_indexBuffer(std::move(indexBuffer))
+    Primitive (const BufferView& vertexView, const BufferView& indexView, std::shared_ptr<Material> material = nullptr)
     {
-        assert(m_vertexBuffer != nullptr && "Vertex buffer cannot be null");
-        assert(m_indexBuffer != nullptr && "Index buffer cannot be null");
+        m_vertexBufferOffset = vertexView;
+        m_indexBufferOffset = indexView;
 
         if (material)
         {
@@ -24,11 +23,12 @@ struct Primitive
 
         m_material = std::make_shared<Material>();
     }
-    std::shared_ptr<VertexBuffer> m_vertexBuffer;
-    std::shared_ptr<IndexBuffer> m_indexBuffer;
     std::shared_ptr<Material> m_material;
 
-    [[nodiscard]] std::shared_ptr<VertexBuffer> GetVertexBuffer() const { return m_vertexBuffer; }
-    [[nodiscard]] std::shared_ptr<IndexBuffer> GetIndexBuffer() const { return m_indexBuffer; }
+    BufferView m_indexBufferOffset;
+    BufferView m_vertexBufferOffset;
+    
     [[nodiscard]] std::shared_ptr<Material> GetMaterial() const { return m_material; }
+    BufferView GetVertexView() const { return m_vertexBufferOffset; }
+    BufferView GetIndexView() const { return m_indexBufferOffset; }
 };

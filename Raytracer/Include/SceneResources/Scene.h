@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+class VertexBuffer;
 class IndexBuffer;
 class AccelerationStructures;
 class AssetId;
@@ -23,14 +24,15 @@ private:
     friend class SceneBuilder;
     Scene() = default;
 
+    std::shared_ptr<IndexBuffer> m_indexBuffer;
+    std::shared_ptr<VertexBuffer> m_vertexBuffer; 
+    
     std::string m_name;
     std::shared_ptr<SceneNode> m_root;
     std::vector<std::shared_ptr<GameObject>> m_gameObjects;
     std::vector<std::shared_ptr<Model>> m_models;
 
     std::shared_ptr<AccelerationStructures> m_rtRepresentation;
-    std::shared_ptr<IndexBuffer> m_allIndicesBuffer;
-
 };
 
 class SceneBuilder
@@ -42,14 +44,14 @@ public:
     void AddChild(const std::shared_ptr<SceneNode>& parent, const std::shared_ptr<SceneNode>& child);
     void SetName(const std::string& name);
     void SetAccelerationStructures(const std::shared_ptr<AccelerationStructures>& accelerationStructures);
+    void SetVertexBuffer(const std::shared_ptr<VertexBuffer>& vertexBuffer);
+    void SetIndexBuffer(const std::shared_ptr<IndexBuffer>& indexBuffer);
     void UpdateMatrices();
 
     std::shared_ptr<SceneNode> GetRoot() const { return m_root; }
     std::vector<std::shared_ptr<GameObject>> GetGameObjects() const { return m_gameObjects; }
     std::shared_ptr<Model> GetModel(const int index) const { return m_models[index]; }
     std::vector<std::shared_ptr<Model>> GetModels() const { return m_models; }
-
-    void PrintDebugInfo();
     
     std::shared_ptr<Scene> Build();
 private:
@@ -57,6 +59,9 @@ private:
 
     static void UpdateMatricesInNodesRecursively(const std::shared_ptr<SceneNode>& node);
 
+    std::shared_ptr<IndexBuffer> m_indexBuffer;
+    std::shared_ptr<VertexBuffer> m_vertexBuffer; 
+    
     std::string m_name;
     std::vector<std::shared_ptr<GameObject>> m_gameObjects;
     std::vector<std::shared_ptr<Model>> m_models;

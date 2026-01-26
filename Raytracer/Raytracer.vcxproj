@@ -112,6 +112,7 @@
     <ClInclude Include="Include\ResourceManager\ResourceManager.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManagerTypes.h" />
     <ClInclude Include="Include\Resources\Buffer.h" />
+    <ClInclude Include="Include\Resources\BufferView.h" />
     <ClInclude Include="Include\Resources\ConstantBuffer.h" />
     <ClInclude Include="Include\Resources\IndexBuffer.h" />
     <ClInclude Include="Include\Resources\Resource.h" />

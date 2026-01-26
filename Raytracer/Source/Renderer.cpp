@@ -67,19 +67,13 @@ void Renderer::Initialize()
 	CreateDepthStencilView();
 
 	// Execute depth stencil creation commands
-	ThrowIfFailed(m_d3d12CommandList->Close());
-	
-	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-	
-	FlushCommandQueue();
-	ResetCommandList();
+	ExecuteCommandsAndReset();
 	// Finish execution - reset command list for next setup commands
 
 	CreateDescriptorHeaps();
 	CreateWorldProjCBV();
 
-	m_scene = ModelLoading::LoadScene(*this, AssetId(ModelLoading::ScenePath(ModelLoading::A_BEAUTIFUL_GAME)));
+	m_scene = ModelLoading::LoadScene(*this, AssetId(ModelLoading::ScenePath(g_currentScene.Get())));
 	previousScene = g_currentScene.Get();
 
 	m_material = std::make_shared<Material>();
@@ -91,11 +85,7 @@ void Renderer::Initialize()
 
 	CreatePipelineState();
 
-	m_d3d12CommandList->Close();
-	commandLists[0] = m_d3d12CommandList.Get();
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-	FlushCommandQueue();
-	ResetCommandList();
+	ExecuteCommandsAndReset();
 
 	m_raytracePass = std::make_shared<RaytracePass>();
 	m_raytracePass->Initialize(g_d3d12Device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap);
@@ -104,11 +94,7 @@ void Renderer::Initialize()
 
 	InitializeImGui();
 	
-	m_d3d12CommandList->Close();
-	commandLists[0] = m_d3d12CommandList.Get();
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-	FlushCommandQueue();
-	ResetCommandList();
+	ExecuteCommandsAndReset();
 }
 float speedMultiplier = 1.0f;
 void Renderer::Update(double elapsedTime, double totalTime)
@@ -265,8 +251,11 @@ void Renderer::Render(double elapsedTime, double totalTime)
 				gpuAddress = primitive->m_material->m_materialBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
 				m_d3d12CommandList->SetGraphicsRootConstantBufferView(2, gpuAddress);
 				
-				auto vertexBuffer = primitive->GetVertexBuffer();
-				auto indexBuffer = primitive->GetIndexBuffer();
+				auto vertex_view = primitive->GetVertexView();
+				auto index_view = primitive->GetIndexView();
+
+				auto vertexBuffer = std::dynamic_pointer_cast<VertexBuffer>(vertex_view.buffer);
+				auto indexBuffer = std::dynamic_pointer_cast<IndexBuffer>(index_view.buffer);
 	
 				m_d3d12CommandList->IASetVertexBuffers(0, 1, &vertexBuffer->GetVertexBufferView());
 				m_d3d12CommandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
@@ -274,8 +263,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 				m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 				
-				// Assume first index and vertex are 0 ( buffers are only for one object )
-				m_d3d12CommandList->DrawIndexedInstanced(indexBuffer->GetIndexCount(), 1, 0, 0, 0);
+				m_d3d12CommandList->DrawIndexedInstanced(index_view.count, 1, index_view.offset, vertex_view.offset, 0);
 			}
 		}
 	}
@@ -358,12 +346,7 @@ void Renderer::OnResize()
 	
 	m_raytracePass->OnResize();
 
-	m_d3d12CommandList->Close();
-	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-	
-	FlushCommandQueue();
-	ResetCommandList();
+	ExecuteCommandsAndReset();
 }
 
 void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
@@ -823,61 +806,6 @@ bool Renderer::CheckRayTracingSupport() const
 	return true;
 }
 
-void Renderer::ExtractBLASesFromSceneModels(const Scene& scene, AccelerationStructures& accelerationStructures)
-{
-	for (auto model : scene.GetModels())
-	{
-		std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> vertex_buffers;
-		std::vector<std::pair<ComPtr<ID3D12Resource>, uint32_t>> index_buffers;
-		
-		for (auto prim : model->GetMeshes())
-		{
-
-			std::pair<ComPtr<ID3D12Resource>, uint32_t> vertex_pair = {
-				prim->GetVertexBuffer()->GetUnderlyingResource(),
-				prim->GetVertexBuffer()->GetVertexCount()
-			};
-			
-			std::pair<ComPtr<ID3D12Resource>, uint32_t> index_pair = {
-				prim->GetIndexBuffer()->GetUnderlyingResource(),
-				prim->GetIndexBuffer()->GetIndexCount()
-			};
-			
-			vertex_buffers.emplace_back(vertex_pair);
-			index_buffers.emplace_back(index_pair);
-		}
-
-		AccelerationStructureBuffers bottomLevelBuffers = accelerationStructures.CreateBottomLevelAS(
-			g_d3d12Device.Get(),
-			m_d3d12CommandList.Get(),
-			vertex_buffers,
-			index_buffers);
-
-		m_modelsBLASes.emplace(model, std::make_shared<AccelerationStructureBuffers>(bottomLevelBuffers));
-	}
-}
-
-void Renderer::CreateTLASForScene(const Scene& scene, AccelerationStructures& accelerationStructures)
-{
-	for (auto go : scene.GetGameObjects())
-	{
-		auto model = go->GetModel();
-		auto blasIt = m_modelsBLASes.find(model);
-		if (blasIt != m_modelsBLASes.end())
-		{
-			DirectX::XMMATRIX worldMatrix = DirectX::XMLoadFloat4x4(&go->m_worldMatrix);
-			auto instance = std::pair(blasIt->second->p_result, worldMatrix);
-			accelerationStructures.GetInstances().emplace_back(instance);
-		}
-		else
-		{
-			spdlog::warn("Model for GameObject not found in BLASes map during TLAS setup.");
-		}
-	}
-
-	accelerationStructures.CreateTopLevelAS(g_d3d12Device.Get(), m_d3d12CommandList.Get(), accelerationStructures.GetInstances(), false);
-}
-
 void Renderer::SetupAccelerationStructures()
 {
 	spdlog::debug("Setting up acceleration structures");
@@ -1051,7 +979,7 @@ void Renderer::ToggleRasterization()
 	m_rasterize = !m_rasterize;
 }
 
-std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, const std::shared_ptr<Material>& material)
+std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> Renderer::CreateSceneResources(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 {
 	ComPtr<ID3D12Resource> vertex_upload_buffer;
 	ComPtr<ID3D12Resource> index_upload_buffer;
@@ -1065,34 +993,16 @@ std::shared_ptr<Primitive> Renderer::CreatePrimitive(const std::vector<Vertex>& 
 	auto index_buffer_resource = RenderingUtils::CreateDefaultBuffer(g_d3d12Device.Get(), m_d3d12CommandList.Get(), cpuIndex, indices.size() * sizeof(uint32_t), index_upload_buffer);
 	
 	// Need to be closed and executed to create buffers before the upload buffers go out of scope.
-	m_d3d12CommandList->Close();
-	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-	FlushCommandQueue();
-	// WHY is resetting the allocator impossible if:
-	// 1. commands are closed
-	// 2. commands are executed
-	// 3. command queue is flushed
-	// D3D12 ERROR: ID3D12CommandAllocator::Reset: The command allocator cannot be reset because a command list is currently being recorded with the allocator. [ EXECUTION ERROR #543: COMMAND_ALLOCATOR_CANNOT_RESET]
-	// Is it possible that in the meantime something gets recorded to the command list?
-	// ---
-	// We have 3 allocators for each of the triple buffered frames
-	// When we reset, we reset only the current frame's allocator
-	// But maybe we haven't yet presented the frame, and we need to??? is that it?
-
-	// After all it seems that the FlushGPU method was not functioning correctly, I never quite researched why that was the case. But it seems that there was an issue with the fence value.
-	// There was a unique fence value for each allocator (frame) and somehow it was not being updated properly. TODO: Check out why was that for the next iteration of the engine.
-	ResetCommandList();
+	ExecuteCommandsAndReset();
 
 	auto vertex_buffer = std::make_shared<VertexBuffer>(g_d3d12Device, vertex_buffer_resource, static_cast<UINT>(vertices.size()), sizeof(Vertex));
 	auto index_buffer = std::make_shared<IndexBuffer>(g_d3d12Device, index_buffer_resource, static_cast<UINT>(indices.size()), DXGI_FORMAT_R32_UINT);
-
-	auto primitive = std::make_shared<Primitive>(vertex_buffer, index_buffer, material);
+	
 
 	AssertFreeClear(&cpuVertex);
 	AssertFreeClear(&cpuIndex);
 	
-	return primitive;
+	return std::make_pair(vertex_buffer, index_buffer);
 }
 
 std::shared_ptr<Texture> Renderer::CreateTextureFromGLTF(const tinygltf::Image& image)
@@ -1238,4 +1148,26 @@ std::shared_ptr<GameObject> Renderer::InstantiateGameObject()
 	game_object->UpdateWorldMatrix(modelWorldMatrix);
 
 	return game_object;
+}
+
+void Renderer::ExecuteCommandsAndReset()
+{
+	ThrowIfFailed(m_d3d12CommandList->Close());
+	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
+	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	FlushCommandQueue();
+	// WHY is resetting the allocator impossible if:
+	// 1. commands are closed
+	// 2. commands are executed
+	// 3. command queue is flushed
+	// D3D12 ERROR: ID3D12CommandAllocator::Reset: The command allocator cannot be reset because a command list is currently being recorded with the allocator. [ EXECUTION ERROR #543: COMMAND_ALLOCATOR_CANNOT_RESET]
+	// Is it possible that in the meantime something gets recorded to the command list?
+	// ---
+	// We have 3 allocators for each of the triple buffered frames
+	// When we reset, we reset only the current frame's allocator
+	// But maybe we haven't yet presented the frame, and we need to??? is that it?
+
+	// After all it seems that the FlushGPU method was not functioning correctly, I never quite researched why that was the case. But it seems that there was an issue with the fence value.
+	// There was a unique fence value for each allocator (frame) and somehow it was not being updated properly. TODO: Check out why was that for the next iteration of the engine.
+	ResetCommandList();
 }

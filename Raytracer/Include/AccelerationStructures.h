@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "Resources/BufferView.h"
 
 
 namespace nv_helpers_dx12
@@ -22,9 +23,8 @@ public:
     AccelerationStructureBuffers CreateBottomLevelAS(
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
-        std::vector<std::pair<Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t>> vertexBuffers, std::vector<std::pair<
-        Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t>
-        > indexBuffers);
+        std::vector<BufferView> vertexBuffers,
+        std::vector<BufferView> indexBuffers);
     
     void CreateTopLevelAS(
         Microsoft::WRL::ComPtr<ID3D12Device5> device,

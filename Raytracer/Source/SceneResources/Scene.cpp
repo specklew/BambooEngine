@@ -41,46 +41,26 @@ void SceneBuilder::SetAccelerationStructures(const std::shared_ptr<AccelerationS
     m_rtRepresentation = accelerationStructures;
 }
 
+void SceneBuilder::SetVertexBuffer(const std::shared_ptr<VertexBuffer>& vertexBuffer)
+{
+    m_vertexBuffer = vertexBuffer;
+}
+
+void SceneBuilder::SetIndexBuffer(const std::shared_ptr<IndexBuffer>& indexBuffer)
+{
+    m_indexBuffer = indexBuffer;
+}
+
 void SceneBuilder::UpdateMatrices()
 {
     UpdateMatricesInNodesRecursively(m_root);
-}
-
-void SceneBuilder::PrintDebugInfo()
-{
-#if _DEBUG
-    spdlog::debug("Scene Debug Info:");
-    spdlog::debug("Number of models in scene: {}", m_models.size());
-    for (int i = 0; i < m_models.size(); i++)
-    {
-        auto model = m_models[i];
-        spdlog::debug("Model {} has {} meshes.", i, model->GetMeshes().size());
-        for (int j = 0; j < model->GetMeshes().size(); j++)
-        {
-            auto mesh = model->GetMeshes()[j];
-            spdlog::debug("  Mesh {}: Vertex Buffer Size = {} vertices, Index Buffer Size = {} indices.", 
-                         j, 
-                         mesh->GetVertexBuffer()->GetVertexCount(), 
-                         mesh->GetIndexBuffer()->GetIndexCount());
-            
-        }
-    }
-
-    for (int i = 0; i < m_gameObjects.size(); i++)
-    {
-        auto gameObject = m_gameObjects[i];
-        spdlog::debug("GameObject {} uses Model with {} meshes.", i, gameObject->GetModel()->GetMeshes().size());
-        MathUtils::PrintMatrix(gameObject->GetWorldFloat4X4());
-    }
-#endif
 }
 
 std::shared_ptr<Scene> SceneBuilder::Build()
 {
     assert(!m_isBuilt && "Scene has already been built");
     m_isBuilt = true;
-
-    PrintDebugInfo();
+    
     UpdateMatricesInNodesRecursively(m_root);
     
     Scene scene;

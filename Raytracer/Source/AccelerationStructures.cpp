@@ -6,6 +6,8 @@
 #include "Utils/Utils.h"
 #include "InputElements.h"
 #include "TopLevelASGenerator.h"
+#include "Resources/Buffer.h"
+#include "Resources/BufferView.h"
 
 AccelerationStructures::AccelerationStructures()
 {
@@ -15,8 +17,8 @@ AccelerationStructures::AccelerationStructures()
 AccelerationStructureBuffers AccelerationStructures::CreateBottomLevelAS(
     Microsoft::WRL::ComPtr<ID3D12Device5> device,
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
-    std::vector<std::pair<Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t>> vertexBuffers,
-    std::vector<std::pair<Microsoft::WRL::ComPtr<ID3D12Resource>, uint32_t>> indexBuffers)
+    std::vector<BufferView> vertexBuffers,
+    std::vector<BufferView> indexBuffers)
 {
     spdlog::debug("Creating bottom level AS");
     
@@ -24,14 +26,17 @@ AccelerationStructureBuffers AccelerationStructures::CreateBottomLevelAS(
     
     for (int i = 0; i < vertexBuffers.size(); i++)
     {
-        auto vertexBuffer = vertexBuffers[i].first;
-        auto vertexCount = vertexBuffers[i].second;
-        auto indexBuffer = indexBuffers[i].first;
-        auto indexCount = indexBuffers[i].second;
+        auto vertexBuffer = vertexBuffers[i].buffer->GetUnderlyingResource();
+        auto vertexCount = vertexBuffers[i].count;
+        auto vertexOffset = vertexBuffers[i].offsetBytes;
+        
+        auto indexBuffer = indexBuffers[i].buffer->GetUnderlyingResource();
+        auto indexCount = indexBuffers[i].count;
+        auto indexOffset = indexBuffers[i].offsetBytes;
 
-        spdlog::debug("Adding vertex buffer with name {} and {} vertices", GetName(vertexBuffer.Get()), vertexCount);
-        bottomLevelGenerator.AddVertexBuffer(vertexBuffer.Get(), 0, vertexCount, sizeof(Vertex),
-            indexBuffer.Get(), 0, indexCount, nullptr, 0);
+        spdlog::debug("Adding vertex buffer with name {}: {} vertices and {} indicies.", GetName(vertexBuffer.Get()), vertexCount, indexCount);
+        bottomLevelGenerator.AddVertexBuffer(vertexBuffer.Get(), vertexOffset, vertexCount, sizeof(Vertex),
+            indexBuffer.Get(), indexOffset, indexCount, nullptr, 0);
     }
 
     uint64_t scratchSizeInBytes = 0;
