@@ -33,7 +33,9 @@ cbuffer PassConstants : register(b3)
     float uvY;
 }
 
-Texture2D gAlbedoTextures[MAX_TEXTURES] : register(t1, space0);
+Texture2D gAlbedoTextures[MAX_TEXTURES] : register(t3, space0);
+
+ByteAddressBuffer g_indices : register(t2);
 
 struct VertexIn
 {
@@ -78,5 +80,5 @@ float4 pixel(VertexOut pin) : SV_Target
     {
         textureAlbedo = gAlbedoTextures[textureIndex].Sample(gsamLinearWrap, pin.TexCoord + float2(uvX, uvY));
     }
-    return ambient * textureAlbedo/*pin.Color*/;
+    return float4(pin.TexCoord.x,0,pin.TexCoord.y,1)/*pin.Color*/;
 }

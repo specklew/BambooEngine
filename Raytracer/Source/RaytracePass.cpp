@@ -34,9 +34,11 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
 void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget)
 {
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
+    m_commandList->SetGraphicsRootSignature(nullptr);
     
     std::vector heaps = {m_srvUavHeap.Get()};
     m_commandList->SetDescriptorHeaps(static_cast<uint32_t>(heaps.size()), heaps.data());
+    m_commandList->SetComputeRootDescriptorTable(0, m_srvUavHeap->GetGPUDescriptorHandleForHeapStart());
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -116,6 +118,7 @@ void RaytracePass::OnShaderReload()
 
 void RaytracePass::OnSceneChange(std::shared_ptr<Scene> scene)
 {
+    spdlog::debug("Scene change for Ray Tracing...");
     m_currentScene = scene;
     CreateShaderResourceHeap();
 }
@@ -253,35 +256,8 @@ void RaytracePass::CreateRootSignatures()
 void RaytracePass::CreateRayGenSignature()
 {
     spdlog::debug("Creating ray generation root signature");
-
-    CD3DX12_ROOT_PARAMETER rootParameters[1];
-
-    // CBV for ImGui
-    D3D12_DESCRIPTOR_RANGE cbvRange;
-    cbvRange.BaseShaderRegister = 0;
-    cbvRange.NumDescriptors = 1;
-    cbvRange.RegisterSpace = 0;
-    cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.OffsetInDescriptorsFromTableStart = 1;
-
-    D3D12_DESCRIPTOR_RANGE rtRange;
-    rtRange.BaseShaderRegister = 0;
-    rtRange.NumDescriptors = 1;
-    rtRange.RegisterSpace = 0;
-    rtRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    rtRange.OffsetInDescriptorsFromTableStart = 2;
-
-    D3D12_DESCRIPTOR_RANGE tlasRange;
-    tlasRange.BaseShaderRegister = 0;
-    tlasRange.NumDescriptors = 1;
-    tlasRange.RegisterSpace = 0;
-    tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    tlasRange.OffsetInDescriptorsFromTableStart = 3;
-
-    D3D12_DESCRIPTOR_RANGE fullRange[3] = {cbvRange, rtRange, tlasRange};
-    rootParameters[0].InitAsDescriptorTable(3, fullRange);
     
-    CD3DX12_ROOT_SIGNATURE_DESC localRayGenSignatureDesc(1, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC localRayGenSignatureDesc(0, nullptr);
     localRayGenSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
 
     Microsoft::WRL::ComPtr<ID3DBlob> blob;
@@ -321,7 +297,49 @@ void RaytracePass::CreateHitSignature()
 
 void RaytracePass::CreateGlobalRootSignature()
 {
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(0, nullptr);
+    CD3DX12_ROOT_PARAMETER rootParameters[1];
+
+    // CBV for ImGui
+    D3D12_DESCRIPTOR_RANGE cbvRange;
+    cbvRange.BaseShaderRegister = 0;
+    cbvRange.NumDescriptors = 1;
+    cbvRange.RegisterSpace = 0;
+    cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+    cbvRange.OffsetInDescriptorsFromTableStart = 1;
+
+    D3D12_DESCRIPTOR_RANGE rtRange;
+    rtRange.BaseShaderRegister = 0;
+    rtRange.NumDescriptors = 1;
+    rtRange.RegisterSpace = 0;
+    rtRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    rtRange.OffsetInDescriptorsFromTableStart = 2;
+
+    D3D12_DESCRIPTOR_RANGE tlasRange;
+    tlasRange.BaseShaderRegister = 0;
+    tlasRange.NumDescriptors = 1;
+    tlasRange.RegisterSpace = 0;
+    tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    tlasRange.OffsetInDescriptorsFromTableStart = 3;
+    
+    D3D12_DESCRIPTOR_RANGE vertex_range;
+    vertex_range.BaseShaderRegister = 1;
+    vertex_range.NumDescriptors = 1;
+    vertex_range.RegisterSpace = 0;
+    vertex_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    vertex_range.OffsetInDescriptorsFromTableStart = 4;
+
+    D3D12_DESCRIPTOR_RANGE index_range;
+    index_range.BaseShaderRegister = 2;
+    index_range.NumDescriptors = 1;
+    index_range.RegisterSpace = 0;
+    index_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    index_range.OffsetInDescriptorsFromTableStart = 5;
+
+    D3D12_DESCRIPTOR_RANGE ranges[5] = {cbvRange, rtRange, tlasRange, vertex_range, index_range};
+
+    rootParameters[0].InitAsDescriptorTable(5, ranges);
+    
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(1, rootParameters);
     
     Microsoft::WRL::ComPtr<ID3DBlob> blob;
     Microsoft::WRL::ComPtr<ID3DBlob> error;

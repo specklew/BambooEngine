@@ -86,10 +86,10 @@ private:
 	
 	bool CheckTearingSupport();
 	bool CheckRayTracingSupport() const;
-	
-	void SetupAccelerationStructures();
 
 	void CreateTextureSRV(const std::shared_ptr<Texture>& texture);
+	void CreateVertexSRV();
+	void CreateIndexSRV();
 
 	void InitializeImGui();
 	void RenderImGui();

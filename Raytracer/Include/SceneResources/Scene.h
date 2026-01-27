@@ -19,6 +19,8 @@ public:
     [[nodiscard]] const std::vector<std::shared_ptr<GameObject>>& GetGameObjects() const { return m_gameObjects; }
     [[nodiscard]] const std::string& GetName() const { return m_name; }
     [[nodiscard]] std::shared_ptr<AccelerationStructures> GetAccelerationStructures() { return m_rtRepresentation; }
+    [[nodiscard]] std::shared_ptr<IndexBuffer> GetIndexBuffer() { return m_indexBuffer; }
+    [[nodiscard]] std::shared_ptr<VertexBuffer> GetVertexBuffer() { return m_vertexBuffer; }
     
 private:
     friend class SceneBuilder;

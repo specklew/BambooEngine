@@ -69,6 +69,8 @@ std::shared_ptr<Scene> SceneBuilder::Build()
     scene.m_root = std::move(m_root);
     scene.m_name = std::move(m_name);
     scene.m_rtRepresentation = std::move(m_rtRepresentation);
+    scene.m_vertexBuffer = std::move(m_vertexBuffer);
+    scene.m_indexBuffer = std::move(m_indexBuffer);
     
     return std::make_shared<Scene>(std::move(scene));
 }

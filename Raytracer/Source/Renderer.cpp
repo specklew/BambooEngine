@@ -76,6 +76,9 @@ void Renderer::Initialize()
 	m_scene = ModelLoading::LoadScene(*this, AssetId(ModelLoading::ScenePath(g_currentScene.Get())));
 	previousScene = g_currentScene.Get();
 
+	CreateVertexSRV();
+	CreateIndexSRV();
+
 	m_material = std::make_shared<Material>();
 	m_material->m_data.albedoColor = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
 
@@ -168,19 +171,19 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	if (previousScene != g_currentScene.Get())
 	{
 		spdlog::info("Scene has been changed. Loading: {}", ModelLoading::ScenePath(g_currentScene.Get()));
+
+		g_textureIndex = 0;
 		
 		m_scene = ModelLoading::LoadScene(*this, AssetId(ModelLoading::ScenePath(g_currentScene.Get())));
 		
+		CreateVertexSRV();
+		CreateIndexSRV();
+
+		ExecuteCommandsAndReset();
+
 		m_raytracePass->OnSceneChange(m_scene);
+
 		previousScene = g_currentScene.Get();
-
-		ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
-		m_d3d12CommandList->Close();
-		commandLists[0] = m_d3d12CommandList.Get();
-		m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-
-		FlushCommandQueue();
-		ResetCommandList();
 	}
 
 	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
@@ -229,16 +232,15 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		true,
 		&m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 	}
-
-	ID3D12DescriptorHeap* descriptorHeaps[] = {m_srvCbvUavDescriptorHeap.Get()};
-
-	m_d3d12CommandList->SetPipelineState(m_pipelineStateObject.Get());
-	m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-	m_d3d12CommandList->SetGraphicsRootSignature(m_rootSignature.Get());
-
-
+	
 	if (m_rasterize)
 	{
+		ID3D12DescriptorHeap* descriptorHeaps[] = {m_srvCbvUavDescriptorHeap.Get()};
+
+		m_d3d12CommandList->SetPipelineState(m_pipelineStateObject.Get());
+		m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+		m_d3d12CommandList->SetGraphicsRootSignature(m_rootSignature.Get());
+		
 		m_d3d12CommandList->SetGraphicsRootConstantBufferView(3, m_passConstants->GetGpuVirtualAddress());
 		
 		for (const auto& go : m_scene->GetGameObjects())
@@ -586,13 +588,13 @@ void Renderer::CreateDSVDescriptorHeap()
 
 void Renderer::CreateDescriptorHeaps()
 {
-	///	|							|								|							|							|
-	///	|	SRV IMGUI TEXTURE (1)	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (MAX_SCENES)	|	TEXTURES (MAX_TEXTURE)	|
-	///	|							|								|							|							|
+	///	|							|								|					|					|					|							|
+	///	|	SRV IMGUI TEXTURE (1)	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (1)	|	VERTEX SRV (1)	|	INDEX SRV (1)	|	TEXTURES (MAX_TEXTURE)	|
+	///	|							|								|					|					|					|							|
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Engine::MAX_SCENES + Constants::Graphics::MAX_TEXTURES;
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES;
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -656,16 +658,30 @@ void Renderer::CreateRasterizationRootSignature()
 	tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	tlasRange.OffsetInDescriptorsFromTableStart = 3;
 
+	D3D12_DESCRIPTOR_RANGE vertexRange;
+	vertexRange.BaseShaderRegister = 1;
+	vertexRange.NumDescriptors = 1;
+	vertexRange.RegisterSpace = 0;
+	vertexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	vertexRange.OffsetInDescriptorsFromTableStart = 4;
+	
+	D3D12_DESCRIPTOR_RANGE indexRange;
+	indexRange.BaseShaderRegister = 2;
+	indexRange.NumDescriptors = 1;
+	indexRange.RegisterSpace = 0;
+	indexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	indexRange.OffsetInDescriptorsFromTableStart = 5;
+	
 	D3D12_DESCRIPTOR_RANGE textureRange;
-	textureRange.BaseShaderRegister = 1;
+	textureRange.BaseShaderRegister = 3;
 	textureRange.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
 	textureRange.RegisterSpace = 0;
 	textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	textureRange.OffsetInDescriptorsFromTableStart = 4;
+	textureRange.OffsetInDescriptorsFromTableStart = 6;
 
-	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, textureRange};
+	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, vertexRange, indexRange, textureRange};
 	
-	rootParameters[0].InitAsDescriptorTable(4, ranges);
+	rootParameters[0].InitAsDescriptorTable(6, ranges);
 	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer
 	rootParameters[2].InitAsConstantBufferView(2); // Material buffer
 	rootParameters[3].InitAsConstantBufferView(3); // Pass constants
@@ -806,26 +822,6 @@ bool Renderer::CheckRayTracingSupport() const
 	return true;
 }
 
-void Renderer::SetupAccelerationStructures()
-{
-	spdlog::debug("Setting up acceleration structures");
-	
-	/*for (auto scene : m_loadedScenes)
-	{
-		spdlog::debug("Setting up AS for scene: {}", scene->GetName());
-		auto accelerationStructures = std::make_shared<AccelerationStructures>();
-		ExtractBLASesFromSceneModels(*scene, *accelerationStructures);
-		CreateTLASForScene(*scene, *accelerationStructures);
-		m_accelerationStructures.emplace_back(accelerationStructures);
-	}*/
-
-	spdlog::debug("Executing command list with BLAS generation");
-	m_d3d12CommandList->Close();
-	ID3D12CommandList* commandLists[] = {m_d3d12CommandList.Get()};
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-	FlushCommandQueue();
-}
-
 void Renderer::CreateTextureSRV(const std::shared_ptr<Texture>& texture)
 {
 	assert(texture && "Passed texture cannot be null!");
@@ -850,12 +846,56 @@ void Renderer::CreateTextureSRV(const std::shared_ptr<Texture>& texture)
 		// TODO: In case that texture is a TEXTURE 2D ARRAY
 	}
 	srv_desc.Format = desc.Format;
-	srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; // TODO: Check what this does and why default is best here.
+	srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 
 	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-	handle.Offset(4 + texture->GetTextureIndex(),  g_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+	handle.Offset(6 + texture->GetTextureIndex(),  g_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
 
 	g_d3d12Device->CreateShaderResourceView(resource.Get(), &srv_desc, handle);
+}
+
+void Renderer::CreateVertexSRV()
+{
+	assert(m_scene && "Scene cannot be null when creating vertex SRV");
+
+	auto vertex_buffer = m_scene->GetVertexBuffer();
+
+	assert(vertex_buffer && "Vertex buffer cannot be null when creating vertex SRV!");
+	
+	D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+	srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	srv_desc.Buffer.FirstElement = 0;
+	srv_desc.Buffer.NumElements = vertex_buffer->GetBufferSize() / sizeof(uint32_t); // Each element is a single 32bit value -> X Y Z separate, UV separate etc...
+	srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+	srv_desc.Format = DXGI_FORMAT_R32_TYPELESS;
+	srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	handle.Offset(4, g_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+
+	g_d3d12Device->CreateShaderResourceView(vertex_buffer->GetUnderlyingResource().Get(), &srv_desc, handle);
+}
+
+void Renderer::CreateIndexSRV()
+{
+	assert(m_scene && "Scene cannot be null when creating index SRV");
+
+	auto index_buffer = m_scene->GetIndexBuffer();
+
+	assert(index_buffer && "Index buffer cannot be null when creating index SRV!");
+	
+	D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+	srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	srv_desc.Buffer.FirstElement = 0;
+	srv_desc.Buffer.NumElements = index_buffer->GetIndexCount();
+	srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+	srv_desc.Format = DXGI_FORMAT_R32_TYPELESS;
+	srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+	handle.Offset(5, g_d3d12Device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+
+	g_d3d12Device->CreateShaderResourceView(index_buffer->GetUnderlyingResource().Get(), &srv_desc, handle);
 }
 
 void Renderer::InitializeImGui()
