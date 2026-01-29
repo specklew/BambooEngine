@@ -11,6 +11,8 @@
 #include "Resources/ShaderBindingTable.h"
 #include "SceneResources/Scene.h"
 
+constexpr int NUM_HIT_GROUPS = 4096; // = max objects
+
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
                               std::shared_ptr<Scene> initialScene,
@@ -52,15 +54,15 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
     D3D12_DISPATCH_RAYS_DESC desc = {};
     
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();
-    desc.RayGenerationShaderRecord.SizeInBytes = m_shaderBindingTable->GetRayGenEntrySize();
+    desc.RayGenerationShaderRecord.SizeInBytes = m_shaderBindingTable->GetRayGenSectionSize();
     
     desc.MissShaderTable.StartAddress = desc.RayGenerationShaderRecord.StartAddress + desc.RayGenerationShaderRecord.SizeInBytes;
-    desc.MissShaderTable.StrideInBytes = m_shaderBindingTable->GetMissSectionSize();
-    desc.MissShaderTable.SizeInBytes = m_shaderBindingTable->GetMissEntrySize();
+    desc.MissShaderTable.StrideInBytes = m_shaderBindingTable->GetMissEntrySize();
+    desc.MissShaderTable.SizeInBytes = m_shaderBindingTable->GetMissSectionSize();
     
-    desc.HitGroupTable.StartAddress = desc.MissShaderTable.StartAddress + desc.MissShaderTable.StrideInBytes;
-    desc.HitGroupTable.StrideInBytes = m_shaderBindingTable->GetHitSectionSize();
-    desc.HitGroupTable.SizeInBytes = m_shaderBindingTable->GetHitEntrySize();
+    desc.HitGroupTable.StartAddress = desc.MissShaderTable.StartAddress + desc.MissShaderTable.SizeInBytes;
+    desc.HitGroupTable.StrideInBytes = m_shaderBindingTable->GetHitEntrySize();
+    desc.HitGroupTable.SizeInBytes = m_shaderBindingTable->GetHitSectionSize();
 
     desc.Width = Window::Get().GetWidth();
     desc.Height = Window::Get().GetHeight();
@@ -173,10 +175,15 @@ void RaytracePass::InitializeRaytracingPipeline()
     spdlog::debug("Adding hit group to pipeline");
     m_hitGroupName = L"HitGroup";
     {
-        auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
-        hitGroup->SetClosestHitShaderImport(m_hitShaderName.c_str());
-        hitGroup->SetHitGroupExport(m_hitGroupName.c_str());
-        hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
+        for (int i = 0; i < NUM_HIT_GROUPS; i++)
+        {
+            std::wstring name = m_hitGroupName + std::to_wstring(i);
+            
+            auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+            hitGroup->SetClosestHitShaderImport(m_hitShaderName.c_str());
+            hitGroup->SetHitGroupExport(name.c_str());
+            hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
+        }
     }
     
     // 5. Root signature associations
@@ -205,7 +212,14 @@ void RaytracePass::InitializeRaytracingPipeline()
 
         auto rootSignatureAssociation = raytracingPipeline.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
         rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignatureSubObj);
-        rootSignatureAssociation->AddExport(m_hitShaderName.c_str());
+
+        for (int i = 0; i < NUM_HIT_GROUPS; i++)
+        {
+            std::wstring name = m_hitGroupName + std::to_wstring(i);
+            rootSignatureAssociation->AddExport(name.c_str());
+        }
+
+
     }
 
     {
@@ -407,7 +421,12 @@ void RaytracePass::CreateShaderBindingTable()
     SBTDescriptor sbt_desc = {};
     sbt_desc.RayGenShaders.push_back({m_rayGenShaderName, {heapPtr}});
     sbt_desc.MissShaders.push_back({m_missShaderName, {}});
-    sbt_desc.HitShaders.push_back({m_hitGroupName, {}});
+
+    for (int i = 0; i < NUM_HIT_GROUPS; i++)
+    {
+        std::wstring name = m_hitGroupName + std::to_wstring(i);
+        sbt_desc.HitShaders.push_back({name, {}});
+    }
 
     m_shaderBindingTable = std::make_shared<ShaderBindingTable>(m_device, m_rtStateObjectProperties, sbt_desc);
 

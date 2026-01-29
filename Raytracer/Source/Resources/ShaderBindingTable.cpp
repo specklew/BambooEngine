@@ -94,17 +94,17 @@ void ShaderBindingTable::MapShadersToBuffer()
 
 size_t ShaderBindingTable::CopyShaderData(BYTE* startData, size_t offset, const std::vector<SBTEntry>& shaders, size_t entrySize)
 {
-    BYTE* pData = startData + offset;
-    
     for (const auto& entry : shaders)
     {
+        BYTE* pData = startData + offset;
+        
         void* shader_id = m_stateObjectProperties->GetShaderIdentifier(entry.entryPoint.c_str());
         
         if (!shader_id) spdlog::error("Failed to get shader identifier!");
 
         memcpy(pData, shader_id, EntryIDSize);
         memcpy(pData + EntryIDSize, entry.inputData.data(), entry.inputData.size() * sizeof(void*));
-
+        
         offset += entrySize;
     }
 
