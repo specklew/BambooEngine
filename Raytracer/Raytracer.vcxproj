@@ -65,7 +65,7 @@
       <AdditionalLibraryDirectories>$(ProjectDir)Vendor\DXC\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <FxCompile>
-      <ShaderModel>6.3</ShaderModel>
+      <ShaderModel>6.5</ShaderModel>
       <EntryPointName />
     </FxCompile>
   </ItemDefinitionGroup>
@@ -94,7 +94,7 @@
       <AdditionalLibraryDirectories>$(ProjectDir)Vendor\DXC\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <FxCompile>
-      <ShaderModel>6.3</ShaderModel>
+      <ShaderModel>6.5</ShaderModel>
       <EntryPointName />
     </FxCompile>
   </ItemDefinitionGroup>
@@ -119,6 +119,7 @@
     <ClInclude Include="Include\Resources\ShaderBindingTable.h" />
     <ClInclude Include="Include\Resources\StringHash.h" />
     <ClInclude Include="Include\Resources\StringId.h" />
+    <ClInclude Include="Include\Resources\StructuredBuffer.h" />
     <ClInclude Include="Include\Resources\Texture.h" />
     <ClInclude Include="Include\Resources\VertexBuffer.h" />
     <ClInclude Include="Include\SceneResources\GameObject.h" />
@@ -321,6 +322,7 @@
     <ClCompile Include="Source\Resources\Resource.cpp" />
     <ClCompile Include="Source\Resources\ShaderBindingTable.cpp"/>
     <ClCompile Include="Source\Resources\StringId.cpp"/>
+    <ClCompile Include="Source\Resources\StructuredBuffer.cpp"/>
     <ClCompile Include="Source\Resources\Texture.cpp"/>
     <ClCompile Include="Source\Resources\VertexBuffer.cpp" />
     <ClCompile Include="Source\SceneResources\GameObject.cpp"/>

@@ -10,7 +10,7 @@ PassConstants::PassConstants()
 
     ComPtr<ID3D12Resource> resource;
 
-    const HRESULT hr = Renderer::g_d3d12Device->CreateCommittedResource(
+    const HRESULT hr = Renderer::g_device->CreateCommittedResource(
         &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
         D3D12_HEAP_FLAG_NONE,
         &CD3DX12_RESOURCE_DESC::Buffer(sizeof(MappedData)),
@@ -20,7 +20,7 @@ PassConstants::PassConstants()
 
     ThrowIfFailed(hr);
 
-    m_buffer = std::make_unique<ConstantBuffer>(Renderer::g_d3d12Device, resource);
+    m_buffer = std::make_unique<ConstantBuffer>(Renderer::g_device, resource);
 }
 
 void PassConstants::Map()

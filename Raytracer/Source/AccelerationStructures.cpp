@@ -75,7 +75,7 @@ void AccelerationStructures::CreateTopLevelAS(
             auto& instance = instances[i];
             spdlog::debug("Adding instance with name {}", GetName(instance.first.Get()));
             m_topLevelAsGenerator->AddInstance(
-                instance.first.Get(), instance.second, static_cast<uint32_t>(i), static_cast<uint32_t>(i));
+                instance.first.Get(), instance.second, static_cast<uint32_t>(i), 0);
         }
 
         uint64_t scratchSize, resultSize, instanceDescsSize;

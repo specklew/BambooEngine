@@ -1,5 +1,7 @@
 ﻿#pragma once
+#include "Resources/StructuredBuffer.h"
 
+class ConstantBuffer;
 class VertexBuffer;
 class IndexBuffer;
 class AccelerationStructures;
@@ -11,6 +13,17 @@ class Model;
 class SceneNode;
 class SceneBuilder;
 
+struct GeometryInfo
+{
+    uint32_t vertexOffset;
+    uint32_t indexOffset;
+};
+
+struct InstanceInfo
+{
+    uint32_t geometryId;
+};
+
 class Scene
 {
 public:
@@ -21,13 +34,17 @@ public:
     [[nodiscard]] std::shared_ptr<AccelerationStructures> GetAccelerationStructures() { return m_rtRepresentation; }
     [[nodiscard]] std::shared_ptr<IndexBuffer> GetIndexBuffer() { return m_indexBuffer; }
     [[nodiscard]] std::shared_ptr<VertexBuffer> GetVertexBuffer() { return m_vertexBuffer; }
+    [[nodiscard]] std::shared_ptr<StructuredBuffer<GeometryInfo>> GetGeometryInfoBuffer() { return m_geometryInfoBuffer; }
+    [[nodiscard]] std::shared_ptr<StructuredBuffer<InstanceInfo>> GetInstanceInfoBuffer() { return m_instanceInfoBuffer; }
     
 private:
     friend class SceneBuilder;
     Scene() = default;
 
     std::shared_ptr<IndexBuffer> m_indexBuffer;
-    std::shared_ptr<VertexBuffer> m_vertexBuffer; 
+    std::shared_ptr<VertexBuffer> m_vertexBuffer;
+    std::shared_ptr<StructuredBuffer<GeometryInfo>> m_geometryInfoBuffer;
+    std::shared_ptr<StructuredBuffer<InstanceInfo>> m_instanceInfoBuffer;
     
     std::string m_name;
     std::shared_ptr<SceneNode> m_root;
@@ -55,14 +72,16 @@ public:
     std::shared_ptr<Model> GetModel(const int index) const { return m_models[index]; }
     std::vector<std::shared_ptr<Model>> GetModels() const { return m_models; }
     
-    std::shared_ptr<Scene> Build();
+    std::shared_ptr<Scene> Build(Renderer& renderer);
+    
 private:
     friend class SceneNode;
 
     static void UpdateMatricesInNodesRecursively(const std::shared_ptr<SceneNode>& node);
+    std::vector<std::shared_ptr<Primitive>> GetAllPrimitives() const; 
 
     std::shared_ptr<IndexBuffer> m_indexBuffer;
-    std::shared_ptr<VertexBuffer> m_vertexBuffer; 
+    std::shared_ptr<VertexBuffer> m_vertexBuffer;
     
     std::string m_name;
     std::vector<std::shared_ptr<GameObject>> m_gameObjects;

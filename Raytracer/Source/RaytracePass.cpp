@@ -9,9 +9,9 @@
 #include "Window.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Resources/ShaderBindingTable.h"
+#include "SceneResources/Primitive.h"
 #include "SceneResources/Scene.h"
 
-constexpr int NUM_HIT_GROUPS = 4096; // = max objects
 
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
@@ -41,6 +41,8 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
     std::vector heaps = {m_srvUavHeap.Get()};
     m_commandList->SetDescriptorHeaps(static_cast<uint32_t>(heaps.size()), heaps.data());
     m_commandList->SetComputeRootDescriptorTable(0, m_srvUavHeap->GetGPUDescriptorHandleForHeapStart());
+    m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -175,15 +177,10 @@ void RaytracePass::InitializeRaytracingPipeline()
     spdlog::debug("Adding hit group to pipeline");
     m_hitGroupName = L"HitGroup";
     {
-        for (int i = 0; i < NUM_HIT_GROUPS; i++)
-        {
-            std::wstring name = m_hitGroupName + std::to_wstring(i);
-            
-            auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
-            hitGroup->SetClosestHitShaderImport(m_hitShaderName.c_str());
-            hitGroup->SetHitGroupExport(name.c_str());
-            hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
-        }
+        auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+        hitGroup->SetClosestHitShaderImport(m_hitShaderName.c_str());
+        hitGroup->SetHitGroupExport(m_hitGroupName.c_str());
+        hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
     }
     
     // 5. Root signature associations
@@ -212,14 +209,9 @@ void RaytracePass::InitializeRaytracingPipeline()
 
         auto rootSignatureAssociation = raytracingPipeline.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
         rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignatureSubObj);
-
-        for (int i = 0; i < NUM_HIT_GROUPS; i++)
-        {
-            std::wstring name = m_hitGroupName + std::to_wstring(i);
-            rootSignatureAssociation->AddExport(name.c_str());
-        }
-
-
+        
+        rootSignatureAssociation->AddExport(m_hitGroupName.c_str());
+        
     }
 
     {
@@ -298,7 +290,7 @@ void RaytracePass::CreateMissSignature()
 void RaytracePass::CreateHitSignature()
 {
     spdlog::debug("Creating hit root signature");
-
+    
     CD3DX12_ROOT_SIGNATURE_DESC localHitSignatureDesc(0, nullptr);
     localHitSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
 
@@ -311,7 +303,7 @@ void RaytracePass::CreateHitSignature()
 
 void RaytracePass::CreateGlobalRootSignature()
 {
-    CD3DX12_ROOT_PARAMETER rootParameters[1];
+    CD3DX12_ROOT_PARAMETER rootParameters[3];
 
     // CBV for ImGui
     D3D12_DESCRIPTOR_RANGE cbvRange;
@@ -350,10 +342,12 @@ void RaytracePass::CreateGlobalRootSignature()
     index_range.OffsetInDescriptorsFromTableStart = 5;
 
     D3D12_DESCRIPTOR_RANGE ranges[5] = {cbvRange, rtRange, tlasRange, vertex_range, index_range};
-
-    rootParameters[0].InitAsDescriptorTable(5, ranges);
     
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(1, rootParameters);
+    rootParameters[0].InitAsDescriptorTable(5, ranges);
+    rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
+    rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
+    
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(3, rootParameters);
     
     Microsoft::WRL::ComPtr<ID3DBlob> blob;
     Microsoft::WRL::ComPtr<ID3DBlob> error;
@@ -421,12 +415,8 @@ void RaytracePass::CreateShaderBindingTable()
     SBTDescriptor sbt_desc = {};
     sbt_desc.RayGenShaders.push_back({m_rayGenShaderName, {heapPtr}});
     sbt_desc.MissShaders.push_back({m_missShaderName, {}});
-
-    for (int i = 0; i < NUM_HIT_GROUPS; i++)
-    {
-        std::wstring name = m_hitGroupName + std::to_wstring(i);
-        sbt_desc.HitShaders.push_back({name, {}});
-    }
+    
+    sbt_desc.HitShaders.push_back({m_hitGroupName, {}});
 
     m_shaderBindingTable = std::make_shared<ShaderBindingTable>(m_device, m_rtStateObjectProperties, sbt_desc);
 

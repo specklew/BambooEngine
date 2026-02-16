@@ -62,4 +62,6 @@ private:
     std::shared_ptr<ShaderBindingTable> m_shaderBindingTable;
     
     std::shared_ptr<Scene> m_currentScene;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE m_geometryInfoHandle;
 };

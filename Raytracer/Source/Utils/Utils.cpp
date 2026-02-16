@@ -23,7 +23,7 @@ void ThrowIfFailed(HRESULT hr)
 		{
 			//DEVICE REMOVED
 			spdlog::error("ERROR caused by DEVICE REMOVED. TRANSLATING...");
-			_com_error deviceRemovedErr(Renderer::g_d3d12Device->GetDeviceRemovedReason());
+			_com_error deviceRemovedErr(Renderer::g_device->GetDeviceRemovedReason());
 			LPCTSTR deviceRemovedMsg = deviceRemovedErr.ErrorMessage();
 			std::wstring w2 = deviceRemovedMsg;
 			std::string deviceRemovedError = std::string(w2.begin(), w2.end());

@@ -259,7 +259,7 @@ static void TraverseNode(Renderer& renderer, const tinygltf::Model& model, Scene
     const tinygltf::Node& gltf_node = model.nodes[nodeIndex];
     auto current_node = std::make_shared<SceneNode>();
     
-    if (gltf_node.mesh > 0)
+    if (gltf_node.mesh >= 0)
     {
         auto gameObject = renderer.InstantiateGameObject();
         sceneBuilder.AddGameObject(gameObject, sceneBuilder.GetModel(gltf_node.mesh));
@@ -282,46 +282,49 @@ static std::shared_ptr<AccelerationStructures> BuildAccelerationStructures(const
 {
     using Microsoft::WRL::ComPtr;
     
-    std::unordered_map<std::shared_ptr<Model>, std::shared_ptr<AccelerationStructureBuffers>> modelBLASes;
+    std::unordered_map<std::shared_ptr<Primitive>, std::shared_ptr<AccelerationStructureBuffers>> modelBLASes;
     std::shared_ptr<AccelerationStructures> as = std::make_shared<AccelerationStructures>();
 
     for (auto model : scene.GetModels())
     {
-        std::vector<BufferView> vertex_buffers;
-        std::vector<BufferView> index_buffers;
-		
         for (auto prim : model->GetMeshes())
         {
+            std::vector<BufferView> vertex_buffers;
+            std::vector<BufferView> index_buffers;
+            
             vertex_buffers.emplace_back(prim->GetVertexView());
             index_buffers.emplace_back(prim->GetIndexView());
+
+            AccelerationStructureBuffers bottomLevelBuffers = as->CreateBottomLevelAS(
+                renderer.g_device.Get(),
+                renderer.GetCommandList(),
+                vertex_buffers,
+                index_buffers);
+
+            modelBLASes.emplace(prim, std::make_shared<AccelerationStructureBuffers>(bottomLevelBuffers));
         }
-
-        AccelerationStructureBuffers bottomLevelBuffers = as->CreateBottomLevelAS(
-            renderer.g_d3d12Device.Get(),
-            renderer.GetCommandList(),
-            vertex_buffers,
-            index_buffers);
-
-        modelBLASes.emplace(model, std::make_shared<AccelerationStructureBuffers>(bottomLevelBuffers));
     }
     
     for (auto go : scene.GetGameObjects())
     {
         auto model = go->GetModel();
-        auto blasIt = modelBLASes.find(model);
-        if (blasIt != modelBLASes.end())
+        for (auto prim : model->GetMeshes())
         {
-            DirectX::XMMATRIX worldMatrix = DirectX::XMLoadFloat4x4(&go->GetWorldFloat4X4());
-            auto instance = std::pair(blasIt->second->p_result, worldMatrix);
-            as->GetInstances().emplace_back(instance);
-        }
-        else
-        {
-            spdlog::warn("Model for GameObject not found in BLASes map during TLAS setup.");
+            auto blasIt = modelBLASes.find(prim);
+            if (blasIt != modelBLASes.end())
+            {
+                DirectX::XMMATRIX worldMatrix = DirectX::XMLoadFloat4x4(&go->GetWorldFloat4X4());
+                auto instance = std::pair(blasIt->second->p_result, worldMatrix);
+                as->GetInstances().emplace_back(instance);
+            }
+            else
+            {
+                spdlog::warn("Model for GameObject not found in BLASes map during TLAS setup.");
+            }
         }
     }
 
-    as->CreateTopLevelAS(Renderer::g_d3d12Device.Get(), renderer.GetCommandList().Get(), as->GetInstances(), false);
+    as->CreateTopLevelAS(Renderer::g_device.Get(), renderer.GetCommandList().Get(), as->GetInstances(), false);
 
     return as;
 }
@@ -414,5 +417,5 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
     scene_builder.UpdateMatrices(); // Needs to be done before TLAS building for instances to have the correct positions.
     scene_builder.SetAccelerationStructures(BuildAccelerationStructures(renderer, scene_builder));
     
-    return scene_builder.Build();
+    return scene_builder.Build(renderer);
 } 

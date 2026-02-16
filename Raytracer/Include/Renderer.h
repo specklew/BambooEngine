@@ -4,6 +4,7 @@
 #include "Constants.h"
 #include "InputElements.h"
 #include "Keyboard.h"
+#include "Resources/StructuredBuffer.h"
 #include "Utils/Utils.h"
 
 class IndexBuffer;
@@ -53,8 +54,11 @@ public:
 
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> GetCommandList() const { return m_d3d12CommandList; }
 
-	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_d3d12Device;
-	inline static int g_textureIndex = 0; 
+	template <typename T>
+	std::shared_ptr<StructuredBuffer<T>> CreateStructuredBuffer(const std::vector<T> &data); 
+	
+	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_device;
+	inline static int g_textureIndex = 0;
 	
 private:
 	void SetupDeviceAndDebug();
@@ -106,8 +110,6 @@ private:
 	
 	Microsoft::WRL::ComPtr<IDXGIAdapter4> GetHardwareAdapter(bool useWarp = false);
 	Microsoft::WRL::ComPtr<ID3D12Device5> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);
-
-	Microsoft::WRL::ComPtr<ID3D12Resource> CreateDefaultBuffer(const void* initData, UINT64 byteSize, Microsoft::WRL::ComPtr<ID3D12Resource> &uploadBuffer);
 
 	Microsoft::WRL::ComPtr<ID3D12InfoQueue> m_infoQueue;
 	
@@ -170,3 +172,27 @@ private:
 
 	std::shared_ptr<PassConstants> m_passConstants;
 };
+
+template <typename T>
+std::shared_ptr<StructuredBuffer<T>> Renderer::CreateStructuredBuffer(const std::vector<T>& data)
+{
+	auto buffer_size = sizeof(T) * data.size();
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> upload_buffer;
+
+	auto cpuData = static_cast<BYTE*>(malloc(buffer_size));
+	memcpy(cpuData, data.data(), buffer_size);
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> default_buffer = RenderingUtils::CreateDefaultBuffer(g_device.Get(), m_d3d12CommandList.Get(), cpuData, buffer_size, upload_buffer);
+	auto structured_buffer = std::make_shared<StructuredBuffer<T>>(g_device, default_buffer, data.size());
+
+	const std::string type_name = typeid(T).name();
+	const std::string resource_name = "Structured Buffer " + type_name;
+	
+	structured_buffer->SetResourceName(resource_name);
+
+	ExecuteCommandsAndReset();
+	AssertFreeClear(&cpuData);
+
+	return structured_buffer;
+}

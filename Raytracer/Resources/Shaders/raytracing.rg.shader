@@ -1,5 +1,5 @@
 {
     "pathWithinResources": "Shaders/raytracing.hlsl",
     "entrypoint": "raygen",
-    "target": "lib_6_3"
+    "target": "lib_6_5"
 }

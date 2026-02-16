@@ -13,6 +13,17 @@ struct HitInfo
 struct Attributes
 {
     float2 barycentrics;
+};    
+
+struct GeometryInfo
+{
+    uint vertexOffset;
+    uint indexOffset;
+};
+
+struct InstanceInfo
+{
+    uint geometryIndex;
 };
 
 // Raytracing output texture, accessed as a UAV
@@ -23,6 +34,9 @@ RaytracingAccelerationStructure SceneBVH : register(t0);
 
 ByteAddressBuffer g_vertices : register(t1);
 ByteAddressBuffer g_indices : register(t2);
+
+StructuredBuffer<GeometryInfo> g_geometryInfo : register(t3);
+StructuredBuffer<InstanceInfo> g_instanceInfo : register(t4);
 
 cbuffer CameraParams : register(b0)
 {
@@ -39,7 +53,7 @@ uint3 Load3x32BitIndices(uint triangleIndex)
     indices.x = g_indices.Load((triangleIndex * 3 + 0) * 4);
     indices.y = g_indices.Load((triangleIndex * 3 + 1) * 4);
     indices.z = g_indices.Load((triangleIndex * 3 + 2) * 4);
-
+    
     return indices;
 }
 
@@ -92,8 +106,14 @@ struct STriVertex
 [shader("closesthit")] 
 void Hit(inout HitInfo payload : SV_RayPayload, Attributes attr) 
 {
-
-    const uint3 indices = Load3x32BitIndices(PrimitiveIndex());
+    uint geometryIndex = g_instanceInfo[InstanceIndex()].geometryIndex;
+    uint vertexOffset = g_geometryInfo[geometryIndex].vertexOffset;
+    uint indexOffset = g_geometryInfo[geometryIndex].indexOffset / 3;
+    
+    uint3 indices = Load3x32BitIndices(PrimitiveIndex() + indexOffset);
+    indices.x += vertexOffset;
+    indices.y += vertexOffset;
+    indices.z += vertexOffset;
     float2 uv0 = GetUVAttribute(indices.x * 32 + 24);
     float2 uv1 = GetUVAttribute(indices.y * 32 + 24);
     float2 uv2 = GetUVAttribute(indices.z * 32 + 24);
@@ -101,11 +121,7 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attr)
     float3 bary = float3(1.0 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
     float2 uv = bary.x * uv0 + bary.y * uv1 + bary.z * uv2;
     
+    float2 col = uv;
     
-    //uint vertId = 3 * PrimitiveIndex();
-    //float3 hitColor = BTriVertex[indices[vertId + 0]].color * barycentrics.x +
-    //BTriVertex[indices[vertId + 1]].color * barycentrics.y +
-    //BTriVertex[indices[vertId + 2]].color * barycentrics.z;
-    
-    payload.colorAndDistance = float4(uv.x, 0, uv.y, RayTCurrent()); 
+    payload.colorAndDistance = float4(col.x, 0, col.y, RayTCurrent()); 
 }

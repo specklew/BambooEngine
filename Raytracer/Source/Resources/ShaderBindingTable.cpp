@@ -102,8 +102,17 @@ size_t ShaderBindingTable::CopyShaderData(BYTE* startData, size_t offset, const 
         
         if (!shader_id) spdlog::error("Failed to get shader identifier!");
 
-        memcpy(pData, shader_id, EntryIDSize);
-        memcpy(pData + EntryIDSize, entry.inputData.data(), entry.inputData.size() * sizeof(void*));
+        memcpy(pData, shader_id, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+        
+        // Copy root arguments - each void* in inputData represents raw data to be copied
+        // For root constants, the value itself is stored in the pointer
+        BYTE* pRootArgs = pData + D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+        for (size_t i = 0; i < entry.inputData.size(); i++)
+        {
+            // Write the pointer value as raw bytes (works for both descriptor handles and root constants cast to void*)
+            void* value = entry.inputData[i];
+            memcpy(pRootArgs + i * sizeof(void*), &value, sizeof(void*));
+        }
         
         offset += entrySize;
     }

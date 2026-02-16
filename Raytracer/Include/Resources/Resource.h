@@ -26,6 +26,13 @@ public:
             m_resource->SetName(name.c_str());
         }
     }
+
+    void SetResourceName(const std::string& name)
+    {
+        const auto w_name = std::wstring(name.begin(), name.end());
+        SetResourceName(w_name);
+    }
+    
     [[nodiscard]] std::wstring GetResourceName() const { return m_resourceName; }
     
 protected:
