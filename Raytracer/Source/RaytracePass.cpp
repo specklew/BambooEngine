@@ -4,7 +4,9 @@
 #include <wrl/client.h>
 
 #include "AccelerationStructures.h"
+#include "Constants.h"
 #include "DXRHelper.h"
+#include "Renderer.h"
 #include "Shader.h"
 #include "Window.h"
 #include "ResourceManager/ResourceManager.h"
@@ -341,13 +343,25 @@ void RaytracePass::CreateGlobalRootSignature()
     index_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     index_range.OffsetInDescriptorsFromTableStart = 5;
 
-    D3D12_DESCRIPTOR_RANGE ranges[5] = {cbvRange, rtRange, tlasRange, vertex_range, index_range};
+    D3D12_DESCRIPTOR_RANGE texture_range;
+    texture_range.BaseShaderRegister = 5;
+    texture_range.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
+    texture_range.RegisterSpace = 0;
+    texture_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    texture_range.OffsetInDescriptorsFromTableStart = 6;
     
-    rootParameters[0].InitAsDescriptorTable(5, ranges);
+
+    D3D12_DESCRIPTOR_RANGE ranges[6] = {cbvRange, rtRange, tlasRange, vertex_range, index_range, texture_range};
+    
+    rootParameters[0].InitAsDescriptorTable(6, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
     
     CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(3, rootParameters);
+
+    auto static_samplers = Renderer::GetStaticSamplers();
+    rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
+    rootSignatureDesc.pStaticSamplers = static_samplers.data();
     
     Microsoft::WRL::ComPtr<ID3DBlob> blob;
     Microsoft::WRL::ComPtr<ID3DBlob> error;

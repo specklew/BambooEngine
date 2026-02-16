@@ -80,5 +80,5 @@ float4 pixel(VertexOut pin) : SV_Target
     {
         textureAlbedo = gAlbedoTextures[textureIndex].Sample(gsamLinearWrap, pin.TexCoord + float2(uvX, uvY));
     }
-    return float4(pin.TexCoord.x,0,pin.TexCoord.y,1)/*pin.Color*/;
+    return textureAlbedo;
 }

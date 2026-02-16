@@ -59,6 +59,8 @@ public:
 	
 	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_device;
 	inline static int g_textureIndex = 0;
+
+	static std::array<const CD3DX12_STATIC_SAMPLER_DESC, Constants::Graphics::STATIC_SAMPLERS_COUNT> GetStaticSamplers();
 	
 private:
 	void SetupDeviceAndDebug();
@@ -99,8 +101,6 @@ private:
 	void RenderImGui();
 
 	void OnShaderReload();
-
-	std::array<const CD3DX12_STATIC_SAMPLER_DESC, Constants::Graphics::STATIC_SAMPLERS_COUNT> GetStaticSamplers();
 	
 	std::shared_ptr<RaytracePass> m_raytracePass;
 	std::vector<std::shared_ptr<AccelerationStructures>> m_accelerationStructures;

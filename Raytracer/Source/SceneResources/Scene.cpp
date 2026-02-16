@@ -4,14 +4,12 @@
 #include "SceneResources/GameObject.h"
 #include "Model.h"
 #include "Renderer.h"
-#include "Resources/ConstantBuffer.h"
 #include "Resources/IndexBuffer.h"
 #include "Resources/StructuredBuffer.h"
 #include "Resources/VertexBuffer.h"
 #include "SceneResources/Model.h"
 #include "SceneResources/Primitive.h"
 #include "SceneResources/SceneNode.h"
-#include "Utils/Utils.h"
 
 SceneBuilder::SceneBuilder()
 {
@@ -88,10 +86,20 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
         {
             auto it = std::find(primitives.begin(), primitives.end(), primitive);
             assert(it != primitives.end() && "Primitive not found in the list of all primitives when creating instance info buffer.");
-            int geometryId = static_cast<int>(std::distance(primitives.begin(), it));
+            int geometry_id = static_cast<int>(std::distance(primitives.begin(), it));
+            int texture_id = -1;
+            
+            if (primitive->m_material)
+            {
+                if (primitive->m_material->m_albedoTexture)
+                {
+                    texture_id = primitive->m_material->m_albedoTexture->GetTextureIndex();
+                }
+            }
             
             InstanceInfo info = {};
-            info.geometryId = geometryId;
+            info.geometryId = geometry_id;
+            info.textureId = texture_id;
             instances_info.push_back(info);
         }
     }

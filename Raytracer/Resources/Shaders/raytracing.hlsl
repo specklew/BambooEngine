@@ -1,8 +1,5 @@
-﻿// Hit information, aka ray payload
-// This sample only carries a shading color and hit distance.
-// Note that the payload should be kept as small as possible,
-// and that its size must be declared in the corresponding
-// D3D12_RAYTRACING_SHADER_CONFIG pipeline subobjet.
+﻿#define MAX_TEXTURES 256
+
 struct HitInfo
 {
     float4 colorAndDistance;
@@ -24,6 +21,7 @@ struct GeometryInfo
 struct InstanceInfo
 {
     uint geometryIndex;
+    uint textureIndex;
 };
 
 // Raytracing output texture, accessed as a UAV
@@ -37,6 +35,15 @@ ByteAddressBuffer g_indices : register(t2);
 
 StructuredBuffer<GeometryInfo> g_geometryInfo : register(t3);
 StructuredBuffer<InstanceInfo> g_instanceInfo : register(t4);
+
+Texture2D g_textures[MAX_TEXTURES] : register(t5);
+
+SamplerState gsamPointWrap : register(s0);
+SamplerState gsamPointClamp : register(s1);
+SamplerState gsamLinearWrap : register(s2);
+SamplerState gsamLinearClamp : register(s3);
+SamplerState gsamAnisotropicWrap : register(s4);
+SamplerState gsamAnisotropicClamp : register(s5);
 
 cbuffer CameraParams : register(b0)
 {
@@ -78,10 +85,10 @@ void RayGen() {
     ray.Origin = mul(viewI, float4(0, 0, 0, 1));
     float4 target = mul(projectionI, float4(d.x, -d.y, 1, 1));
     ray.Direction = mul(viewI, float4(target.xyz, 0));
-    ray.TMin = 0.001;
+    ray.TMin = 0.01;
     ray.TMax = 1000;
 
-    TraceRay(SceneBVH, RAY_FLAG_NONE, ~0, 0, 0, 0, ray, payload);
+    TraceRay(SceneBVH, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
 
     float3 color = payload.colorAndDistance.xyz; 
     gOutput[launchIndex] = float4(color, 1.f);
@@ -121,7 +128,12 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attr)
     float3 bary = float3(1.0 - attr.barycentrics.x - attr.barycentrics.y, attr.barycentrics.x, attr.barycentrics.y);
     float2 uv = bary.x * uv0 + bary.y * uv1 + bary.z * uv2;
     
-    float2 col = uv;
+    float4 col = float4(1, 1, 1, 1);
+
+    if (g_instanceInfo[InstanceIndex()].textureIndex != -1)
+    {
+        col = g_textures[g_instanceInfo[InstanceIndex()].textureIndex].SampleLevel(gsamLinearWrap, uv, 0);
+    }
     
-    payload.colorAndDistance = float4(col.x, 0, col.y, RayTCurrent()); 
+    payload.colorAndDistance = float4(col.x, col.y, col.z, RayTCurrent()); 
 }
