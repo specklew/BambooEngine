@@ -423,13 +423,9 @@ void RaytracePass::CreateShaderBindingTable()
 {
     spdlog::info("Creating shader binding table");
     
-    D3D12_GPU_DESCRIPTOR_HANDLE srvUavHeapHandle = m_srvUavHeap->GetGPUDescriptorHandleForHeapStart();
-    void* heapPtr = reinterpret_cast<void*>(srvUavHeapHandle.ptr);
-    
     SBTDescriptor sbt_desc = {};
-    sbt_desc.RayGenShaders.push_back({m_rayGenShaderName, {heapPtr}});
+    sbt_desc.RayGenShaders.push_back({m_rayGenShaderName, {}});
     sbt_desc.MissShaders.push_back({m_missShaderName, {}});
-    
     sbt_desc.HitShaders.push_back({m_hitGroupName, {}});
 
     m_shaderBindingTable = std::make_shared<ShaderBindingTable>(m_device, m_rtStateObjectProperties, sbt_desc);

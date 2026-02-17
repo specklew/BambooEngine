@@ -177,8 +177,8 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
         {
             const tinygltf::Image albedoImage = model.images[model.textures[albedo_index].source];
             material->m_albedoTexture = renderer.CreateTextureFromGLTF(albedoImage);
-            material->UpdateMaterial();
         }
+        material->UpdateMaterial();
     }
 
     auto index_view = BufferView();

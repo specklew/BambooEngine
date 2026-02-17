@@ -14,10 +14,9 @@ struct Material
     struct MaterialData
     {
         DirectX::XMFLOAT4 albedoColor = {1.0f, 1.0f, 1.0f, 1.0f};
-        uint32_t albedo_index = -1;
-        uint32_t normal_index = -1;
-        uint32_t roughness_index = -1;
-        uint32_t padding = -1;
+        int albedo_index = -1;
+        int normal_index = -1;
+        int roughness_index = -1;
         // albedo texture <- idk if I should put textures as ids into the buffer? maybe lets just stay with the naive approach and just pack everything into the memory without any shape or form?
         // normal texture
         // roughness texture

@@ -24,7 +24,7 @@ cbuffer ModelTransforms : register(b1)
 cbuffer Material : register(b2)
 {
     float4 ambient;
-    uint textureIndex;
+    int textureIndex;
 }
 
 cbuffer PassConstants : register(b3)
@@ -75,7 +75,7 @@ VertexOut vertex(VertexIn vin)
 
 float4 pixel(VertexOut pin) : SV_Target
 {
-    float4 textureAlbedo = float4(1,1,1,1);
+    float4 textureAlbedo = float4(1,0,1,1);
     if (textureIndex != -1)
     {
         textureAlbedo = gAlbedoTextures[textureIndex].Sample(gsamLinearWrap, pin.TexCoord + float2(uvX, uvY));
