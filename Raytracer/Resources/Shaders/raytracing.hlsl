@@ -125,10 +125,10 @@ void RayGen() {
     RayDesc ray;
     ray.Origin = origin;
     ray.Direction = direction;
-    ray.TMin = 0.1;
+    ray.TMin = 0.01;
     ray.TMax = 1000;
 
-    TraceRay(SceneBVH, RAY_FLAG_NONE, 0xFF, 0, 0, 0, ray, payload);
+    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
 
     float3 color = payload.colorAndDistance.xyz;
     gOutput[launchIndex] = float4(color, 1.f);
@@ -153,7 +153,7 @@ struct STriVertex
 [shader("closesthit")] 
 void Hit(inout HitInfo payload : SV_RayPayload, Attributes attr) 
 {
-    uint geometryIndex = g_instanceInfo[InstanceIndex()].geometryIndex;
+    uint geometryIndex = g_instanceInfo[InstanceID()].geometryIndex;
     uint vertexOffset = g_geometryInfo[geometryIndex].vertexOffset;
     uint indexOffset = g_geometryInfo[geometryIndex].indexOffset;
     
@@ -194,9 +194,13 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attr)
     
     float4 col = float4(1, 0, 1, 1);
 
-    if (g_instanceInfo[InstanceIndex()].textureIndex != -1)
+    //col = g_textures[4].Load(0) / 1.0f;
+    
+    if (g_instanceInfo[InstanceID()].textureIndex != -1)
     {
-        col = g_textures[g_instanceInfo[InstanceIndex()].textureIndex].SampleGrad(gsamLinearWrap, uv, ddxUV, ddyUV);
+        //uv = float2(0.5, 0.5);
+        //col = g_textures[g_instanceInfo[InstanceID()].textureIndex].Load(0);
+        col = g_textures[InstanceID()].Load(0);
     }
     
     payload.colorAndDistance = float4(col.x, col.y, col.z, RayTCurrent()); 

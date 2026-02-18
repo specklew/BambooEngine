@@ -186,7 +186,7 @@ void TopLevelASGenerator::Generate(
     instanceDescs[i].InstanceContributionToHitGroupIndex = m_instances[i].hitGroupIndex;
     // Instance flags, including backface culling, winding, etc - TODO: should
     // be accessible from outside
-    instanceDescs[i].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+    instanceDescs[i].Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_FRONT_COUNTERCLOCKWISE;
     // Instance transform matrix
     DirectX::XMMATRIX m = XMMatrixTranspose(
         m_instances[i].transform); // GLM is column major, the INSTANCE_DESC is row major
