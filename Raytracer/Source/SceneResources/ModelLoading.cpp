@@ -26,6 +26,7 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
     assert(has_position && "Mesh primitive must have POSITION attribute");
 
     const float* positions = nullptr;
+    const float* normals = nullptr;
     const float* texCoords = nullptr;
     size_t vertex_count = 0;
 
@@ -44,6 +45,15 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
         vertex_count = accessor.count;
     }
 
+    if (has_normal)
+    {
+        const tinygltf::Accessor& accessor = model.accessors[primitive.attributes["NORMAL"]];
+        const tinygltf::BufferView& buffer_view = model.bufferViews[accessor.bufferView];
+        const tinygltf::Buffer& buffer = model.buffers[buffer_view.buffer];
+
+        normals = reinterpret_cast<const float*>(&buffer.data[buffer_view.byteOffset + accessor.byteOffset]);
+    }
+    
     //TEXTURE COORDINATES
     if (has_tex_coords)
     {
@@ -68,6 +78,13 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
         vertex.Normal = DirectX::XMFLOAT3{0, 1, 0};
         vertex.Tex0 = DirectX::XMFLOAT2{0,0};
 
+        if (has_normal)
+        {
+            vertex.Normal.x = normals[i * 3 + 0];
+            vertex.Normal.y = normals[i * 3 + 1];
+            vertex.Normal.z = normals[i * 3 + 2];
+        }
+        
         if (has_tex_coords)
         {
             vertex.Tex0.x = texCoords[i * 2 + 0];

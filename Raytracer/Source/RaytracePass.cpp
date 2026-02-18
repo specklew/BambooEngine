@@ -234,7 +234,7 @@ void RaytracePass::InitializeRaytracingPipeline()
     spdlog::debug("Setting raytracing pipeline configuration");
     {
         auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
-        pipelineConfig->Config(1); // Max recursion depth TODO: CHANGE THIS WHEN IMPLEMENTING RECURSIVE RT
+        pipelineConfig->Config(3);
     }
 
     ThrowIfFailed(m_device->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&m_rtStateObject)));
