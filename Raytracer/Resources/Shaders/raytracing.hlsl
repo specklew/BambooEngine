@@ -159,8 +159,10 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
     float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
     
     hit_data.uv = bary.x * hit_data.tri_uv0 + bary.y * hit_data.tri_uv1 + bary.z * hit_data.tri_uv2;
-    hit_data.normal = normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2);
-    hit_data.position = bary.x * hit_data.tri_v0 + bary.y * hit_data.tri_v1 + bary.z * hit_data.tri_v2;
+    hit_data.normal = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
+    
+    // Compute world-space hit position from the ray (vertex positions are in object space)
+    hit_data.position = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
     
     return hit_data;
 }
@@ -268,7 +270,7 @@ void Miss(inout HitInfo payload : SV_RayPayload)
     float2 dims = float2(DispatchRaysDimensions().xy);
     
     float ramp = launchIndex.y / dims.y;
-    payload.colorAndDistance = float4(0.3f, 0.5f, 0.8f - 0.1f*ramp, -1.0f);
+    payload.colorAndDistance = float4(0.7f, 0.8f, 1.0f - 0.1f*ramp, -1.0f);
 }
 
 struct STriVertex
