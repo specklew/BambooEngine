@@ -1,5 +1,7 @@
 ﻿#pragma once
+#include "Resources/StructuredBuffer.h"
 
+class Renderer;
 class Scene;
 class ShaderBindingTable;
 class AccelerationStructures;
@@ -11,10 +13,11 @@ public:
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
         std::shared_ptr<Scene> initialScene,
-        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvUavHeap);
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvUavHeap,
+        Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer);
     
     void Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget);
-    void Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj);
+    void Update(double elapsedTime, double totalTime);
     void OnResize();
     void OnShaderReload();
     void OnSceneChange(std::shared_ptr<Scene> scene);
@@ -64,4 +67,8 @@ private:
     std::shared_ptr<Scene> m_currentScene;
 
     D3D12_CPU_DESCRIPTOR_HANDLE m_geometryInfoHandle;
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_randomBuffer;
+
+    float m_time = 0.0f;
 };

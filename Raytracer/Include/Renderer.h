@@ -171,6 +171,7 @@ private:
 	std::vector<std::shared_ptr<Texture>> m_textures = std::vector<std::shared_ptr<Texture>>();
 
 	std::shared_ptr<PassConstants> m_passConstants;
+	std::shared_ptr<StructuredBuffer<float>> m_randomBuffer;
 };
 
 template <typename T>

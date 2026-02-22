@@ -18,7 +18,8 @@
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
                               std::shared_ptr<Scene> initialScene,
-                              Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> cbvSrvUavHeap)
+                              Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> cbvSrvUavHeap,
+                              Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer)
 {
     spdlog::info("Initializing raytracer pass...");
     
@@ -26,6 +27,7 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
     m_commandList = commandList;
     m_srvUavHeap = cbvSrvUavHeap;
     m_currentScene = initialScene;
+    m_randomBuffer = randomBuffer;
 
     InitializeRaytracingPipeline();
     CreateRaytracingOutputBuffer();
@@ -45,6 +47,11 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
     m_commandList->SetComputeRootDescriptorTable(0, m_srvUavHeap->GetGPUDescriptorHandleForHeapStart());
     m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(3, m_randomBuffer->GetGPUVirtualAddress());
+
+    uint32_t time;
+    memcpy(&time, &m_time, sizeof(float));
+    m_commandList->SetComputeRoot32BitConstant(4, time, 0);
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -105,8 +112,9 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
     }
 }
 
-void RaytracePass::Update(DirectX::XMMATRIX view, DirectX::XMMATRIX proj)
+void RaytracePass::Update(double elapsedTime, double totalTime)
 {
+    m_time = static_cast<float>(totalTime);
 }
 
 void RaytracePass::OnResize()
@@ -234,7 +242,7 @@ void RaytracePass::InitializeRaytracingPipeline()
     spdlog::debug("Setting raytracing pipeline configuration");
     {
         auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
-        pipelineConfig->Config(3);
+        pipelineConfig->Config(4);
     }
 
     ThrowIfFailed(m_device->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&m_rtStateObject)));
@@ -305,8 +313,6 @@ void RaytracePass::CreateHitSignature()
 
 void RaytracePass::CreateGlobalRootSignature()
 {
-    CD3DX12_ROOT_PARAMETER rootParameters[3];
-
     // CBV for ImGui
     D3D12_DESCRIPTOR_RANGE cbvRange;
     cbvRange.BaseShaderRegister = 0;
@@ -344,7 +350,7 @@ void RaytracePass::CreateGlobalRootSignature()
     index_range.OffsetInDescriptorsFromTableStart = 5;
 
     D3D12_DESCRIPTOR_RANGE texture_range;
-    texture_range.BaseShaderRegister = 5;
+    texture_range.BaseShaderRegister = 6;
     texture_range.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
     texture_range.RegisterSpace = 0;
     texture_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -352,12 +358,15 @@ void RaytracePass::CreateGlobalRootSignature()
     
 
     D3D12_DESCRIPTOR_RANGE ranges[6] = {cbvRange, rtRange, tlasRange, vertex_range, index_range, texture_range};
-    
+
+    CD3DX12_ROOT_PARAMETER rootParameters[5];
     rootParameters[0].InitAsDescriptorTable(6, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
+    rootParameters[3].InitAsShaderResourceView(5, 0);
+    rootParameters[4].InitAsConstants(1, 1);
     
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(3, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(5, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -433,3 +442,4 @@ void RaytracePass::CreateShaderBindingTable()
 
     spdlog::info("SBT Buffer has been populated with SBT entries successfully");
 }
+

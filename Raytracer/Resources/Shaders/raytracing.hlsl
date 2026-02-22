@@ -27,10 +27,10 @@ struct InstanceInfo
 struct TriangleData
 {
     uint3 indices;
+    float3 normal;
     float3 n0;
     float3 n1;
     float3 n2;
-    float3 normal;
     float3 v0;
     float3 v1;
     float3 v2;
@@ -41,6 +41,20 @@ struct TriangleData
 
 struct HitData
 {
+    // Triangle data (flattened to avoid nested struct issues)
+    uint3 tri_indices;
+    float3 tri_normal;
+    float3 tri_n0;
+    float3 tri_n1;
+    float3 tri_n2;
+    float3 tri_v0;
+    float3 tri_v1;
+    float3 tri_v2;
+    float2 tri_uv0;
+    float2 tri_uv1;
+    float2 tri_uv2;
+    
+    // Hit point data
     float3 normal;
     float3 position;
     float2 uv;
@@ -57,8 +71,9 @@ ByteAddressBuffer g_indices : register(t2);
 
 StructuredBuffer<GeometryInfo> g_geometryInfo : register(t3);
 StructuredBuffer<InstanceInfo> g_instanceInfo : register(t4);
+StructuredBuffer<float> g_random : register(t5);
 
-Texture2D g_textures[MAX_TEXTURES] : register(t5);
+Texture2D g_textures[MAX_TEXTURES] : register(t6);
 
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);
@@ -74,6 +89,30 @@ cbuffer CameraParams : register(b0)
     float4x4 projection;
     float4x4 viewI;
     float4x4 projectionI;
+}
+
+cbuffer Constants : register(b1)
+{
+    float time;
+}
+
+float rand_1_05(in float2 uv)
+{
+    float2 noise = (frac(sin(dot(uv ,float2(12.9898,78.233)*2.0)) * 43758.5453));
+    return abs(noise.x + noise.y) * 0.5;
+}
+
+float3 RandomDirectionInHemisphere(float3 normal, float seed = 1.0f)
+{
+    float uv_1 = sin(g_random.Load(DispatchRaysIndex().x + DispatchRaysIndex().y * DispatchRaysDimensions().y) + seed + time);
+    float uv_2 = cos(g_random.Load(DispatchRaysIndex().x + DispatchRaysIndex().y * DispatchRaysDimensions().y) + seed + time);
+    float2 s1 = float2(uv_1, uv_2);
+    float2 s2 = float2(cos(uv_1 + 1), sin(uv_2 + 2));
+    float2 s3 = float2(sin(uv_2 + 1), cos(uv_1 + 2));
+    float3 randomDirection = float3(rand_1_05(s1), rand_1_05(s2), rand_1_05(s3)) * 2.0f - 1.0f;
+    if (dot(randomDirection, normal) < 0.0f)
+        randomDirection = -randomDirection;
+    return normalize(randomDirection);
 }
 
 uint3 Load3x32BitIndices(uint triangleIndex, uint indexOffset = 0)
@@ -97,40 +136,33 @@ float3 GetVertexFloat3Attribute(uint byteOffset)
     return asfloat(g_vertices.Load3(byteOffset));
 }
 
-TriangleData GetTriangleData(uint triangleIndex, uint vertexOffset, uint indexOffset)
+HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, float2 barycentrics)
 {
-    TriangleData data;
+    HitData hit_data;
     
-    data.indices = Load3x32BitIndices(triangleIndex, indexOffset) + vertexOffset;
+    hit_data.tri_indices = Load3x32BitIndices(triangleIndex, indexOffset) + vertexOffset;
 
-    data.uv0 = GetVertexFloat2Attribute(data.indices.x * 32 + 24);
-    data.uv1 = GetVertexFloat2Attribute(data.indices.y * 32 + 24);
-    data.uv2 = GetVertexFloat2Attribute(data.indices.z * 32 + 24);
+    hit_data.tri_uv0 = GetVertexFloat2Attribute(hit_data.tri_indices.x * 32 + 24);
+    hit_data.tri_uv1 = GetVertexFloat2Attribute(hit_data.tri_indices.y * 32 + 24);
+    hit_data.tri_uv2 = GetVertexFloat2Attribute(hit_data.tri_indices.z * 32 + 24);
 
-    data.v0 = GetVertexFloat3Attribute(data.indices.x * 32 + 0);
-    data.v1 = GetVertexFloat3Attribute(data.indices.y * 32 + 0);
-    data.v2 = GetVertexFloat3Attribute(data.indices.z * 32 + 0);
+    hit_data.tri_v0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 32 + 0);
+    hit_data.tri_v1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 32 + 0);
+    hit_data.tri_v2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 32 + 0);
 
-    data.n0 = GetVertexFloat3Attribute(data.indices.x * 32 + 12);
-    data.n1 = GetVertexFloat3Attribute(data.indices.y * 32 + 12);
-    data.n2 = GetVertexFloat3Attribute(data.indices.z * 32 + 12);
+    hit_data.tri_n0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 32 + 12);
+    hit_data.tri_n1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 32 + 12);
+    hit_data.tri_n2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 32 + 12);
 
-    data.normal = normalize(cross(data.v2 - data.v0, data.v1 - data.v0));
-    
-    return data;
-}
+    hit_data.tri_normal = normalize(cross(hit_data.tri_v2 - hit_data.tri_v0, hit_data.tri_v1 - hit_data.tri_v0));
 
-HitData GetHitData(TriangleData triangleData, float2 barycentrics)
-{
-    HitData data;
-    
     float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
     
-    data.uv = bary.x * triangleData.uv0 + bary.y * triangleData.uv1 + bary.z * triangleData.uv2;
-    data.normal = normalize(bary.x * triangleData.n0 + bary.y * triangleData.n1 + bary.z * triangleData.n2);
-    data.position = bary.x * triangleData.v0 + bary.y * triangleData.v1 + bary.z * triangleData.v2;
+    hit_data.uv = bary.x * hit_data.tri_uv0 + bary.y * hit_data.tri_uv1 + bary.z * hit_data.tri_uv2;
+    hit_data.normal = normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2);
+    hit_data.position = bary.x * hit_data.tri_v0 + bary.y * hit_data.tri_v1 + bary.z * hit_data.tri_v2;
     
-    return data;
+    return hit_data;
 }
 
 inline void GenerateCameraRay(uint2 index, out float3 origin, out float3 direction)
@@ -173,6 +205,33 @@ float3 BarycentricCoordinates(float3 pt, float3 v0, float3 v1, float3 v2)
     return float3(u, v, w);
 }
 
+float3 SampleTextureColor(HitData data)
+{
+    uint2 launchIndex = DispatchRaysIndex().xy;
+    float3 ddxOrigin, ddxDirection, ddyOrigin, ddyDirection;
+    GenerateCameraRay(launchIndex + uint2(1, 0), ddxOrigin, ddxDirection);
+    GenerateCameraRay(launchIndex + uint2(0, 1), ddyOrigin, ddyDirection);
+
+    float3 xOffsetPoint = RayPlaneIntersection(data.tri_v0, data.tri_normal, ddxOrigin, ddxDirection);
+    float3 yOffsetPoint = RayPlaneIntersection(data.tri_v0, data.tri_normal, ddyOrigin, ddyDirection);
+
+    float3 baryX = BarycentricCoordinates(xOffsetPoint, data.tri_v0, data.tri_v1, data.tri_v2);
+    float3 baryY = BarycentricCoordinates(yOffsetPoint, data.tri_v0, data.tri_v1, data.tri_v2);
+
+    float3x2 uvMat = float3x2(data.tri_uv0, data.tri_uv1, data.tri_uv2);
+    float2 ddxUV = mul(baryX, uvMat) - data.uv;
+    float2 ddyUV = mul(baryY, uvMat) - data.uv;
+    
+    float4 col = float4(0, 0, 0, 1);
+    
+    if (g_instanceInfo[InstanceID()].textureIndex != -1)
+    {
+        col = g_textures[g_instanceInfo[InstanceID()].textureIndex].SampleGrad(gsamAnisotropicWrap, data.uv, ddxUV, ddyUV);
+    }
+
+    return col;
+}
+
 [shader("raygeneration")] 
 void RayGen() {
     // Initialize the ray payload
@@ -191,9 +250,14 @@ void RayGen() {
     ray.TMin = 0.01;
     ray.TMax = 1000;
 
-    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+    float4 col = float4(0, 0, 0, 0);
+    for (int i = 0; i < 4; i++)
+    {
+        TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+        col += float4(payload.colorAndDistance.xyz, 1);
+    }
 
-    float3 color = payload.colorAndDistance.xyz;
+    float3 color = col / 4.0f;
     gOutput[launchIndex] = float4(color, 1.f);
 }
 
@@ -204,7 +268,7 @@ void Miss(inout HitInfo payload : SV_RayPayload)
     float2 dims = float2(DispatchRaysDimensions().xy);
     
     float ramp = launchIndex.y / dims.y;
-    payload.colorAndDistance = float4(0.3f, 0.4f, 0.7f - 0.2f*ramp, -1.0f);
+    payload.colorAndDistance = float4(0.3f, 0.5f, 0.8f - 0.1f*ramp, -1.0f);
 }
 
 struct STriVertex
@@ -220,51 +284,27 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attr)
     uint vertexOffset = g_geometryInfo[geometryIndex].vertexOffset;
     uint indexOffset = g_geometryInfo[geometryIndex].indexOffset;
     
-    TriangleData triangle_data = GetTriangleData(PrimitiveIndex(), vertexOffset, indexOffset);
-    HitData hit_data = GetHitData(triangle_data, attr.barycentrics);
-
-    if (payload.colorAndDistance.z > 0.0f || InstanceID() != 4) // already hit something closer, so ignore this hit
+    HitData hit_data = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
+    
+    if (payload.colorAndDistance.z >= 3.0f) // already hit something closer, so ignore this hit
     {
-        // ---------------------
-        // Calculate UV gradient
-        // ---------------------
-
-        // Triangle normal
-        float3 triangleNormal = triangle_data.normal;
-    
-        uint2 launchIndex = DispatchRaysIndex().xy;
-        float3 ddxOrigin, ddxDirection, ddyOrigin, ddyDirection;
-        GenerateCameraRay(launchIndex + uint2(1, 0), ddxOrigin, ddxDirection);
-        GenerateCameraRay(launchIndex + uint2(0, 1), ddyOrigin, ddyDirection);
-
-        float3 xOffsetPoint = RayPlaneIntersection(triangle_data.v0, triangleNormal, ddxOrigin, ddxDirection);
-        float3 yOffsetPoint = RayPlaneIntersection(triangle_data.v0, triangleNormal, ddyOrigin, ddyDirection);
-
-        float3 baryX = BarycentricCoordinates(xOffsetPoint, triangle_data.v0, triangle_data.v1, triangle_data.v2);
-        float3 baryY = BarycentricCoordinates(yOffsetPoint, triangle_data.v0, triangle_data.v1, triangle_data.v2);
-
-        float3x2 uvMat = float3x2(triangle_data.uv0, triangle_data.uv1, triangle_data.uv2);
-        float2 ddxUV = mul(baryX, uvMat) - hit_data.uv;
-        float2 ddyUV = mul(baryY, uvMat) - hit_data.uv;
-    
-        float4 col = float4(1, 0, 1, 1);
-    
-        if (g_instanceInfo[InstanceID()].textureIndex != -1)
-        {
-            col = g_textures[g_instanceInfo[InstanceID()].textureIndex].SampleGrad(gsamAnisotropicWrap, hit_data.uv, ddxUV, ddyUV);
-        }
-    
-        payload.colorAndDistance = float4(col.x, col.y, col.z, RayTCurrent()); 
+        payload.colorAndDistance = float4(0, 0, 0, 3.0f);
         return;
     }
-
-    payload.colorAndDistance.z = 1.0f;
     
+    float4 color = float4(0, 0, 0, 0);
+
     RayDesc ray;
     ray.Origin = hit_data.position;
-    ray.Direction = reflect(WorldRayDirection(), hit_data.normal);
+    ray.Direction = RandomDirectionInHemisphere(hit_data.normal, 0);
     ray.TMin = 0.01;
     ray.TMax = 1000;
 
+    payload.colorAndDistance.z += 1.0f; // increment bounce count in payload to limit number of bounces
     TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+    color += float4(payload.colorAndDistance.xyz, 0.0f);
+    
+    color.xyz *= SampleTextureColor(hit_data);
+    
+    payload.colorAndDistance = color;
 }

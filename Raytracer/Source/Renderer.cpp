@@ -90,8 +90,15 @@ void Renderer::Initialize()
 
 	ExecuteCommandsAndReset();
 
+	std::vector<float> randomData(3840 * 2190);
+	for (int i = 0; i < 3840 * 2190; ++i)
+	{
+		randomData[i] = RaytracerRandom::g_random->GetRandomFloat();
+	}
+	
+	m_randomBuffer = CreateStructuredBuffer<float>(randomData);
 	m_raytracePass = std::make_shared<RaytracePass>();
-	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap);
+	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource());
 
 	spdlog::info("Renderer initialized successfully.");
 
@@ -166,7 +173,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	
 	memcpy(&m_mappedData[0], &constants, sizeof(constants));
 
-	m_raytracePass->Update(view, viewProj);
+	m_raytracePass->Update(elapsedTime, totalTime);
 
 	if (previousScene != g_currentScene.Get())
 	{
