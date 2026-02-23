@@ -112,7 +112,7 @@ float3 RandomDirectionInHemisphere(float3 normal, float seed = 1.0f)
     float3 randomDirection = float3(rand_1_05(s1), rand_1_05(s2), rand_1_05(s3)) * 2.0f - 1.0f;
     if (dot(randomDirection, normal) < 0.0f)
         randomDirection = -randomDirection;
-    return normalize(randomDirection);
+    return normalize(randomDirection) + normalize(normal);
 }
 
 uint3 Load3x32BitIndices(uint triangleIndex, uint indexOffset = 0)
@@ -253,13 +253,13 @@ void RayGen() {
     ray.TMax = 1000;
 
     float4 col = float4(0, 0, 0, 0);
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < 16; i++)
     {
         TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
         col += float4(payload.colorAndDistance.xyz, 1);
     }
 
-    float3 color = col / 4.0f;
+    float3 color = col / 16.0f;
     gOutput[launchIndex] = float4(color, 1.f);
 }
 
@@ -288,9 +288,10 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attr)
     
     HitData hit_data = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
     
-    if (payload.colorAndDistance.z >= 3.0f) // already hit something closer, so ignore this hit
+    if (payload.colorAndDistance.z >= 2.0f) // already hit something closer, so ignore this hit
     {
-        payload.colorAndDistance = float4(0, 0, 0, 3.0f);
+        float3 color = SampleTextureColor(hit_data) / 5.0f;
+        payload.colorAndDistance = float4(color, 3.0f);
         return;
     }
     
