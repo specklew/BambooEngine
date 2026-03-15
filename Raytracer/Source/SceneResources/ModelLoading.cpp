@@ -22,11 +22,13 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
 {
     const bool has_position = primitive.attributes.find("POSITION") != primitive.attributes.end();
     const bool has_normal = primitive.attributes.find("NORMAL") != primitive.attributes.end();
+    const bool has_tangent = primitive.attributes.find("TANGENT") != primitive.attributes.end();
     const bool has_tex_coords = primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end();
     assert(has_position && "Mesh primitive must have POSITION attribute");
 
     const float* positions = nullptr;
     const float* normals = nullptr;
+    const float* tangents = nullptr;
     const float* texCoords = nullptr;
     size_t vertex_count = 0;
 
@@ -52,6 +54,15 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
         const tinygltf::Buffer& buffer = model.buffers[buffer_view.buffer];
 
         normals = reinterpret_cast<const float*>(&buffer.data[buffer_view.byteOffset + accessor.byteOffset]);
+    }
+
+    if (has_tangent)
+    {
+        const tinygltf::Accessor& accessor = model.accessors[primitive.attributes["TANGENT"]];
+        const tinygltf::BufferView& buffer_view = model.bufferViews[accessor.bufferView];
+        const tinygltf::Buffer& buffer = model.buffers[buffer_view.buffer];
+
+        tangents = reinterpret_cast<const float*>(&buffer.data[buffer_view.byteOffset + accessor.byteOffset]);
     }
     
     //TEXTURE COORDINATES
@@ -83,6 +94,25 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
             vertex.Normal.x = normals[i * 3 + 0];
             vertex.Normal.y = normals[i * 3 + 1];
             vertex.Normal.z = normals[i * 3 + 2];
+        }
+
+        /*if (has_tangent)
+        {
+            vertex.Tangent.x = tangents[i * 3 + 0];
+            vertex.Tangent.y = tangents[i * 3 + 1];
+            vertex.Tangent.z = tangents[i * 3 + 2];
+        }*/
+        //else
+        {
+            DirectX::XMFLOAT3 normal = DirectX::XMFLOAT3{vertex.Normal.x, vertex.Normal.y, vertex.Normal.z};
+            DirectX::XMFLOAT3 up = std::abs(normal.y) < 0.999999f ? DirectX::XMFLOAT3{0, 1, 0} : DirectX::XMFLOAT3{1, 0, 0};
+
+            DirectX::XMFLOAT3 tangent = DirectX::XMFLOAT3{0, 0, 0};
+            DirectX::XMStoreFloat3(&tangent, DirectX::XMVector3Normalize(DirectX::XMVector3Cross(DirectX::XMLoadFloat3(&up), DirectX::XMLoadFloat3(&normal))));
+            
+            vertex.Tangent.x = tangent.x;
+            vertex.Tangent.y = tangent.y;
+            vertex.Tangent.z = tangent.z;
         }
         
         if (has_tex_coords)
@@ -192,9 +222,22 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     {
         if (int albedo_index = model.materials[primitive.material].pbrMetallicRoughness.baseColorTexture.index; albedo_index >= 0)
         {
-            const tinygltf::Image albedoImage = model.images[model.textures[albedo_index].source];
-            material->m_albedoTexture = renderer.CreateTextureFromGLTF(albedoImage);
+            const tinygltf::Image albedo_image = model.images[model.textures[albedo_index].source];
+            material->m_albedoTexture = renderer.CreateTextureFromGLTF(albedo_image);
         }
+
+        if (int normal_texture_index = model.materials[primitive.material].normalTexture.index; normal_texture_index >= 0)
+        {
+            const tinygltf::Image normal_texture = model.images[model.textures[normal_texture_index].source];
+            material->m_normalTexture = renderer.CreateTextureFromGLTF(normal_texture);
+        }
+
+        if (int metallic_roughness_index = model.materials[primitive.material].pbrMetallicRoughness.metallicRoughnessTexture.index; metallic_roughness_index >= 0)
+        {
+            const tinygltf::Image metallic_roughness_image = model.images[model.textures[metallic_roughness_index].source];
+            material->m_metallicRoughnessTexture = renderer.CreateTextureFromGLTF(metallic_roughness_image);
+        }
+        
         material->UpdateMaterial();
     }
 

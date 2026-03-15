@@ -11,7 +11,7 @@ Material::Material()
     Renderer::g_device->CreateCommittedResource(
         &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
         D3D12_HEAP_FLAG_NONE,
-        &CD3DX12_RESOURCE_DESC::Buffer(256),
+        &CD3DX12_RESOURCE_DESC::Buffer(Align(sizeof(MaterialData), D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT)),
         D3D12_RESOURCE_STATE_GENERIC_READ,
         nullptr,
         IID_PPV_ARGS(&materialResource));
@@ -24,6 +24,8 @@ Material::Material()
 void Material::UpdateMaterial()
 {
     if (m_albedoTexture) m_data.albedo_index = m_albedoTexture->GetTextureIndex();
+    if (m_normalTexture) m_data.normal_index = m_normalTexture->GetTextureIndex();
+    if (m_metallicRoughnessTexture) m_data.roughness_index = m_metallicRoughnessTexture->GetTextureIndex();
     
     auto p_data = &m_mappedData;
     m_materialBuffer->MapDataToWholeBuffer(reinterpret_cast<void**>(&p_data));

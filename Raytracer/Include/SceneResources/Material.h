@@ -10,6 +10,8 @@ struct Material
     
     std::shared_ptr<ConstantBuffer> m_materialBuffer;
     std::shared_ptr<Texture> m_albedoTexture;
+    std::shared_ptr<Texture> m_normalTexture;
+    std::shared_ptr<Texture> m_metallicRoughnessTexture;
 
     struct MaterialData
     {

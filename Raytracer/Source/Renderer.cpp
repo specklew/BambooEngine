@@ -595,9 +595,9 @@ void Renderer::CreateDSVDescriptorHeap()
 
 void Renderer::CreateDescriptorHeaps()
 {
-	///	|							|								|					|					|					|							|
-	///	|	SRV IMGUI TEXTURE (1)	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (1)	|	VERTEX SRV (1)	|	INDEX SRV (1)	|	TEXTURES (MAX_TEXTURE)	|
-	///	|							|								|					|					|					|							|
+	///	|							|						|								|					|					|					|							|
+	///	|	SRV IMGUI TEXTURE (1)	|	CBV MATRICES (1)	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (1)	|	VERTEX SRV (1)	|	INDEX SRV (1)	|	TEXTURES (MAX_TEXTURE)	|
+	///	|							|						|								|					|					|					|							|
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
@@ -833,6 +833,7 @@ void Renderer::CreateTextureSRV(const std::shared_ptr<Texture>& texture)
 {
 	assert(texture && "Passed texture cannot be null!");
 	assert(texture->GetUnderlyingResource() && "Texture resources cannot be null!");
+	assert(texture->GetTextureIndex() < Constants::Graphics::MAX_TEXTURES && "Texture index exceeds maximum number of textures supported!");
 
 	spdlog::debug("Setting up texture SRV");
 
