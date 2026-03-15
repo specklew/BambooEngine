@@ -88,18 +88,21 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
             assert(it != primitives.end() && "Primitive not found in the list of all primitives when creating instance info buffer.");
             int geometry_id = static_cast<int>(std::distance(primitives.begin(), it));
             int texture_id = -1;
-            
+            int normal_texture_id = -1;
+
             if (primitive->m_material)
             {
                 if (primitive->m_material->m_albedoTexture)
-                {
                     texture_id = primitive->m_material->m_albedoTexture->GetTextureIndex();
-                }
+
+                if (primitive->m_material->m_normalTexture)
+                    normal_texture_id = primitive->m_material->m_normalTexture->GetTextureIndex();
             }
-            
+
             InstanceInfo info = {};
             info.geometryId = geometry_id;
             info.textureId = texture_id;
+            info.normalTextureId = normal_texture_id;
             instances_info.push_back(info);
         }
     }

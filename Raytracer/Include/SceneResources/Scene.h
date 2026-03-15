@@ -23,6 +23,7 @@ struct InstanceInfo
 {
     uint32_t geometryId;
     int textureId;
+    int normalTextureId;
 };
 
 class Scene

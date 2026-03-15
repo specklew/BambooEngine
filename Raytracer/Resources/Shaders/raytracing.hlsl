@@ -22,6 +22,7 @@ struct InstanceInfo
 {
     uint geometryIndex;
     int textureIndex;
+    int normalTextureIndex;
 };
 
 struct TriangleData
@@ -47,15 +48,19 @@ struct HitData
     float3 tri_n0;
     float3 tri_n1;
     float3 tri_n2;
+    float3 tri_t0;
+    float3 tri_t1;
+    float3 tri_t2;
     float3 tri_v0;
     float3 tri_v1;
     float3 tri_v2;
     float2 tri_uv0;
     float2 tri_uv1;
     float2 tri_uv2;
-    
+
     // Hit point data
     float3 normal;
+    float3 tangent;
     float3 position;
     float2 uv;
 };
@@ -142,24 +147,30 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
     
     hit_data.tri_indices = Load3x32BitIndices(triangleIndex, indexOffset) + vertexOffset;
 
-    hit_data.tri_uv0 = GetVertexFloat2Attribute(hit_data.tri_indices.x * 32 + 24);
-    hit_data.tri_uv1 = GetVertexFloat2Attribute(hit_data.tri_indices.y * 32 + 24);
-    hit_data.tri_uv2 = GetVertexFloat2Attribute(hit_data.tri_indices.z * 32 + 24);
+    // Vertex stride: 44 bytes (float3 pos + float3 normal + float3 tangent + float2 uv)
+    hit_data.tri_v0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 44 + 0);
+    hit_data.tri_v1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 44 + 0);
+    hit_data.tri_v2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 44 + 0);
 
-    hit_data.tri_v0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 32 + 0);
-    hit_data.tri_v1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 32 + 0);
-    hit_data.tri_v2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 32 + 0);
+    hit_data.tri_n0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 44 + 12);
+    hit_data.tri_n1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 44 + 12);
+    hit_data.tri_n2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 44 + 12);
 
-    hit_data.tri_n0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 32 + 12);
-    hit_data.tri_n1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 32 + 12);
-    hit_data.tri_n2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 32 + 12);
+    hit_data.tri_t0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 44 + 24);
+    hit_data.tri_t1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 44 + 24);
+    hit_data.tri_t2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 44 + 24);
+
+    hit_data.tri_uv0 = GetVertexFloat2Attribute(hit_data.tri_indices.x * 44 + 36);
+    hit_data.tri_uv1 = GetVertexFloat2Attribute(hit_data.tri_indices.y * 44 + 36);
+    hit_data.tri_uv2 = GetVertexFloat2Attribute(hit_data.tri_indices.z * 44 + 36);
 
     hit_data.tri_normal = normalize(cross(hit_data.tri_v2 - hit_data.tri_v0, hit_data.tri_v1 - hit_data.tri_v0));
 
     float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
-    
-    hit_data.uv = bary.x * hit_data.tri_uv0 + bary.y * hit_data.tri_uv1 + bary.z * hit_data.tri_uv2;
-    hit_data.normal = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
+
+    hit_data.uv     = bary.x * hit_data.tri_uv0 + bary.y * hit_data.tri_uv1 + bary.z * hit_data.tri_uv2;
+    hit_data.normal  = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
+    hit_data.tangent = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_t0 + bary.y * hit_data.tri_t1 + bary.z * hit_data.tri_t2)));
     
     // Compute world-space hit position from the ray (vertex positions are in object space)
     hit_data.position = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
@@ -205,6 +216,38 @@ float3 BarycentricCoordinates(float3 pt, float3 v0, float3 v1, float3 v2)
     float w = (d00 * d21 - d01 * d20) * denom;
     float u = 1.0 - v - w;
     return float3(u, v, w);
+}
+
+float3 SampleWorldSpaceNormal(HitData data)
+{
+    int normalTexIdx = g_instanceInfo[InstanceID()].normalTextureIndex;
+    if (normalTexIdx == -1)
+        return data.normal;
+
+    uint2 launchIndex = DispatchRaysIndex().xy;
+    float3 ddxOrigin, ddxDirection, ddyOrigin, ddyDirection;
+    GenerateCameraRay(launchIndex + uint2(1, 0), ddxOrigin, ddxDirection);
+    GenerateCameraRay(launchIndex + uint2(0, 1), ddyOrigin, ddyDirection);
+
+    float3 xOffsetPoint = RayPlaneIntersection(data.tri_v0, data.tri_normal, ddxOrigin, ddxDirection);
+    float3 yOffsetPoint = RayPlaneIntersection(data.tri_v0, data.tri_normal, ddyOrigin, ddyDirection);
+
+    float3 baryX = BarycentricCoordinates(xOffsetPoint, data.tri_v0, data.tri_v1, data.tri_v2);
+    float3 baryY = BarycentricCoordinates(yOffsetPoint, data.tri_v0, data.tri_v1, data.tri_v2);
+
+    float3x2 uvMat = float3x2(data.tri_uv0, data.tri_uv1, data.tri_uv2);
+    float2 ddxUV = mul(baryX, uvMat) - data.uv;
+    float2 ddyUV = mul(baryY, uvMat) - data.uv;
+
+    float3 normalTS = g_textures[normalTexIdx].SampleGrad(gsamAnisotropicWrap, data.uv, ddxUV, ddyUV).xyz * 2.0 - 1.0;
+
+    // Build TBN and transform normal to world space
+    float3 N = data.normal;
+    float3 T = normalize(data.tangent - dot(data.tangent, N) * N);
+    float3 B = cross(N, T);
+    float3x3 TBN = float3x3(T, B, N);
+
+    return normalize(mul(normalTS, TBN));
 }
 
 float3 SampleTextureColor(HitData data)
@@ -297,9 +340,11 @@ void Hit(inout HitInfo payload : SV_RayPayload, Attributes attr)
     
     float4 color = float4(0, 0, 0, 0);
 
+    float3 shadingNormal = SampleWorldSpaceNormal(hit_data);
+
     RayDesc ray;
     ray.Origin = hit_data.position;
-    ray.Direction = RandomDirectionInHemisphere(hit_data.normal, 0);
+    ray.Direction = RandomDirectionInHemisphere(shadingNormal, 0);
     ray.TMin = 0.01;
     ray.TMax = 1000;
 
