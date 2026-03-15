@@ -72,10 +72,10 @@ VertexOut vertex(VertexIn vin)
     vout.PosH = mul(world, posL);
     vout.PosH = mul(vout.PosH, viewProj);
 
-    float4 normalL = float4(vin.NormalL, 1.0f);
+    float4 normalL = float4(vin.NormalL, 0.0f);
     vout.NormalW = mul(world, normalL);
 
-    float4 tangentL = float4(vin.TangentL, 1.0f);
+    float4 tangentL = float4(vin.TangentL, 0.0f);
     vout.TangentW = mul(world, tangentL);
     
     return vout;
@@ -83,8 +83,8 @@ VertexOut vertex(VertexIn vin)
 
 float4 pixel(VertexOut pin) : SV_Target
 {
-    float4 textureAlbedo = float4(1,0,1,1);
-    float4 textureNormal = float4(0,0,0,1);
+    float4 textureAlbedo = float4(1, 0, 1, 1);
+    float4 textureNormal = float4(0.5, 0.5, 1.0, 1.0); // flat normal fallback
     if (textureIndex != -1)
     {
         textureAlbedo = gTextures[textureIndex].Sample(gsamLinearWrap, pin.TexCoord + float2(uvX, uvY));
@@ -94,21 +94,18 @@ float4 pixel(VertexOut pin) : SV_Target
         textureNormal = gTextures[normalTextureIndex].Sample(gsamLinearWrap, pin.TexCoord + float2(uvX, uvY));
     }
 
+    // Build TBN — re-orthogonalize T against N to fix interpolation drift
+    float3 N = normalize(pin.NormalW);
+    float3 T = normalize(pin.TangentW - dot(pin.TangentW, N) * N);
+    float3 B = cross(N, T);
+    float3x3 TBN = float3x3(T, B, N);
+
+    // Decode tangent-space normal from [0,1] to [-1,1] and bring to world space
+    float3 normalTS = textureNormal.xyz * 2.0 - 1.0;
+    float3 worldNormal = normalize(mul(normalTS, TBN));
+
     float3 dir = normalize(float3(1, 0.5, 0.5));
-    float3 normal = pin.NormalW;
-    float3 tangent = pin.TangentW;
-    float3 bitangent = cross(normal, tangent);
+    float diffuse = max(0.0, dot(dir, worldNormal));
 
-    float4x4 TBN = float4x4(
-        tangent.x, bitangent.x, normal.x, 0,
-        tangent.y, bitangent.y, normal.y, 0,
-        tangent.z, bitangent.z, normal.z, 0,
-        0,         0,           0,       1
-    );
-
-    TBN = transpose(TBN);
-    
-    float4 newNormal = normalize(mul(textureNormal, TBN));
-    
-    return float4(tangent.xyz, 1);
+    return float4(textureAlbedo.rgb * diffuse, 1.0);
 }

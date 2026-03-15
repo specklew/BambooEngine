@@ -5,6 +5,11 @@
 #include <tinygltf/tiny_gltf.h>
 #include <spdlog/spdlog.h>
 
+extern "C" {
+#include <mikktspace/mikktspace.h>
+#include <mikktspace/mikktspace.c>
+}
+
 #include "AccelerationStructures.h"
 #include "InputElements.h"
 #include "SceneResources/Model.h"
@@ -95,30 +100,24 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
             vertex.Normal.y = normals[i * 3 + 1];
             vertex.Normal.z = normals[i * 3 + 2];
         }
-
-        /*if (has_tangent)
-        {
-            vertex.Tangent.x = tangents[i * 3 + 0];
-            vertex.Tangent.y = tangents[i * 3 + 1];
-            vertex.Tangent.z = tangents[i * 3 + 2];
-        }*/
-        //else
-        {
-            DirectX::XMFLOAT3 normal = DirectX::XMFLOAT3{vertex.Normal.x, vertex.Normal.y, vertex.Normal.z};
-            DirectX::XMFLOAT3 up = std::abs(normal.y) < 0.999999f ? DirectX::XMFLOAT3{0, 1, 0} : DirectX::XMFLOAT3{1, 0, 0};
-
-            DirectX::XMFLOAT3 tangent = DirectX::XMFLOAT3{0, 0, 0};
-            DirectX::XMStoreFloat3(&tangent, DirectX::XMVector3Normalize(DirectX::XMVector3Cross(DirectX::XMLoadFloat3(&up), DirectX::XMLoadFloat3(&normal))));
-            
-            vertex.Tangent.x = tangent.x;
-            vertex.Tangent.y = tangent.y;
-            vertex.Tangent.z = tangent.z;
-        }
         
         if (has_tex_coords)
         {
             vertex.Tex0.x = texCoords[i * 2 + 0];
             vertex.Tex0.y = texCoords[i * 2 + 1];
+        }
+
+        if (has_tangent)
+        {
+            // glTF TANGENT is VEC4: xyz = tangent direction, w = handedness (+/-1). Stride is 4 floats.
+            // No support for handedness.
+            vertex.Tangent.x = tangents[i * 4 + 0];
+            vertex.Tangent.y = tangents[i * 4 + 1];
+            vertex.Tangent.z = tangents[i * 4 + 2];
+        }
+        else
+        {
+            vertex.Tangent = {0, 0, 0};  // Accumulated per-triangle in ComputeTangents
         }
 
         outVertices.push_back(vertex);
@@ -169,6 +168,59 @@ static void ExtractIndices(const tinygltf::Model& model, const tinygltf::Primiti
     }
 }
 
+static void ComputeTangents(std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+{
+    struct UserData
+    {
+        std::vector<Vertex>* vertices;
+        const std::vector<uint32_t>* indices;
+    } userData = { &vertices, &indices };
+
+    SMikkTSpaceInterface iface = {};
+
+    iface.m_getNumFaces = [](const SMikkTSpaceContext* pContext) -> int
+    {
+        const auto* data = static_cast<UserData*>(pContext->m_pUserData);
+        return static_cast<int>(data->indices->size() / 3);
+    };
+
+    iface.m_getNumVerticesOfFace = [](const SMikkTSpaceContext*, const int) -> int
+    {
+        return 3;
+    };
+
+    iface.m_getPosition = [](const SMikkTSpaceContext* pContext, float fvPosOut[], const int iFace, const int iVert)
+    {
+        const auto* data = static_cast<UserData*>(pContext->m_pUserData);
+        const Vertex& v = (*data->vertices)[(*data->indices)[iFace * 3 + iVert]];
+        fvPosOut[0] = v.Pos.x; fvPosOut[1] = v.Pos.y; fvPosOut[2] = v.Pos.z;
+    };
+
+    iface.m_getNormal = [](const SMikkTSpaceContext* pContext, float fvNormOut[], const int iFace, const int iVert)
+    {
+        const auto* data = static_cast<UserData*>(pContext->m_pUserData);
+        const Vertex& v = (*data->vertices)[(*data->indices)[iFace * 3 + iVert]];
+        fvNormOut[0] = v.Normal.x; fvNormOut[1] = v.Normal.y; fvNormOut[2] = v.Normal.z;
+    };
+
+    iface.m_getTexCoord = [](const SMikkTSpaceContext* pContext, float fvTexcOut[], const int iFace, const int iVert)
+    {
+        const auto* data = static_cast<UserData*>(pContext->m_pUserData);
+        const Vertex& v = (*data->vertices)[(*data->indices)[iFace * 3 + iVert]];
+        fvTexcOut[0] = v.Tex0.x; fvTexcOut[1] = v.Tex0.y;
+    };
+
+    iface.m_setTSpaceBasic = [](const SMikkTSpaceContext* pContext, const float fvTangent[], const float /*fSign*/, const int iFace, const int iVert)
+    {
+        auto* data = static_cast<UserData*>(pContext->m_pUserData);
+        Vertex& v = (*data->vertices)[(*data->indices)[iFace * 3 + iVert]];
+        v.Tangent = {fvTangent[0], fvTangent[1], fvTangent[2]};
+    };
+
+    SMikkTSpaceContext ctx = { &iface, &userData };
+    genTangSpaceDefault(&ctx);
+}
+
 static bool LoadTinyGLTFModel(const std::filesystem::path &path, tinygltf::Model& outModel)
 {
     tinygltf::TinyGLTF loader;
@@ -214,7 +266,9 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     assert(vertices.size() < INT_MAX);
     assert(indices.size() < INT_MAX);
     
-    // Here we would normally calculate tangents and AABB.
+    const bool has_tangent = primitive.attributes.find("TANGENT") != primitive.attributes.end();
+    if (!has_tangent)
+        ComputeTangents(vertices, indices);
 
     std::shared_ptr<Material> material = std::make_shared<Material>();
 
