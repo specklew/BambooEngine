@@ -12,6 +12,7 @@ enum class CVarType : char
 	Float,
 	String,
 	Enum,
+	Float3,
 };
 // for some reason imgui requires the bounds to be half the max values for float, otherwise throws on opening cvar floats
 #define IMGUI_SAFE_FLT_MAX (FLT_MAX / 2.0f)
@@ -62,9 +63,12 @@ public:
 		const char* name, const char* description, const char* defaultValue, const char* current_value) = 0;
 	virtual uint32_t CreateEnumCVar(const char* name, const char* description, CVarEnum value) = 0;
 	
+	virtual CVarParameter* CreateFloat3CVar(const char* name, const char* description, DirectX::XMFLOAT3 defaultValue, DirectX::XMFLOAT3 currentValue) = 0;
+
 	virtual float* GetFloatCVar(StringId hash) = 0;
 	virtual int32_t* GetIntCVar(StringId hash) = 0;
 	virtual std::string* GetStringCVar(StringId hash) = 0;
+	virtual DirectX::XMFLOAT3* GetFloat3CVar(StringId hash) = 0;
 	virtual CVarType GetCVarType(StringId hash) = 0;
 
 	template<typename T, typename = std::enable_if_t<std::is_enum_v<T>>>
@@ -86,6 +90,7 @@ public:
 	virtual void SetCVarInt(StringId hash, int32_t value) = 0;
 	virtual void SetCVarString(StringId hash, std::string&& value) = 0;
 	virtual void SetCVarEnum(StringId hash, uint32_t enumValueIndex) = 0;
+	virtual void SetCVarFloat3(StringId hash, DirectX::XMFLOAT3 value) = 0;
 	// only for AutoCVarEnum::Set() internal usage
 	virtual void SetCVarEnumByIndex(int32_t index, uint32_t enumValueIndex) = 0;
 	virtual void DrawImguiEditor() = 0;
@@ -143,6 +148,16 @@ struct AutoCVarString : AutoCVar<std::string>
 
 	const char* Get();
 	void Set(std::string&& val);
+};
+
+// CVar for XMFLOAT3 (3-component vector)
+// constructor syntax: (name, description, default value, optional: [ flags ])
+struct AutoCVarFloat3 : AutoCVar<DirectX::XMFLOAT3>
+{
+	AutoCVarFloat3(const char* name, const char* description, DirectX::XMFLOAT3 defaultValue, CVarFlags flags = CVarFlags::None);
+	DirectX::XMFLOAT3 Get();
+	DirectX::XMFLOAT3* GetPtr();
+	void Set(DirectX::XMFLOAT3 value);
 };
 
 // this apparently prevents construction of this class with non-enum types

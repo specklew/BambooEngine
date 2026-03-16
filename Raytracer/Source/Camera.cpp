@@ -43,6 +43,16 @@ void Camera::AddRotation(DirectX::XMFLOAT4 rotation)
     SetRotation(Quaternion::Concatenate(m_rotation, rotation));
 }
 
+DirectX::XMFLOAT3 Camera::GetEulerDegrees() const
+{
+    Vector3 euler = m_rotation.ToEuler(); // pitch (x), yaw (y), roll (z) in radians
+    return DirectX::XMFLOAT3(
+        DirectX::XMConvertToDegrees(euler.x),
+        DirectX::XMConvertToDegrees(euler.y),
+        DirectX::XMConvertToDegrees(euler.z)
+    );
+}
+
 void Camera::AddRotationEuler(DirectX::XMFLOAT3 rotation)
 {
     AddRotation(Quaternion::CreateFromYawPitchRoll(rotation.y, rotation.x, rotation.z));

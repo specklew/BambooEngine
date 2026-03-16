@@ -42,6 +42,8 @@ static AutoCVarFloat g_cameraScrollFactor("renderer.camera.scrollFactor", "Multi
 static AutoCVarFloat g_uvCoordX("renderer.uv.x", "Texture uv x offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 static AutoCVarEnum g_debugMode("renderer.debugMode", "Shader debug visualization mode.", RasterDebugMode::None);
+static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world position", {0.0f, 0.0f, -10.0f});
+static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
 
 void Renderer::Initialize()
 {
@@ -112,6 +114,14 @@ void Renderer::Initialize()
 float speedMultiplier = 1.0f;
 void Renderer::Update(double elapsedTime, double totalTime)
 {
+	// Apply any CVar edits from ImGui (CVar → camera)
+	m_camera->SetPosition(g_cameraPos.Get());
+	{
+		auto rot = g_cameraRot.Get();
+		m_camera->SetRotation(DirectX::SimpleMath::Quaternion::CreateFromYawPitchRoll(
+			DirectX::XMConvertToRadians(rot.y), DirectX::XMConvertToRadians(rot.x), DirectX::XMConvertToRadians(rot.z)));
+	}
+
 	auto key_state = DirectX::Keyboard::Get().GetState();
 
 	if (key_state.LeftShift || key_state.RightShift)
@@ -147,7 +157,14 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	{
 		OnShaderReload();
 	}
-	
+
+	// Sync camera state back to CVars (camera → CVar)
+	{
+		const auto& pos = m_camera->GetPosition();
+		g_cameraPos.Set({ pos.x, pos.y, pos.z });
+		g_cameraRot.Set(m_camera->GetEulerDegrees());
+	}
+
 	using namespace DirectX;
 
     //SimpleMath::Matrix world = m_world;
@@ -376,7 +393,8 @@ void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
 		m_phi += dy;
 
 		m_camera->AddRotationEuler(DirectX::SimpleMath::Vector3(dy, -dx, 0.0f));
-		
+		g_cameraRot.Set(m_camera->GetEulerDegrees());
+
 		// Restrict the angle mPhi.
 		m_phi = std::clamp(m_phi, 0.01f - DirectX::XM_PIDIV2,  DirectX::XM_PIDIV2 - 0.01f);
 	}

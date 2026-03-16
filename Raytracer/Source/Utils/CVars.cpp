@@ -175,10 +175,12 @@ public:
 	CVarParameter* CreateIntCVar(const char* name, const char* description, int32_t defaultValue, int32_t currentValue, int minValue, int maxValue) override final;
 	CVarParameter* CreateStringCVar(const char* name, const char* description, const char* defaultValue, const char* currentValue) override final;
 	uint32_t CreateEnumCVar(const char* name, const char* description, CVarEnum value) override final;
+	CVarParameter* CreateFloat3CVar(const char* name, const char* description, DirectX::XMFLOAT3 defaultValue, DirectX::XMFLOAT3 currentValue) override final;
 	
 	float* GetFloatCVar(StringId hash) override final;
 	int32_t* GetIntCVar(StringId hash) override final;
 	std::string* GetStringCVar(StringId hash) override final;
+	DirectX::XMFLOAT3* GetFloat3CVar(StringId hash) override final;
 	CVarEnum* GetEnumCVar(StringId hash) override final;
 	CVarEnum* GetEnumByIndex(int32_t index) override final;
 	
@@ -187,6 +189,7 @@ public:
 	void SetCVarString(StringId hash, std::string&& value) override final;
 	void SetCVarEnum(StringId hash, uint32_t enumValueIndex) override final;
 	void SetCVarEnumByIndex(int32_t index, uint32_t enumValueIndex) override final;
+	void SetCVarFloat3(StringId hash, DirectX::XMFLOAT3 value) override final;
 
 	CVarType GetCVarType(StringId hash) override final;
 
@@ -202,6 +205,9 @@ public:
 
 	constexpr static int MAX_STRING_CVARS = 200;
 	CVarArray<std::string> stringCVars{ MAX_STRING_CVARS };
+
+	constexpr static int MAX_FLOAT3_CVARS = 100;
+	CVarArray<DirectX::XMFLOAT3> float3CVars{ MAX_FLOAT3_CVARS };
 
 	constexpr static int MAX_ENUM_CVARS = 100;
 	CVarEnumArray enumCVars{ MAX_ENUM_CVARS };
@@ -225,6 +231,11 @@ public:
 	CVarArray<std::string>* GetCVarArray()
 	{
 		return &stringCVars;
+	}
+	template<>
+	CVarArray<DirectX::XMFLOAT3>* GetCVarArray()
+	{
+		return &float3CVars;
 	}
 
 	//templated get-set cvar versions for syntax sugar
@@ -408,6 +419,28 @@ void AutoCVarString::Set(std::string&& val)
 	SetCVarCurrentByIndex<CVarType>(m_index, val);
 }
 
+AutoCVarFloat3::AutoCVarFloat3(const char* name, const char* description, DirectX::XMFLOAT3 defaultValue, CVarFlags flags)
+{
+	CVarParameter* cvar = CVarSystem::Get()->CreateFloat3CVar(name, description, defaultValue, defaultValue);
+	cvar->flags = flags;
+	m_index = cvar->arrayIndex;
+}
+
+DirectX::XMFLOAT3 AutoCVarFloat3::Get()
+{
+	return GetCVarCurrentByIndex<CVarType>(m_index);
+}
+
+DirectX::XMFLOAT3* AutoCVarFloat3::GetPtr()
+{
+	return PtrGetCVarCurrentByIndex<CVarType>(m_index);
+}
+
+void AutoCVarFloat3::Set(DirectX::XMFLOAT3 value)
+{
+	SetCVarCurrentByIndex<CVarType>(m_index, value);
+}
+
 CVarParameter* CVarSystemImpl::CreateFloatCVar(const char* name, const char* description, float defaultValue, float currentValue, float minValue, float maxValue)
 {
 	std::unique_lock lock(m_mutex);
@@ -460,6 +493,20 @@ uint32_t CVarSystemImpl::CreateEnumCVar(const char* name, const char* descriptio
 	return param->arrayIndex;
 }
 
+CVarParameter* CVarSystemImpl::CreateFloat3CVar(const char* name, const char* description, DirectX::XMFLOAT3 defaultValue, DirectX::XMFLOAT3 currentValue)
+{
+	std::unique_lock lock(m_mutex);
+	CVarParameter* param = InitCVar(name, description);
+	if (!param) return nullptr;
+
+	param->type = CVarType::Float3;
+
+	DirectX::XMFLOAT3 dummy{};
+	GetCVarArray<DirectX::XMFLOAT3>()->Add(defaultValue, currentValue, dummy, dummy, param);
+
+	return param;
+}
+
 float* CVarSystemImpl::GetFloatCVar(StringId hash)
 {
 	return GetCVarCurrent<float>(hash);
@@ -473,6 +520,11 @@ int32_t* CVarSystemImpl::GetIntCVar(StringId hash)
 std::string* CVarSystemImpl::GetStringCVar(StringId hash)
 {
 	return GetCVarCurrent<std::string>(hash);
+}
+
+DirectX::XMFLOAT3* CVarSystemImpl::GetFloat3CVar(StringId hash)
+{
+	return GetCVarCurrent<DirectX::XMFLOAT3>(hash);
 }
 
 CVarEnum* CVarSystemImpl::GetEnumCVar(StringId hash)
@@ -508,6 +560,11 @@ void CVarSystemImpl::SetCVarEnum(StringId hash, uint32_t enumValueIndex)
 void CVarSystemImpl::SetCVarEnumByIndex(int32_t index, uint32_t enumValueIndex)
 {
 	enumCVars.SetCurrent(enumValueIndex, index);
+}
+
+void CVarSystemImpl::SetCVarFloat3(StringId hash, DirectX::XMFLOAT3 value)
+{
+	SetCVarCurrent<DirectX::XMFLOAT3>(hash, value);
 }
 
 CVarType CVarSystemImpl::GetCVarType(StringId hash)
@@ -570,6 +627,10 @@ void CVarSystemImpl::DrawImguiEditor()
 	for (int i = 0; i < GetCVarArray<std::string>()->lastCVar; i++)
 	{
 		addToEditList(GetCVarArray<std::string>()->cvars[i].parameter);
+	}
+	for (int i = 0; i < GetCVarArray<DirectX::XMFLOAT3>()->lastCVar; i++)
+	{
+		addToEditList(GetCVarArray<DirectX::XMFLOAT3>()->cvars[i].parameter);
 	}
 	for (int i = 0; i < enumCVars.lastCVar; i++)
 	{
@@ -847,6 +908,18 @@ void CVarSystemImpl::EditParameter(CVarParameter* p, float textWidth)
         		}
         		ImGui::PopID();
         		break;
+	        }
+        case CVarType::Float3:
+	        {
+                ImGui::PushID(p->name.c_str());
+                ImGui::DragFloat3("", &GetCVarArray<DirectX::XMFLOAT3>()->GetCurrentPtr(p->arrayIndex)->x, 0.05f);
+                ImGui::SameLine();
+                if (ImGui::Button("R"))
+                {
+                    GetCVarArray<DirectX::XMFLOAT3>()->SetCurrent(GetCVarArray<DirectX::XMFLOAT3>()->cvars[p->arrayIndex].initial, p->arrayIndex);
+                }
+                ImGui::PopID();
+                break;
 	        }
         default:
             break;

@@ -24,6 +24,8 @@ public:
     [[nodiscard]] const DirectX::XMFLOAT4X4& GetProjectionMatrix() const { return m_projectionMatrix; }
     [[nodiscard]] const DirectX::XMFLOAT4X4& GetViewProjectionMatrix() const { return m_viewProjectionMatrix; }
 
+    [[nodiscard]] DirectX::XMFLOAT3 GetEulerDegrees() const;
+
     [[nodiscard]] DirectX::SimpleMath::Vector3 GetForward() const { return m_forward; }
     [[nodiscard]] DirectX::SimpleMath::Vector3 GetRight() const { return m_right; }
     [[nodiscard]] DirectX::SimpleMath::Vector3 GetUp() const { return m_up; }
