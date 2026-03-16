@@ -43,6 +43,7 @@ public:
 
 	void OnResize();
 	void OnMouseMove(unsigned long long btnState, int x, int y);
+	void OnMouseWheel(int delta);
 	void OnKeyDown(unsigned long long btnState) const;
 	
 	void ToggleRasterization();

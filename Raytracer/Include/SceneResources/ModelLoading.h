@@ -17,7 +17,7 @@ namespace ModelLoading
     };
 
     inline std::vector<std::string> scenePaths = {
-        "resources/models/avocado/avocado.glb",
+        "resources/models/avocado/avocado.gltf",
         "resources/models/abeautifulgame.glb",
         "resources/models/sponza/gltf/sponza.gltf",
         "resources/models/simpleinstancing.glb",

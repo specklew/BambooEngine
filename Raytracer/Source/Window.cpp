@@ -125,6 +125,9 @@ LRESULT Window::MsgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_MOUSEMOVE:
 		application->OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		break;
+	case WM_MOUSEWHEEL:
+		application->OnMouseWheel(GET_WHEEL_DELTA_WPARAM(wParam));
+		break;
 	case WM_KEYDOWN:
 		if (wParam == VK_RETURN && (lParam & 0x60000000) == 0x20000000)
 		{

@@ -17,6 +17,7 @@ private:
 	void GameLoop();
 	void OnResize();
 	void OnMouseMove(WPARAM btnState, int x, int y);
+	void OnMouseWheel(int delta);
 	void OnKeyDown(WPARAM btnState);
 	void ReportLiveObjects();
 	void SetupLoggingLevel();

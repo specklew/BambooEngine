@@ -218,14 +218,6 @@ float3 BarycentricCoordinates(float3 pt, float3 v0, float3 v1, float3 v2)
     return float3(u, v, w);
 }
 
-// Validates UV derivatives before SampleGrad. At silhouette edges the differential ray
-// may be parallel to the hit plane, producing NaN/Inf derivatives. On AMD, passing these
-// to SampleGrad corrupts the entire wavefront (64 threads). Fall back to zero (mip 0).
-float2 SafeUVDerivative(float2 d)
-{
-    return (any(isnan(d)) || any(isinf(d)) || dot(d, d) > 1.0f) ? float2(0, 0) : d;
-}
-
 float3 SampleWorldSpaceNormal(HitData data)
 {
     int normalTexIdx = g_instanceInfo[NonUniformResourceIndex(InstanceID())].normalTextureIndex;
@@ -247,7 +239,7 @@ float3 SampleWorldSpaceNormal(HitData data)
     float2 ddxUV = mul(baryX, uvMat) - data.uv;
     float2 ddyUV = mul(baryY, uvMat) - data.uv;
 
-    float3 normalTS = g_textures[NonUniformResourceIndex(normalTexIdx)].SampleGrad(gsamAnisotropicWrap, data.uv, SafeUVDerivative(ddxUV), SafeUVDerivative(ddyUV)).xyz * 2.0 - 1.0;
+    float3 normalTS = g_textures[NonUniformResourceIndex(normalTexIdx)].SampleGrad(gsamAnisotropicWrap, data.uv, ddxUV, ddyUV).xyz * 2.0 - 1.0;
 
     // Build TBN and transform normal to world space
     float3 N = data.normal;
@@ -280,7 +272,7 @@ float3 SampleTextureColor(HitData data)
     int texIdx = g_instanceInfo[NonUniformResourceIndex(InstanceID())].textureIndex;
     if (texIdx != -1)
     {
-        col = g_textures[NonUniformResourceIndex(texIdx)].SampleGrad(gsamAnisotropicWrap, data.uv, SafeUVDerivative(ddxUV), SafeUVDerivative(ddyUV));
+        col = g_textures[NonUniformResourceIndex(texIdx)].SampleGrad(gsamAnisotropicWrap, data.uv, ddxUV, ddyUV);
     }
 
     return col;

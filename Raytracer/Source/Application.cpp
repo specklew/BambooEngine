@@ -57,6 +57,11 @@ void Application::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	m_renderer->OnMouseMove(btnState, x, y);
 }
+ 
+void Application::OnMouseWheel(int delta)
+{
+	m_renderer->OnMouseWheel(delta);
+}
 
 void Application::OnKeyDown(WPARAM btnState)
 {

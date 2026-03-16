@@ -240,12 +240,36 @@ namespace RenderingUtils
     	void* pData;
     	ThrowIfFailed(uploadBuffer->Map(0, nullptr, &pData));
 
-    	for (auto i = 0; i < rowCount; i++)
+    	const UINT dstRowPitch = footprint.Footprint.RowPitch;
+
+    	if (image.component == 4)
     	{
-    		memcpy(
-    			static_cast<uint8_t*>(pData) + rowSize * i,
-    			&image.image[0] + image.width * image.component * i,
-    			image.width * image.component);
+    		for (UINT i = 0; i < rowCount; i++)
+    		{
+    			memcpy(
+    				static_cast<uint8_t*>(pData) + dstRowPitch * i,
+    				&image.image[0] + image.width * 4 * i,
+    				image.width * 4);
+    		}
+    	}
+    	else if (image.component == 3)
+    	{
+    		for (UINT i = 0; i < rowCount; i++)
+    		{
+    			const uint8_t* srcRow = &image.image[0] + image.width * 3 * i;
+    			uint8_t* dstRow = static_cast<uint8_t*>(pData) + dstRowPitch * i;
+    			for (int px = 0; px < image.width; px++)
+    			{
+    				dstRow[px * 4 + 0] = srcRow[px * 3 + 0];
+    				dstRow[px * 4 + 1] = srcRow[px * 3 + 1];
+    				dstRow[px * 4 + 2] = srcRow[px * 3 + 2];
+    				dstRow[px * 4 + 3] = 255;
+    			}
+    		}
+    	}
+    	else
+    	{
+    		spdlog::error("Unsupported image component count: {}", image.component);
     	}
 
     	D3D12_TEXTURE_COPY_LOCATION defaultCopyLocation = {};

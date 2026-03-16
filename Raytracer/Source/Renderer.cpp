@@ -28,6 +28,7 @@
 #include "SceneResources/Model.h"
 #include "tinygltf/tiny_gltf.h"
 #include "Utils/PassConstants.h"
+#include "RasterDebugMode.h"
 
 #ifdef _DEBUG
 #define ENABLE_GPU_BASED_VALIDATION 1
@@ -36,9 +37,11 @@
 using namespace Microsoft::WRL;
 
 static AutoCVarEnum g_currentScene("renderer.initialScene", "Specifies which scene to load on startup.", ModelLoading::LOADED_SCENES::A_BEAUTIFUL_GAME);
-static AutoCVarFloat g_cameraSpeed("renderer.camera.speed", "Specifies the base speed of camera", 1.0f, CVarFlags::EditDrag, 1.0f, 20.0f);
+static AutoCVarFloat g_cameraSpeed("renderer.camera.speed", "Specifies the base speed of camera", 1.0f, CVarFlags::EditDrag, 0.1f, 100.0f);
+static AutoCVarFloat g_cameraScrollFactor("renderer.camera.scrollFactor", "Multiplier per scroll tick for camera speed", 1.2f, CVarFlags::EditDrag, 1.01f, 3.0f);
 static AutoCVarFloat g_uvCoordX("renderer.uv.x", "Texture uv x offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
+static AutoCVarEnum g_debugMode("renderer.debugMode", "Shader debug visualization mode.", RasterDebugMode::None);
 
 void Renderer::Initialize()
 {
@@ -80,7 +83,7 @@ void Renderer::Initialize()
 	CreateIndexSRV();
 
 	m_material = std::make_shared<Material>();
-	m_material->m_data.albedoColor = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
+	m_material->m_data.baseColorFactor = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
 
 	m_passConstants = std::make_shared<PassConstants>();
 	
@@ -195,6 +198,9 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
 	m_passConstants->data.uvCoordY = g_uvCoordY.Get();
+	m_passConstants->data.debugMode = static_cast<int>(g_debugMode.Get());
+	const auto& camPos = m_camera->GetPosition();
+	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->Map();
 }
 
@@ -386,6 +392,19 @@ void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
 	}
 	m_lastMousePosX = x;
 	m_lastMousePosY = y;
+}
+
+void Renderer::OnMouseWheel(int delta)
+{
+	float scrollFactor = g_cameraScrollFactor.Get();
+	float speed = g_cameraSpeed.Get();
+
+	if (delta > 0)
+		speed *= scrollFactor;
+	else if (delta < 0)
+		speed /= scrollFactor;
+
+	g_cameraSpeed.Set(std::clamp(speed, 0.1f, 20.0f));
 }
 
 void Renderer::OnKeyDown(unsigned long long btnState) const

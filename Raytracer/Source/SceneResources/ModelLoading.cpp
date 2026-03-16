@@ -291,7 +291,13 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
             const tinygltf::Image metallic_roughness_image = model.images[model.textures[metallic_roughness_index].source];
             material->m_metallicRoughnessTexture = renderer.CreateTextureFromGLTF(metallic_roughness_image);
         }
-        
+
+        const auto& pbr = model.materials[primitive.material].pbrMetallicRoughness;
+        const auto& bcf = pbr.baseColorFactor;
+        material->m_data.baseColorFactor = { static_cast<float>(bcf[0]), static_cast<float>(bcf[1]), static_cast<float>(bcf[2]), static_cast<float>(bcf[3]) };
+        material->m_data.metallicFactor = static_cast<float>(pbr.metallicFactor);
+        material->m_data.roughnessFactor = static_cast<float>(pbr.roughnessFactor);
+
         material->UpdateMaterial();
     }
 

@@ -15,15 +15,12 @@ struct Material
 
     struct MaterialData
     {
-        DirectX::XMFLOAT4 albedoColor = {1.0f, 1.0f, 1.0f, 1.0f};
+        DirectX::XMFLOAT4 baseColorFactor = {1.0f, 1.0f, 1.0f, 1.0f};
         int albedo_index = -1;
         int normal_index = -1;
         int roughness_index = -1;
-        // albedo texture <- idk if I should put textures as ids into the buffer? maybe lets just stay with the naive approach and just pack everything into the memory without any shape or form?
-        // normal texture
-        // roughness texture
-        // maybe fresnel?
-        // material transform - affine transform of material UVs - will I use it??
+        float metallicFactor = 1.0f;
+        float roughnessFactor = 1.0f;
     } m_data;
 
 private:

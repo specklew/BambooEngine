@@ -50,6 +50,7 @@ ComPtr<IDxcBlob> CompileShader(const ShaderMetadata& meta)
 		L"-T", target.get(),
 		L"-Zi", // enable debugging
 		L"-Qembed_debug", // embed pdb into shader
+		L"-I", L"Include",
 		standardDefines,
 	};
 	if (userDefines)

@@ -37,7 +37,7 @@ private:
 
     float m_fovYRadians = (DirectX::XM_PI / 180) * 60;
     float m_aspectRatio = 16.0f / 9.0f;
-    float m_nearZ = 0.1f;
+    float m_nearZ = 0.001f;
     float m_farZ = 1000.0f;
     
     DirectX::XMFLOAT4X4 m_viewMatrix = {};

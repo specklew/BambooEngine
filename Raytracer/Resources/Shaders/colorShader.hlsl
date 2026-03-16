@@ -1,4 +1,5 @@
 #define MAX_TEXTURES 512
+#include "RasterDebugMode.h"
 
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);
@@ -25,16 +26,20 @@ cbuffer ModelTransforms : register(b1)
 
 cbuffer Material : register(b2)
 {
-    float4 ambient;
+    float4 baseColorFactor;
     int textureIndex;
     int normalTextureIndex;
     int roughnessTextureIndex;
+    float metallicFactor;
+    float roughnessFactor;
 }
 
 cbuffer PassConstants : register(b3)
 {
     float uvX;
     float uvY;
+    int debugMode;
+    float3 cameraWorldPos;
 }
 
 Texture2D gTextures[MAX_TEXTURES] : register(t3, space0);
@@ -53,6 +58,7 @@ struct VertexIn
 struct VertexOut
 {
     float4 PosH  : SV_POSITION;
+    float3 PosW  : POSITION;
     float3 NormalW : NORMAL;
     float3 TangentW : TANGENT;
     float2 TexCoord : TEXCOORD;
@@ -69,8 +75,9 @@ VertexOut vertex(VertexIn vin)
 
     // TODO: Something must not be right here. The multiplication should be reversed? (curr: world * posL, should it be posL * world)
     float4 posL = float4(vin.PosL, 1.0f);
-    vout.PosH = mul(world, posL);
-    vout.PosH = mul(vout.PosH, viewProj);
+    float4 posW = mul(world, posL);
+    vout.PosW = posW.xyz;
+    vout.PosH = mul(posW, viewProj);
 
     float4 normalL = float4(vin.NormalL, 0.0f);
     vout.NormalW = mul(world, normalL);
@@ -81,17 +88,57 @@ VertexOut vertex(VertexIn vin)
     return vout;
 }
 
+static const float PI = 3.14159265359;
+
+float DistributionGGX(float NdotH, float roughness)
+{
+    float a = roughness * roughness;
+    float a2 = a * a;
+    float denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
+    return a2 / (PI * denom * denom);
+}
+
+float GeometrySchlickGGX(float NdotV, float roughness)
+{
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+    return NdotV / (NdotV * (1.0 - k) + k);
+}
+
+float GeometrySmith(float NdotV, float NdotL, float roughness)
+{
+    return GeometrySchlickGGX(NdotV, roughness) * GeometrySchlickGGX(NdotL, roughness);
+}
+
+float3 FresnelSchlick(float cosTheta, float3 F0)
+{
+    return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
+}
+
 float4 pixel(VertexOut pin) : SV_Target
 {
-    float4 textureAlbedo = float4(1, 0, 1, 1);
-    float4 textureNormal = float4(0.5, 0.5, 1.0, 1.0); // flat normal fallback
+    float2 uv = pin.TexCoord + float2(uvX, uvY);
+
+    // Sample textures
+    float4 textureAlbedo = baseColorFactor;
+    float4 textureNormal = float4(0.5, 0.5, 1.0, 1.0);
+    float metallic = metallicFactor;
+    float roughness = roughnessFactor;
+
     if (textureIndex != -1)
     {
-        textureAlbedo = gTextures[textureIndex].Sample(gsamLinearWrap, pin.TexCoord + float2(uvX, uvY));
+        textureAlbedo *= gTextures[textureIndex].Sample(gsamLinearWrap, uv);
     }
     if (normalTextureIndex != -1)
     {
-        textureNormal = gTextures[normalTextureIndex].Sample(gsamLinearWrap, pin.TexCoord + float2(uvX, uvY));
+        textureNormal = gTextures[normalTextureIndex].Sample(gsamLinearWrap, uv);
+    }
+    if (roughnessTextureIndex != -1)
+    {
+        // glTF: green = roughness, blue = metallic
+        float4 mr = gTextures[roughnessTextureIndex].Sample(gsamLinearWrap, uv);
+        roughness *= mr.g;
+        metallic *= mr.b;
     }
 
     // Build TBN — re-orthogonalize T against N to fix interpolation drift
@@ -104,8 +151,47 @@ float4 pixel(VertexOut pin) : SV_Target
     float3 normalTS = textureNormal.xyz * 2.0 - 1.0;
     float3 worldNormal = normalize(mul(normalTS, TBN));
 
-    float3 dir = normalize(float3(1, 0.5, 0.5));
-    float diffuse = max(0.0, dot(dir, worldNormal));
+    // Debug visualization
+    DebugData debugData;
+    debugData.albedo = textureAlbedo;
+    debugData.worldNormal = worldNormal;
+    debugData.vertexNormal = N;
+    debugData.normalMap = textureNormal;
+    debugData.tangent = T;
+    debugData.uv = pin.TexCoord;
 
-    return float4(textureAlbedo.rgb * diffuse, 1.0);
+    float4 debugResult = ApplyRasterDebugMode(debugMode, debugData);
+    if (debugResult.x >= 0) return debugResult;
+
+    // PBR shading
+    float3 albedo = textureAlbedo.rgb;
+    float3 L = normalize(float3(1, 0.5, 0.5));
+    float3 V = normalize(cameraWorldPos - pin.PosW);
+    float3 H = normalize(V + L);
+
+    float NdotL = max(dot(worldNormal, L), 0.0);
+    float NdotV = max(dot(worldNormal, V), 0.001);
+    float NdotH = max(dot(worldNormal, H), 0.0);
+    float HdotV = max(dot(H, V), 0.0);
+
+    // Dielectric F0 = 0.04, metals use albedo as F0
+    float3 F0 = lerp(float3(0.04, 0.04, 0.04), albedo, metallic);
+
+    float D = DistributionGGX(NdotH, roughness);
+    float G = GeometrySmith(NdotV, NdotL, roughness);
+    float3 F = FresnelSchlick(HdotV, F0);
+
+    float3 specular = (D * G * F) / (4.0 * NdotV * NdotL + 0.0001);
+
+    float3 kD = (1.0 - F) * (1.0 - metallic);
+    float3 diffuse = kD * albedo / PI;
+
+    float3 lightColor = float3(1.0, 1.0, 1.0) * 3.0;
+    float3 Lo = (diffuse + specular) * lightColor * NdotL;
+
+    // Ambient
+    float3 ambient = float3(0.03, 0.03, 0.03) * albedo;
+    float3 color = ambient + Lo;
+
+    return float4(color, textureAlbedo.a);
 }

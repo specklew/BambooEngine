@@ -16,6 +16,8 @@ public:
     {
         float uvCoordX = 0.0f;
         float uvCoordY = 0.0f;
+        int debugMode = 0;
+        DirectX::XMFLOAT3 cameraWorldPos = {0.0f, 0.0f, 0.0f};
     } data;
 
 private:
