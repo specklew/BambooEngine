@@ -41,7 +41,7 @@ static AutoCVarFloat g_cameraSpeed("renderer.camera.speed", "Specifies the base 
 static AutoCVarFloat g_cameraScrollFactor("renderer.camera.scrollFactor", "Multiplier per scroll tick for camera speed", 1.2f, CVarFlags::EditDrag, 1.01f, 3.0f);
 static AutoCVarFloat g_uvCoordX("renderer.uv.x", "Texture uv x offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
-static AutoCVarEnum g_debugMode("renderer.debugMode", "Shader debug visualization mode.", RasterDebugMode::None);
+static AutoCVarEnum g_rasterizationDebugMode("renderer.rasterDebugMode", "Rasterization shader debug visualization mode", RasterDebugMode::None);
 static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world position", {0.0f, 0.0f, -10.0f});
 static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
 
@@ -215,7 +215,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
 	m_passConstants->data.uvCoordY = g_uvCoordY.Get();
-	m_passConstants->data.debugMode = static_cast<int>(g_debugMode.Get());
+	m_passConstants->data.debugMode = static_cast<int>(g_rasterizationDebugMode.Get());
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->Map();

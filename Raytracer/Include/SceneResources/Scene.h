@@ -24,6 +24,10 @@ struct InstanceInfo
     uint32_t geometryId;
     int textureId;
     int normalTextureId;
+    int roughnessTextureId;
+    float metallicFactor;
+    float roughnessFactor;
+    DirectX::XMFLOAT4 baseColorFactor;
 };
 
 class Scene

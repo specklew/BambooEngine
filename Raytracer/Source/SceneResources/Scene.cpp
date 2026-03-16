@@ -8,6 +8,7 @@
 #include "Resources/StructuredBuffer.h"
 #include "Resources/VertexBuffer.h"
 #include "SceneResources/Model.h"
+#include "SceneResources/Material.h"
 #include "SceneResources/Primitive.h"
 #include "SceneResources/SceneNode.h"
 
@@ -89,6 +90,10 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
             int geometry_id = static_cast<int>(std::distance(primitives.begin(), it));
             int texture_id = -1;
             int normal_texture_id = -1;
+            int roughness_texture_id = -1;
+            float metallic_factor = 1.0f;
+            float roughness_factor = 1.0f;
+            DirectX::XMFLOAT4 base_color_factor = { 1.0f, 1.0f, 1.0f, 1.0f };
 
             if (primitive->m_material)
             {
@@ -97,12 +102,23 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
 
                 if (primitive->m_material->m_normalTexture)
                     normal_texture_id = primitive->m_material->m_normalTexture->GetTextureIndex();
+
+                if (primitive->m_material->m_metallicRoughnessTexture)
+                    roughness_texture_id = primitive->m_material->m_metallicRoughnessTexture->GetTextureIndex();
+
+                metallic_factor = primitive->m_material->m_data.metallicFactor;
+                roughness_factor = primitive->m_material->m_data.roughnessFactor;
+                base_color_factor = primitive->m_material->m_data.baseColorFactor;
             }
 
             InstanceInfo info = {};
             info.geometryId = geometry_id;
             info.textureId = texture_id;
             info.normalTextureId = normal_texture_id;
+            info.roughnessTextureId = roughness_texture_id;
+            info.metallicFactor = metallic_factor;
+            info.roughnessFactor = roughness_factor;
+            info.baseColorFactor = base_color_factor;
             instances_info.push_back(info);
         }
     }
