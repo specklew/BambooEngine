@@ -159,6 +159,8 @@ float4 pixel(VertexOut pin) : SV_Target
     debugData.normalMap = textureNormal;
     debugData.tangent = T;
     debugData.uv = pin.TexCoord;
+    debugData.roughness = roughness;
+    debugData.metallic = metallic;
 
     float4 debugResult = ApplyRasterDebugMode(debugMode, debugData);
     if (debugResult.x >= 0) return debugResult;

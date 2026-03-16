@@ -11,6 +11,7 @@ enum class RasterDebugMode : int
 	NormalMap = 4,
 	Tangents = 5,
 	UVs = 6,
+	Roughness = 7,
 };
 
 #else // HLSL
@@ -23,6 +24,8 @@ struct DebugData
 	float4 normalMap;
 	float3 tangent;
 	float2 uv;
+	float roughness;
+	float metallic;
 };
 
 float4 ApplyRasterDebugMode(int mode, DebugData d)
@@ -33,6 +36,7 @@ float4 ApplyRasterDebugMode(int mode, DebugData d)
 	if (mode == 4) return d.normalMap;
 	if (mode == 5) return float4(d.tangent * 0.5 + 0.5, 1);
 	if (mode == 6) return float4(d.uv, 0, 1);
+	if (mode == 7) return float4(d.roughness, d.metallic, 0, 1);
 	return float4(-1, -1, -1, -1);
 }
 
