@@ -390,10 +390,6 @@
     <Natvis Include="Vendor\imgui\misc\debuggers\imgui.natvis" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Resources\Models\Avocado\albedo.dds" />
-    <Content Include="Resources\Models\Avocado\avocado.glb" />
-    <Content Include="Resources\Models\Avocado\normal.dds" />
-    <Content Include="Resources\Models\Avocado\rm.dds" />
     <Content Include="Resources\Shaders\colorShader.ps.shader" />
     <Content Include="Resources\Shaders\colorShader.vs.shader" />
     <Content Include="Resources\Shaders\raytracing.ch.shader" />
@@ -428,6 +424,9 @@
     <ProjectReference Include="..\DirectXTK\DirectXTK_Desktop_2022.vcxproj">
       <Project>{e0b52ae7-e160-4d32-bf3f-910b785e5a8e}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Resources\Models\" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
