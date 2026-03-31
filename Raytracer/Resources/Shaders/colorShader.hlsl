@@ -1,5 +1,6 @@
 #define MAX_TEXTURES 512
 #include "RasterDebugMode.h"
+#include "passConstants.hlsl"
 
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);
@@ -32,14 +33,6 @@ cbuffer Material : register(b2)
     int roughnessTextureIndex;
     float metallicFactor;
     float roughnessFactor;
-}
-
-cbuffer PassConstants : register(b3)
-{
-    float uvX;
-    float uvY;
-    int debugMode;
-    float3 cameraWorldPos;
 }
 
 Texture2D gTextures[MAX_TEXTURES] : register(t3, space0);

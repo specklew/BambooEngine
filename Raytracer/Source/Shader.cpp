@@ -1,6 +1,7 @@
 ﻿#include <pch.h>
 #include "Shader.h"
 #include "rapidjson/document.h"
+#include "rapidjson/error/en.h"
 
 // ReSharper disable CppClangTidyReadabilityMisplacedArrayIndex
 
@@ -9,6 +10,12 @@ ShaderMetadata ShaderMetadata::Deserialize(const char* szSerializedData)
     using namespace rapidjson;
     Document doc;
     doc.Parse(szSerializedData);
+
+    if (doc.HasParseError())
+    {
+        spdlog::error("Failed to deserialize shader metadata. Error offset: {}. Error message: {}", doc.GetErrorOffset(), GetParseError_En(doc.GetParseError()));
+    }
+    
     assert(doc.HasParseError() == false);
 
     ShaderMetadata data{};

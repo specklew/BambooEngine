@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "LightData.h"
 #include "Resources/StructuredBuffer.h"
 
 class ConstantBuffer;
@@ -42,6 +43,7 @@ public:
     [[nodiscard]] std::shared_ptr<VertexBuffer> GetVertexBuffer() { return m_vertexBuffer; }
     [[nodiscard]] std::shared_ptr<StructuredBuffer<GeometryInfo>> GetGeometryInfoBuffer() { return m_geometryInfoBuffer; }
     [[nodiscard]] std::shared_ptr<StructuredBuffer<InstanceInfo>> GetInstanceInfoBuffer() { return m_instanceInfoBuffer; }
+    [[nodiscard]] std::shared_ptr<StructuredBuffer<LightData>> GetLightDataBuffer() { return m_lightDataBuffer; }
     
 private:
     friend class SceneBuilder;
@@ -51,6 +53,7 @@ private:
     std::shared_ptr<VertexBuffer> m_vertexBuffer;
     std::shared_ptr<StructuredBuffer<GeometryInfo>> m_geometryInfoBuffer;
     std::shared_ptr<StructuredBuffer<InstanceInfo>> m_instanceInfoBuffer;
+    std::shared_ptr<StructuredBuffer<LightData>> m_lightDataBuffer;
     
     std::string m_name;
     std::shared_ptr<SceneNode> m_root;
@@ -67,6 +70,7 @@ public:
     void AddGameObject(const std::shared_ptr<GameObject>& gameObject, const std::shared_ptr<Model>& model);
     void AddModel(const std::shared_ptr<Model>& model);
     void AddChild(const std::shared_ptr<SceneNode>& parent, const std::shared_ptr<SceneNode>& child);
+    void AddLightData(const LightData& lightData);
     void SetName(const std::string& name);
     void SetAccelerationStructures(const std::shared_ptr<AccelerationStructures>& accelerationStructures);
     void SetVertexBuffer(const std::shared_ptr<VertexBuffer>& vertexBuffer);
@@ -95,6 +99,8 @@ private:
     std::shared_ptr<SceneNode> m_root;
 
     std::shared_ptr<AccelerationStructures> m_rtRepresentation;
+
+    std::vector<LightData> m_lightData;
 
     bool m_isBuilt = false;
 };

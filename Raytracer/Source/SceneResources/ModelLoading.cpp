@@ -449,6 +449,114 @@ static std::shared_ptr<AccelerationStructures> BuildAccelerationStructures(const
     return as;
 }
 
+static DirectX::XMMATRIX ComputeNodeLocalMatrix(const tinygltf::Node& node)
+{
+    if (node.matrix.size() == 16)
+    {
+        float m[16];
+        for (int i = 0; i < 16; ++i)
+            m[i] = static_cast<float>(node.matrix[i]);
+        return DirectX::XMMATRIX(m);
+    }
+
+    auto translation = ReadNodePosition(node);
+    auto rotation = ReadNodeRotation(node);
+    auto scale = ReadNodeScale(node);
+
+    return DirectX::XMMatrixAffineTransformation(
+        DirectX::XMLoadFloat3(&scale),
+        DirectX::g_XMZero,
+        DirectX::XMLoadFloat4(&rotation),
+        DirectX::XMLoadFloat3(&translation));
+}
+
+static void CollectLightsFromNode(
+    const tinygltf::Model& model,
+    int nodeIndex,
+    DirectX::XMMATRIX parentWorldMatrix,
+    const std::vector<LightData>& lightTemplates,
+    std::vector<LightData>& outLights)
+{
+    const tinygltf::Node& node = model.nodes[nodeIndex];
+    DirectX::XMMATRIX worldMatrix = ComputeNodeLocalMatrix(node) * parentWorldMatrix;
+
+    if (node.light >= 0)
+    {
+        LightData light = lightTemplates.at(node.light);
+
+        DirectX::XMVECTOR pos = DirectX::XMVector3Transform(
+            DirectX::XMVectorSet(0.0f, 0.0f, 0.0f, 1.0f), worldMatrix);
+        DirectX::XMStoreFloat3(&light.position, pos);
+
+        // glTF lights emit along local -Z
+        DirectX::XMVECTOR dir = DirectX::XMVector3Normalize(DirectX::XMVector3TransformNormal(
+            DirectX::XMVectorSet(0.0f, 0.0f, -1.0f, 0.0f), worldMatrix));
+        DirectX::XMStoreFloat3(&light.direction, dir);
+
+        outLights.emplace_back(light);
+    }
+
+    for (int childIndex : node.children)
+    {
+        CollectLightsFromNode(model, childIndex, worldMatrix, lightTemplates, outLights);
+    }
+}
+
+static void LoadLights(const tinygltf::Model& model, SceneBuilder& sceneBuilder)
+{
+    const std::unordered_map<std::string, LightType> lightTypeMap = {
+        {"point", Point},
+        {"directional", Directional},
+        {"spot", Spot}
+    };
+
+    std::vector<LightData> lightTemplates;
+    for (const auto& gltf_light : model.lights)
+    {
+        LightData lightData;
+        lightData.type = lightTypeMap.at(gltf_light.type);
+        lightData.position = {0, 0, 0};
+        lightData.direction = {0, 0, -1};
+        lightData.color = { static_cast<float>(gltf_light.color[0]), static_cast<float>(gltf_light.color[1]), static_cast<float>(gltf_light.color[2]) };
+        lightData.intensity = static_cast<float>(gltf_light.intensity);
+        lightData.range = static_cast<float>(gltf_light.range);
+
+        if (lightData.type == Spot)
+        {
+            // TODO: Implement inner / outer cone angles.
+        }
+
+        lightTemplates.emplace_back(lightData);
+    }
+
+    std::vector<LightData> lightDataVector;
+
+    int defaultScene = model.defaultScene >= 0 ? model.defaultScene : 0;
+    const auto& sceneRoots = model.scenes[defaultScene].nodes;
+    for (int rootIndex : sceneRoots)
+    {
+        CollectLightsFromNode(model, rootIndex, DirectX::XMMatrixIdentity(), lightTemplates, lightDataVector);
+    }
+
+    if (lightDataVector.empty())
+    {
+        LightData lightData;
+        lightData.type = Directional;
+        lightData.position = {0, 0, 0};
+        lightData.direction = {0, -0.7071f, -0.7071f};
+        lightData.color = {1, 1, 1};
+        lightData.intensity = 1.0f;
+        lightData.range = 0.0f;
+        sceneBuilder.AddLightData(lightData);
+        return;
+    }
+
+    for (const auto& light : lightDataVector)
+    {
+        sceneBuilder.AddLightData(light);
+    }
+}
+
 std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId& assetId)
 {
     spdlog::info("Loading scene {}", assetId.AsString());
@@ -479,6 +587,8 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
         scene_builder.AddModel(current_model);
     }
 
+    LoadLights(model, scene_builder);
+    
     auto vertex_index_pair = renderer.CreateSceneResources(vertices, indices);
     auto vertex_buffer = vertex_index_pair.first;
     auto index_buffer = vertex_index_pair.second;

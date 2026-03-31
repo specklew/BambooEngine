@@ -13,13 +13,15 @@
 #include "Resources/ShaderBindingTable.h"
 #include "SceneResources/Primitive.h"
 #include "SceneResources/Scene.h"
+#include "Utils/PassConstants.h"
 
 
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
                               std::shared_ptr<Scene> initialScene,
                               Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> cbvSrvUavHeap,
-                              Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer)
+                              Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer,
+                              std::shared_ptr<PassConstants> passConstants)
 {
     spdlog::info("Initializing raytracer pass...");
     
@@ -28,6 +30,7 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
     m_srvUavHeap = cbvSrvUavHeap;
     m_currentScene = initialScene;
     m_randomBuffer = randomBuffer;
+    m_passConstants = passConstants;
 
     InitializeRaytracingPipeline();
     CreateRaytracingOutputBuffer();
@@ -48,10 +51,12 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
     m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(3, m_randomBuffer->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(4, m_currentScene->GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
 
     uint32_t time;
     memcpy(&time, &m_time, sizeof(float));
-    m_commandList->SetComputeRoot32BitConstant(4, time, 0);
+    m_commandList->SetComputeRoot32BitConstant(5, time, 0);
+    m_commandList->SetComputeRootConstantBufferView(6, m_passConstants->GetGpuVirtualAddress());
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -174,7 +179,7 @@ void RaytracePass::InitializeRaytracingPipeline()
         lib->DefineExport(m_missShaderName.c_str(), m_missShaderName.c_str());
     }
 
-    // 3. Hit shader DXIL
+    // 3a. Hit shader DXIL
     m_hitShaderName = L"Hit";
     {
         auto lib =  raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
@@ -183,13 +188,39 @@ void RaytracePass::InitializeRaytracingPipeline()
         lib->DefineExport(m_hitShaderName.c_str(), m_hitShaderName.c_str());
     }
 
-    // 4. Hit group
+    // 3n. Shadow hit shader DXIL
+    m_hitShadowShaderName = L"ShadowHit";
+    {
+        auto lib =  raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+        D3D12_SHADER_BYTECODE libdxil = CD3DX12_SHADER_BYTECODE(m_hitShadowShaderBlob->GetBufferPointer(), m_hitShadowShaderBlob->GetBufferSize());
+        lib->SetDXILLibrary(&libdxil);
+        lib->DefineExport(m_hitShadowShaderName.c_str(), m_hitShadowShaderName.c_str());
+    }
+
+    // 3m. Shadow miss shader DXIL
+    m_missShadowShaderName = L"ShadowMiss";
+    {
+        auto lib = raytracingPipeline.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+        D3D12_SHADER_BYTECODE libdxil = CD3DX12_SHADER_BYTECODE(m_missShadowShaderBlob->GetBufferPointer(), m_missShadowShaderBlob->GetBufferSize());
+        lib->SetDXILLibrary(&libdxil);
+        lib->DefineExport(m_missShadowShaderName.c_str(), m_missShadowShaderName.c_str());
+    }
+
+    // 4. Hit groups - primary, shadow
     spdlog::debug("Adding hit group to pipeline");
-    m_hitGroupName = L"HitGroup";
+    m_hitGroupPrimaryName = L"PrimaryHitGroup";
     {
         auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
         hitGroup->SetClosestHitShaderImport(m_hitShaderName.c_str());
-        hitGroup->SetHitGroupExport(m_hitGroupName.c_str());
+        hitGroup->SetHitGroupExport(m_hitGroupPrimaryName.c_str());
+        hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
+    }
+
+    m_hitGroupShadowName = L"ShadowHitGroup";
+    {
+        auto hitGroup = raytracingPipeline.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+        hitGroup->SetAnyHitShaderImport(m_hitShadowShaderName.c_str());
+        hitGroup->SetHitGroupExport(m_hitGroupShadowName.c_str());
         hitGroup->SetHitGroupType(D3D12_HIT_GROUP_TYPE_TRIANGLES);
     }
     
@@ -207,21 +238,31 @@ void RaytracePass::InitializeRaytracingPipeline()
     {
         auto localRootSignatureSubObj = raytracingPipeline.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
         localRootSignatureSubObj->SetRootSignature(m_missSignature.Get());
-        
+
         auto rootSignatureAssociation = raytracingPipeline.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
         rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignatureSubObj);
         rootSignatureAssociation->AddExport(m_missShaderName.c_str());
+        rootSignatureAssociation->AddExport(m_missShadowShaderName.c_str());
     }
 
     {
         auto localRootSignatureSubObj = raytracingPipeline.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
-        localRootSignatureSubObj->SetRootSignature(m_hitSignature.Get());
+        localRootSignatureSubObj->SetRootSignature(m_hitPrimarySignature.Get());
 
         auto rootSignatureAssociation = raytracingPipeline.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
         rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignatureSubObj);
         
-        rootSignatureAssociation->AddExport(m_hitGroupName.c_str());
+        rootSignatureAssociation->AddExport(m_hitGroupPrimaryName.c_str());
+    }
+
+    {
+        auto localRootSignatureSubObj = raytracingPipeline.CreateSubobject<CD3DX12_LOCAL_ROOT_SIGNATURE_SUBOBJECT>();
+        localRootSignatureSubObj->SetRootSignature(m_hitShadowSignature.Get());
+
+        auto rootSignatureAssociation = raytracingPipeline.CreateSubobject<CD3DX12_SUBOBJECT_TO_EXPORTS_ASSOCIATION_SUBOBJECT>();
+        rootSignatureAssociation->SetSubobjectToAssociate(*localRootSignatureSubObj);
         
+        rootSignatureAssociation->AddExport(m_hitGroupShadowName.c_str());
     }
 
     {
@@ -233,7 +274,7 @@ void RaytracePass::InitializeRaytracingPipeline()
     spdlog::debug("Setting raytracing shader configuration");
     {
         auto shaderConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-        uint32_t maxPayloadSize = 4 * sizeof(float); // RGB + distance
+        uint32_t maxPayloadSize = 5 * sizeof(float); // RGB + distance + bounce count
         uint32_t maxAttributeSize = 2 * sizeof(float); // barycentric coordinates
         shaderConfig->Config(maxPayloadSize, maxAttributeSize);
     }
@@ -261,11 +302,16 @@ void RaytracePass::CreateRootSignatures()
     m_missShaderBlob = rm.shaders.GetResource(missShader).bytecode;
     auto hitShader = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.ch.shader"));
     m_hitShaderBlob = rm.shaders.GetResource(hitShader).bytecode;
+    auto hitShadow = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.shadowhit.shader"));
+    m_hitShadowShaderBlob = rm.shaders.GetResource(hitShadow).bytecode;
+    auto missShadow = rm.GetOrLoadShader(AssetId("resources/shaders/raytracing.shadowmiss.shader"));
+    m_missShadowShaderBlob = rm.shaders.GetResource(missShadow).bytecode;
 
     spdlog::debug("Creating raytracing root signatures");
     CreateRayGenSignature();
     CreateMissSignature();
-    CreateHitSignature();
+    CreatePrimaryHitSignature();
+    CreateShadowHitSignature();
     CreateGlobalRootSignature();
 }
 
@@ -297,7 +343,7 @@ void RaytracePass::CreateMissSignature()
     ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_missSignature)));
 }
 
-void RaytracePass::CreateHitSignature()
+void RaytracePass::CreatePrimaryHitSignature()
 {
     spdlog::debug("Creating hit root signature");
     
@@ -308,7 +354,21 @@ void RaytracePass::CreateHitSignature()
     Microsoft::WRL::ComPtr<ID3DBlob> error;
 
     ThrowIfFailed(D3D12SerializeRootSignature(&localHitSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
-    ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_hitSignature)));
+    ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_hitPrimarySignature)));
+}
+
+void RaytracePass::CreateShadowHitSignature()
+{
+    spdlog::debug("Creating shadow hit root signature");
+    
+    CD3DX12_ROOT_SIGNATURE_DESC localHitSignatureDesc(0, nullptr);
+    localHitSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+    Microsoft::WRL::ComPtr<ID3DBlob> blob;
+    Microsoft::WRL::ComPtr<ID3DBlob> error;
+
+    ThrowIfFailed(D3D12SerializeRootSignature(&localHitSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
+    ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_hitShadowSignature)));
 }
 
 void RaytracePass::CreateGlobalRootSignature()
@@ -350,7 +410,7 @@ void RaytracePass::CreateGlobalRootSignature()
     index_range.OffsetInDescriptorsFromTableStart = 5;
 
     D3D12_DESCRIPTOR_RANGE texture_range;
-    texture_range.BaseShaderRegister = 6;
+    texture_range.BaseShaderRegister = 7;
     texture_range.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
     texture_range.RegisterSpace = 0;
     texture_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -359,14 +419,16 @@ void RaytracePass::CreateGlobalRootSignature()
 
     D3D12_DESCRIPTOR_RANGE ranges[6] = {cbvRange, rtRange, tlasRange, vertex_range, index_range, texture_range};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[5];
+    CD3DX12_ROOT_PARAMETER rootParameters[7];
     rootParameters[0].InitAsDescriptorTable(6, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
-    rootParameters[3].InitAsShaderResourceView(5, 0);
-    rootParameters[4].InitAsConstants(1, 1);
+    rootParameters[3].InitAsShaderResourceView(5, 0); // Random buffer
+    rootParameters[4].InitAsShaderResourceView(6, 0); // Lights struct buffer
+    rootParameters[5].InitAsConstants(1, 1);
+    rootParameters[6].InitAsConstantBufferView(3, 0); // Pass constants buffer
     
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(5, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(7, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -436,7 +498,9 @@ void RaytracePass::CreateShaderBindingTable()
     SBTDescriptor sbt_desc = {};
     sbt_desc.RayGenShaders.push_back({m_rayGenShaderName, {}});
     sbt_desc.MissShaders.push_back({m_missShaderName, {}});
-    sbt_desc.HitShaders.push_back({m_hitGroupName, {}});
+    sbt_desc.MissShaders.push_back({m_missShadowShaderName, {}});
+    sbt_desc.HitShaders.push_back({m_hitGroupPrimaryName, {}});
+    sbt_desc.HitShaders.push_back({m_hitGroupShadowName, {}});
 
     m_shaderBindingTable = std::make_shared<ShaderBindingTable>(m_device, m_rtStateObjectProperties, sbt_desc);
 

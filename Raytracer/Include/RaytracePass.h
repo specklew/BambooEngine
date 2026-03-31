@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "Resources/StructuredBuffer.h"
 
+class PassConstants;
 class Renderer;
 class Scene;
 class ShaderBindingTable;
@@ -14,7 +15,8 @@ public:
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
         std::shared_ptr<Scene> initialScene,
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvUavHeap,
-        Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer);
+        Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer,
+        std::shared_ptr<PassConstants> passConstants);
     
     void Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget);
     void Update(double elapsedTime, double totalTime);
@@ -28,7 +30,8 @@ private:
     void CreateRootSignatures();
     void CreateRayGenSignature();
     void CreateMissSignature();
-    void CreateHitSignature();
+    void CreatePrimaryHitSignature();
+    void CreateShadowHitSignature();
     void CreateGlobalRootSignature();
 
     void CreateRaytracingOutputBuffer();
@@ -44,17 +47,23 @@ private:
     Microsoft::WRL::ComPtr<IDxcBlob> m_rayGenShaderBlob;
     Microsoft::WRL::ComPtr<IDxcBlob> m_missShaderBlob;
     Microsoft::WRL::ComPtr<IDxcBlob> m_hitShaderBlob;
+    Microsoft::WRL::ComPtr<IDxcBlob> m_hitShadowShaderBlob;
+    Microsoft::WRL::ComPtr<IDxcBlob> m_missShadowShaderBlob;
     std::wstring m_rayGenShaderName;
     std::wstring m_missShaderName;
+    std::wstring m_missShadowShaderName;
     std::wstring m_hitShaderName;
-    std::wstring m_hitGroupName;
+    std::wstring m_hitShadowShaderName;
+    std::wstring m_hitGroupPrimaryName;
+    std::wstring m_hitGroupShadowName;
 
     Microsoft::WRL::ComPtr<ID3D12StateObject> m_rtStateObject;
     Microsoft::WRL::ComPtr<ID3D12StateObjectProperties> m_rtStateObjectProperties;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rayGenSignature;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_missSignature;
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_hitSignature;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_hitPrimarySignature;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_hitShadowSignature;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_globalRootSignature;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_outputResource;
@@ -69,6 +78,8 @@ private:
     D3D12_CPU_DESCRIPTOR_HANDLE m_geometryInfoHandle;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_randomBuffer;
+
+    std::shared_ptr<PassConstants> m_passConstants;
 
     float m_time = 0.0f;
 };

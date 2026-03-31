@@ -4,7 +4,6 @@
 
 #include <algorithm>
 
-#include "AccelerationStructures.h"
 #include "Camera.h"
 #include "Utils/CVars.h"
 #include "SceneResources/GameObject.h"
@@ -103,7 +102,7 @@ void Renderer::Initialize()
 	
 	m_randomBuffer = CreateStructuredBuffer<float>(randomData);
 	m_raytracePass = std::make_shared<RaytracePass>();
-	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource());
+	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
 	spdlog::info("Renderer initialized successfully.");
 
@@ -218,6 +217,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.debugMode = static_cast<int>(g_rasterizationDebugMode.Get());
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
+	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
 	m_passConstants->Map();
 }
 

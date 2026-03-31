@@ -2,6 +2,8 @@
 #define BRDF_HLSL
 
 static const float PI = 3.14159265359;
+static const float EPSILON = 0.001;
+static const float3 DIELECTRIC_F0 = float3(0.04, 0.04, 0.04);
 
 // ---- Cook-Torrance BRDF components ----
 
@@ -13,21 +15,37 @@ float DistributionGGX(float NdotH, float roughness)
     return a2 / (PI * denom * denom);
 }
 
-float GeometrySchlickGGX(float NdotV, float roughness)
+float3 FresnelSchlick(float cosTheta, float3 F0)
+{
+    return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
+}
+
+// Smith G1 for direct lighting: k = (roughness + 1)^2 / 8
+float GeometrySchlickGGX(float NdotX, float roughness)
 {
     float r = roughness + 1.0;
     float k = (r * r) / 8.0;
-    return NdotV / (NdotV * (1.0 - k) + k);
+    return NdotX / (NdotX * (1.0 - k) + k);
 }
 
+// Joint Smith masking-shadowing for direct/analytic lighting
 float GeometrySmith(float NdotV, float NdotL, float roughness)
 {
     return GeometrySchlickGGX(NdotV, roughness) * GeometrySchlickGGX(NdotL, roughness);
 }
 
-float3 FresnelSchlick(float cosTheta, float3 F0)
+// Smith G1 for path tracing / IBL: k = a^2 / 2
+float SmithG1_GGX(float NdotX, float roughness)
 {
-    return F0 + (1.0 - F0) * pow(saturate(1.0 - cosTheta), 5.0);
+    float a = roughness * roughness;
+    float k = (a * a) / 2.0;
+    return NdotX / (NdotX * (1.0 - k) + k);
+}
+
+// Joint Smith masking-shadowing for path tracing / IBL
+float SmithG_GGX(float NdotV, float NdotL, float roughness)
+{
+    return SmithG1_GGX(NdotV, roughness) * SmithG1_GGX(NdotL, roughness);
 }
 
 // ---- Tangent-space utilities ----
@@ -46,6 +64,7 @@ float3 TangentToWorld(float3 dir, float3 N, float3 T, float3 B)
 
 // ---- Importance sampling ----
 
+// Samples a half-vector from the GGX distribution. PDF = D(H) * NdotH.
 float3 ImportanceSampleGGX(float2 xi, float3 N, float roughness)
 {
     float a = roughness * roughness;
@@ -62,6 +81,7 @@ float3 ImportanceSampleGGX(float2 xi, float3 N, float roughness)
     return TangentToWorld(H_tangent, N, T, B);
 }
 
+// Samples a direction from a cosine-weighted hemisphere. PDF = NdotL / PI.
 float3 CosineSampleHemisphere(float2 xi, float3 N)
 {
     float phi = 2.0 * PI * xi.x;

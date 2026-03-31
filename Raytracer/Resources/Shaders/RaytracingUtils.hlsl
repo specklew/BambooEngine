@@ -1,9 +1,27 @@
 #ifndef RAYTRACING_UTILS_HLSL
 #define RAYTRACING_UTILS_HLSL
 
-#define MAX_TEXTURES 256
+#define MAX_TEXTURES 512
+#define VERTEX_STRIDE 44 // float3 pos + float3 normal + float3 tangent + float2 uv
+
+static const int MAX_BOUNCES = 2;
+static const int SAMPLES_PER_PIXEL = 16;
+static const float MIN_ROUGHNESS = 0.04;
+static const float RAY_TMIN = 0.01;
+static const float RAY_TMAX = 1000.0;
 
 // ---- Struct definitions ----
+
+struct Payload
+{
+    float4 color;
+    uint bounceCount;
+};
+
+struct Attributes
+{
+    float2 barycentrics;
+};
 
 struct GeometryInfo
 {
@@ -20,6 +38,16 @@ struct InstanceInfo
     float metallicFactor;
     float roughnessFactor;
     float4 baseColorFactor;
+};
+
+struct LightData
+{
+    uint type; // 0 = directional, 1 = point, 2 = spot (not implemented)
+    float3 position;
+    float3 direction;
+    float3 color;
+    float intensity;
+    float range;
 };
 
 struct TriangleData
@@ -64,13 +92,17 @@ struct HitData
 
 // ---- Resource declarations ----
 
+RWTexture2D<float4> gOutput : register(u0);
+RaytracingAccelerationStructure SceneBVH : register(t0);
+
 ByteAddressBuffer g_vertices : register(t1);
 ByteAddressBuffer g_indices : register(t2);
 
 StructuredBuffer<GeometryInfo> g_geometryInfo : register(t3);
 StructuredBuffer<InstanceInfo> g_instanceInfo : register(t4);
+StructuredBuffer<LightData> g_lightData : register(t6);
 
-Texture2D g_textures[MAX_TEXTURES] : register(t6);
+Texture2D g_textures[MAX_TEXTURES] : register(t7);
 
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);

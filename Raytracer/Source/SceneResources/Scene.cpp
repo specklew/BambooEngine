@@ -33,6 +33,11 @@ void SceneBuilder::AddChild(const std::shared_ptr<SceneNode>& parent, const std:
     parent->AddChild(child);
 }
 
+void SceneBuilder::AddLightData(const LightData& lightData)
+{
+    m_lightData.push_back(lightData);
+}
+
 void SceneBuilder::SetName(const std::string& name)
 {
     m_name = name;
@@ -126,6 +131,11 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
     return renderer.CreateStructuredBuffer(instances_info);
 }
 
+static std::shared_ptr<StructuredBuffer<LightData>> CreateLightDataBuffer(Renderer& renderer, const std::vector<LightData>& lightData)
+{
+    return renderer.CreateStructuredBuffer(lightData);
+}
+
 std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
 {
     assert(!m_isBuilt && "Scene has already been built");
@@ -137,6 +147,7 @@ std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
     
     auto geo_info_buffer = CreateGeometryInfoBuffer(renderer, all_prims);
     auto instance_info_buffer = CreateInstanceInfoBuffer(renderer, m_gameObjects, all_prims);
+    auto light_data_buffer = CreateLightDataBuffer(renderer, m_lightData);
     
     Scene scene;
     scene.m_gameObjects = std::move(m_gameObjects);
@@ -148,6 +159,7 @@ std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
     scene.m_indexBuffer = std::move(m_indexBuffer);
     scene.m_geometryInfoBuffer = std::move(geo_info_buffer);
     scene.m_instanceInfoBuffer = std::move(instance_info_buffer);
+    scene.m_lightDataBuffer = std::move(light_data_buffer);
     
     return std::make_shared<Scene>(std::move(scene));
 }
