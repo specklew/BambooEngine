@@ -22,8 +22,18 @@ void GameObject::UpdateWorldMatrix() const
 {
     auto data_bucket = DirectX::XMFLOAT4X4{};
     DirectX::XMFLOAT4X4* mapped_data = &data_bucket;
-    
+
     m_worldMatrixBuffer->MapDataToWholeBuffer(reinterpret_cast<void**>(&mapped_data));
-    memcpy(&mapped_data[0], &m_worldMatrix, sizeof(DirectX::XMFLOAT4X4));
+
+    DirectX::XMMATRIX W = DirectX::XMLoadFloat4x4(&m_worldMatrix);
+
+    // Transpose for HLSL column-major cbuffer layout (row-vector mul convention)
+    DirectX::XMStoreFloat4x4(&mapped_data[0], DirectX::XMMatrixTranspose(W));
+
+    // Upload inverse WITHOUT transpose: HLSL reads it as transpose(W^-1) = (W^-1)^T,
+    // which is exactly the inverse-transpose needed for correct normal transforms.
+    DirectX::XMVECTOR det;
+    DirectX::XMStoreFloat4x4(&mapped_data[1], DirectX::XMMatrixInverse(&det, W));
+
     m_worldMatrixBuffer->Unmap();
 }

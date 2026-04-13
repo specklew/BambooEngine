@@ -12,7 +12,7 @@ float2 Random2D(float seed)
 {
     uint2 pixel = DispatchRaysIndex().xy;
     uint idx = pixel.x + pixel.y * DispatchRaysDimensions().y;
-    float base = g_random.Load(idx) + seed + time;
+    float base = g_random.Load(idx) + seed * 0.7548776662 + time;
 
     float r1 = frac(sin(base) * 43758.5453);
     float r2 = frac(cos(base + 1.0) * 22578.1459);

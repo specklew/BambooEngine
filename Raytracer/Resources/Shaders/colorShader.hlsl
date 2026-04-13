@@ -9,8 +9,6 @@ SamplerState gsamLinearClamp : register(s3);
 SamplerState gsamAnisotropicWrap : register(s4);
 SamplerState gsamAnisotropicClamp : register(s5);
 
-float3 directionOfLight = normalize(float3(-0.5, -0.5, -0.5));
-
 cbuffer CameraParams : register(b0)
 {
     float4x4 viewProj;
@@ -23,6 +21,7 @@ cbuffer CameraParams : register(b0)
 cbuffer ModelTransforms : register(b1)
 {
     float4x4 world;
+    float4x4 worldInvTranspose;
 }
 
 cbuffer Material : register(b2)
@@ -43,9 +42,8 @@ struct VertexIn
 {
     float3 PosL  : POSITION;
     float3 NormalL : NORMAL;
-    float3 TangentL : TANGENT;
+    float4 TangentL : TANGENT; // xyz = tangent, w = bitangent sign
     float2 TexCoord : TEXCOORD;
-    //float4 Color : COLOR;
 };
 
 struct VertexOut
@@ -53,7 +51,7 @@ struct VertexOut
     float4 PosH  : SV_POSITION;
     float3 PosW  : POSITION;
     float3 NormalW : NORMAL;
-    float3 TangentW : TANGENT;
+    float4 TangentW : TANGENT; // xyz = tangent, w = bitangent sign
     float2 TexCoord : TEXCOORD;
 };
 
@@ -61,23 +59,24 @@ VertexOut vertex(VertexIn vin)
 {
     VertexOut vout;
 
-    vout.NormalW = vin.NormalL;
     vout.TexCoord = vin.TexCoord;
-    
-    // Transform to world space.
 
-    // TODO: Something must not be right here. The multiplication should be reversed? (curr: world * posL, should it be posL * world)
+    // Transform to world space (row-vector convention: v * M)
     float4 posL = float4(vin.PosL, 1.0f);
-    float4 posW = mul(world, posL);
+    float4 posW = mul(posL, world);
     vout.PosW = posW.xyz;
     vout.PosH = mul(posW, viewProj);
 
+    // Normals require the inverse-transpose of the world matrix.
+    // worldInvTranspose is uploaded as W^{-1} without CPU transpose, so HLSL
+    // reads it as (W^{-1})^T. Using mul(M, v) applies (W^{-1})^T * n directly.
     float4 normalL = float4(vin.NormalL, 0.0f);
-    vout.NormalW = mul(world, normalL);
+    vout.NormalW = mul(worldInvTranspose, normalL).xyz;
 
-    float4 tangentL = float4(vin.TangentL, 0.0f);
-    vout.TangentW = mul(world, tangentL);
-    
+    // Tangent vectors transform with the world matrix (same as directions)
+    float4 tangentL = float4(vin.TangentL.xyz, 0.0f);
+    vout.TangentW = float4(mul(tangentL, world).xyz, vin.TangentL.w);
+
     return vout;
 }
 
@@ -85,6 +84,8 @@ VertexOut vertex(VertexIn vin)
 
 float4 pixel(VertexOut pin) : SV_Target
 {
+    float3 directionOfLight = normalize(float3(0.0f, -0.7071f, -0.7071f));
+    
     float2 uv = pin.TexCoord + float2(uvX, uvY);
 
     // Sample textures
@@ -95,7 +96,9 @@ float4 pixel(VertexOut pin) : SV_Target
 
     if (textureIndex != -1)
     {
-        textureAlbedo *= gTextures[textureIndex].Sample(gsamLinearWrap, uv);
+        float4 texColor = gTextures[textureIndex].Sample(gsamLinearWrap, uv);
+        texColor.rgb = pow(texColor.rgb, 2.2); // sRGB to linear
+        textureAlbedo *= texColor;
     }
     if (normalTextureIndex != -1)
     {
@@ -111,8 +114,8 @@ float4 pixel(VertexOut pin) : SV_Target
 
     // Build TBN — re-orthogonalize T against N to fix interpolation drift
     float3 N = normalize(pin.NormalW);
-    float3 T = normalize(pin.TangentW - dot(pin.TangentW, N) * N);
-    float3 B = cross(N, T);
+    float3 T = normalize(pin.TangentW.xyz - dot(pin.TangentW.xyz, N) * N);
+    float3 B = cross(N, T) * pin.TangentW.w;
     float3x3 TBN = float3x3(T, B, N);
 
     // Decode tangent-space normal from [0,1] to [-1,1] and bring to world space
@@ -135,7 +138,7 @@ float4 pixel(VertexOut pin) : SV_Target
 
     // PBR shading
     float3 albedo = textureAlbedo.rgb;
-    float3 L = normalize(float3(1, 0.5, 0.5));
+    float3 L = -directionOfLight;
     float3 V = normalize(cameraWorldPos - pin.PosW);
     float3 H = normalize(V + L);
 
@@ -156,12 +159,18 @@ float4 pixel(VertexOut pin) : SV_Target
     float3 kD = (1.0 - F) * (1.0 - metallic);
     float3 diffuse = kD * albedo / PI;
 
-    float3 lightColor = float3(1.0, 1.0, 1.0) * 3.0;
+    float3 lightColor = float3(1.0, 1.0, 1.0);
     float3 Lo = (diffuse + specular) * lightColor * NdotL;
 
     // Ambient
     float3 ambient = float3(0.03, 0.03, 0.03) * albedo;
     float3 color = ambient + Lo;
+
+    // ACES filmic tonemapping (Narkowicz 2015 fit)
+    color = saturate((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14));
+
+    // Linear to sRGB gamma
+    color = pow(color, 1.0 / 2.2);
 
     return float4(color, textureAlbedo.a);
 }

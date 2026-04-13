@@ -109,15 +109,15 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
 
         if (has_tangent)
         {
-            // glTF TANGENT is VEC4: xyz = tangent direction, w = handedness (+/-1). Stride is 4 floats.
-            // No support for handedness.
+            // glTF TANGENT is VEC4: xyz = tangent direction, w = handedness (+/-1)
             vertex.Tangent.x = tangents[i * 4 + 0];
             vertex.Tangent.y = tangents[i * 4 + 1];
             vertex.Tangent.z = tangents[i * 4 + 2];
+            vertex.Tangent.w = tangents[i * 4 + 3];
         }
         else
         {
-            vertex.Tangent = {0, 0, 0};  // Accumulated per-triangle in ComputeTangents
+            vertex.Tangent = {0, 0, 0, 1.0f};  // Accumulated per-triangle in ComputeTangents
         }
 
         outVertices.push_back(vertex);
@@ -210,11 +210,11 @@ static void ComputeTangents(std::vector<Vertex>& vertices, const std::vector<uin
         fvTexcOut[0] = v.Tex0.x; fvTexcOut[1] = v.Tex0.y;
     };
 
-    iface.m_setTSpaceBasic = [](const SMikkTSpaceContext* pContext, const float fvTangent[], const float /*fSign*/, const int iFace, const int iVert)
+    iface.m_setTSpaceBasic = [](const SMikkTSpaceContext* pContext, const float fvTangent[], const float fSign, const int iFace, const int iVert)
     {
         auto* data = static_cast<UserData*>(pContext->m_pUserData);
         Vertex& v = (*data->vertices)[(*data->indices)[iFace * 3 + iVert]];
-        v.Tangent = {fvTangent[0], fvTangent[1], fvTangent[2]};
+        v.Tangent = {fvTangent[0], fvTangent[1], fvTangent[2], fSign};
     };
 
     SMikkTSpaceContext ctx = { &iface, &userData };
@@ -543,9 +543,9 @@ static void LoadLights(const tinygltf::Model& model, SceneBuilder& sceneBuilder)
         LightData lightData;
         lightData.type = Directional;
         lightData.position = {0, 0, 0};
-        lightData.direction = {0, -0.7071f, -0.7071f};
+        lightData.direction = {-0.5f, -0.7071f, -0.7071f};
         lightData.color = {1, 1, 1};
-        lightData.intensity = 1.0f;
+        lightData.intensity = 3.0f;
         lightData.range = 0.0f;
         sceneBuilder.AddLightData(lightData);
         return;

@@ -2,10 +2,10 @@
 #define RAYTRACING_UTILS_HLSL
 
 #define MAX_TEXTURES 512
-#define VERTEX_STRIDE 44 // float3 pos + float3 normal + float3 tangent + float2 uv
+#define VERTEX_STRIDE 48 // float3 pos + float3 normal + float4 tangent + float2 uv
 
-static const int MAX_BOUNCES = 2;
-static const int SAMPLES_PER_PIXEL = 16;
+static const int MAX_BOUNCES = 3;
+static const int SAMPLES_PER_PIXEL = 1;
 static const float MIN_ROUGHNESS = 0.04;
 static const float RAY_TMIN = 0.01;
 static const float RAY_TMAX = 1000.0;
@@ -14,8 +14,10 @@ static const float RAY_TMAX = 1000.0;
 
 struct Payload
 {
-    float4 color;
+    float3 color;
+    float3 throughput;
     uint bounceCount;
+    uint seed;
 };
 
 struct Attributes
@@ -73,9 +75,9 @@ struct HitData
     float3 tri_n0;
     float3 tri_n1;
     float3 tri_n2;
-    float3 tri_t0;
-    float3 tri_t1;
-    float3 tri_t2;
+    float4 tri_t0; // xyz = tangent, w = bitangent sign
+    float4 tri_t1;
+    float4 tri_t2;
     float3 tri_v0;
     float3 tri_v1;
     float3 tri_v2;
@@ -85,7 +87,7 @@ struct HitData
 
     // Hit point data
     float3 normal;
-    float3 tangent;
+    float4 tangent; // xyz = tangent, w = bitangent sign
     float3 position;
     float2 uv;
 };
@@ -141,28 +143,33 @@ float3 GetVertexFloat3Attribute(uint byteOffset)
     return asfloat(g_vertices.Load3(byteOffset));
 }
 
+float4 GetVertexFloat4Attribute(uint byteOffset)
+{
+    return asfloat(g_vertices.Load4(byteOffset));
+}
+
 HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, float2 barycentrics)
 {
     HitData hit_data;
 
     hit_data.tri_indices = Load3x32BitIndices(triangleIndex, indexOffset) + vertexOffset;
 
-    // Vertex stride: 44 bytes (float3 pos + float3 normal + float3 tangent + float2 uv)
-    hit_data.tri_v0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 44 + 0);
-    hit_data.tri_v1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 44 + 0);
-    hit_data.tri_v2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 44 + 0);
+    // Vertex stride: 48 bytes (float3 pos + float3 normal + float4 tangent + float2 uv)
+    hit_data.tri_v0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * VERTEX_STRIDE + 0);
+    hit_data.tri_v1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * VERTEX_STRIDE + 0);
+    hit_data.tri_v2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * VERTEX_STRIDE + 0);
 
-    hit_data.tri_n0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 44 + 12);
-    hit_data.tri_n1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 44 + 12);
-    hit_data.tri_n2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 44 + 12);
+    hit_data.tri_n0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * VERTEX_STRIDE + 12);
+    hit_data.tri_n1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * VERTEX_STRIDE + 12);
+    hit_data.tri_n2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * VERTEX_STRIDE + 12);
 
-    hit_data.tri_t0 = GetVertexFloat3Attribute(hit_data.tri_indices.x * 44 + 24);
-    hit_data.tri_t1 = GetVertexFloat3Attribute(hit_data.tri_indices.y * 44 + 24);
-    hit_data.tri_t2 = GetVertexFloat3Attribute(hit_data.tri_indices.z * 44 + 24);
+    hit_data.tri_t0 = GetVertexFloat4Attribute(hit_data.tri_indices.x * VERTEX_STRIDE + 24);
+    hit_data.tri_t1 = GetVertexFloat4Attribute(hit_data.tri_indices.y * VERTEX_STRIDE + 24);
+    hit_data.tri_t2 = GetVertexFloat4Attribute(hit_data.tri_indices.z * VERTEX_STRIDE + 24);
 
-    hit_data.tri_uv0 = GetVertexFloat2Attribute(hit_data.tri_indices.x * 44 + 36);
-    hit_data.tri_uv1 = GetVertexFloat2Attribute(hit_data.tri_indices.y * 44 + 36);
-    hit_data.tri_uv2 = GetVertexFloat2Attribute(hit_data.tri_indices.z * 44 + 36);
+    hit_data.tri_uv0 = GetVertexFloat2Attribute(hit_data.tri_indices.x * VERTEX_STRIDE + 40);
+    hit_data.tri_uv1 = GetVertexFloat2Attribute(hit_data.tri_indices.y * VERTEX_STRIDE + 40);
+    hit_data.tri_uv2 = GetVertexFloat2Attribute(hit_data.tri_indices.z * VERTEX_STRIDE + 40);
 
     hit_data.tri_normal = normalize(cross(hit_data.tri_v2 - hit_data.tri_v0, hit_data.tri_v1 - hit_data.tri_v0));
 
@@ -170,7 +177,9 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
 
     hit_data.uv     = bary.x * hit_data.tri_uv0 + bary.y * hit_data.tri_uv1 + bary.z * hit_data.tri_uv2;
     hit_data.normal  = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
-    hit_data.tangent = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_t0 + bary.y * hit_data.tri_t1 + bary.z * hit_data.tri_t2)));
+
+    float3 interpTangent = normalize(bary.x * hit_data.tri_t0.xyz + bary.y * hit_data.tri_t1.xyz + bary.z * hit_data.tri_t2.xyz);
+    hit_data.tangent = float4(normalize(mul((float3x3)ObjectToWorld3x4(), interpTangent)), hit_data.tri_t0.w);
 
     hit_data.position = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
 
@@ -250,8 +259,8 @@ float3 SampleWorldSpaceNormal(HitData data, float2 ddxUV, float2 ddyUV)
     float3 normalTS = SampleTexture(normalTexIdx, data.uv, ddxUV, ddyUV).xyz * 2.0 - 1.0;
 
     float3 N = data.normal;
-    float3 T = normalize(data.tangent - dot(data.tangent, N) * N);
-    float3 B = cross(N, T);
+    float3 T = normalize(data.tangent.xyz - dot(data.tangent.xyz, N) * N);
+    float3 B = cross(N, T) * data.tangent.w;
     float3x3 TBN = float3x3(T, B, N);
 
     return normalize(mul(normalTS, TBN));

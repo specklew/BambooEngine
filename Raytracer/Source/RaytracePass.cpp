@@ -274,7 +274,7 @@ void RaytracePass::InitializeRaytracingPipeline()
     spdlog::debug("Setting raytracing shader configuration");
     {
         auto shaderConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
-        uint32_t maxPayloadSize = 5 * sizeof(float); // RGB + distance + bounce count
+        uint32_t maxPayloadSize = 8 * sizeof(float); // RGB 3 + throughput 3 + bounce count 1 + seed 1
         uint32_t maxAttributeSize = 2 * sizeof(float); // barycentric coordinates
         shaderConfig->Config(maxPayloadSize, maxAttributeSize);
     }
