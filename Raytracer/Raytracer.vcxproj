@@ -173,6 +173,7 @@
     <ClInclude Include="Vendor\imgui\backends\imgui_impl_vulkan.h" />
     <ClInclude Include="Vendor\imgui\backends\imgui_impl_wgpu.h" />
     <ClInclude Include="Vendor\imgui\backends\imgui_impl_win32.h" />
+    <ClInclude Include="Vendor\imgui\ImGuizmo.h" />
     <ClInclude Include="Vendor\imgui\examples\example_allegro5\imconfig_allegro5.h" />
     <ClInclude Include="Vendor\imgui\examples\libs\emscripten\emscripten_mainloop_stub.h" />
     <ClInclude Include="Vendor\imgui\examples\libs\glfw\include\GLFW\glfw3.h" />
@@ -392,6 +393,9 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Vendor\ImGui\misc\cpp\imgui_stdlib.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="Vendor\imgui\ImGuizmo.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Vendor\tinygltf\tiny_gltf.cc">

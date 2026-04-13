@@ -889,13 +889,12 @@ void CVarSystemImpl::EditParameter(CVarParameter* p, float textWidth)
         		int selectedIndex = std::clamp(static_cast<int>(enumCVar->index), 0, static_cast<int>(enumCVar->values.size() - 1));
         		// Render ImGui combo box
         		ImGui::PushID(p->name.c_str());
-        		if (ImGui::Combo(("##" + p->name).c_str(), &selectedIndex, 
-								 [](void* data, int idx, const char** out_text) {
+        		if (ImGui::Combo(("##" + p->name).c_str(), &selectedIndex,
+								 [](void* data, int idx) -> const char* {
 									 auto* names = static_cast<std::vector<std::string>*>(data);
-									 if (out_text) *out_text = (*names)[idx].c_str();
-									 return true;
-								 }, 
-								 static_cast<void*>(&enumCVar->names), 
+									 return (*names)[idx].c_str();
+								 },
+								 static_cast<void*>(&enumCVar->names),
 								 static_cast<int>(enumCVar->names.size())))
         		{
         			CVarSystem::Get()->SetCVarEnum(hash, selectedIndex);

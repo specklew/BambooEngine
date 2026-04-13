@@ -22,13 +22,20 @@ float3 GetShadowRayDirection(float3 shadingPoint, LightData light)
     return float3(0, -1, 0);
 }
 
+float GetShadowRayTMax(float3 shadingPoint, LightData light)
+{
+    if (light.type == 1) // Point — stop at light position to avoid back-side occlusion
+        return length(light.position - shadingPoint);
+    return RAY_TMAX; // Directional — infinite
+}
+
 float TraceShadow(float3 shadingPoint, LightData light)
 {
     RayDesc shadowRay;
     shadowRay.Origin = shadingPoint;
     shadowRay.Direction = GetShadowRayDirection(shadingPoint, light);
     shadowRay.TMin = RAY_TMIN;
-    shadowRay.TMax = RAY_TMAX;
+    shadowRay.TMax = GetShadowRayTMax(shadingPoint, light);
 
     ShadowPayload payload = { 0.0 }; // Start fully lit
     TraceRay(SceneBVH, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, ~0, 1, 1, 1, shadowRay, payload);

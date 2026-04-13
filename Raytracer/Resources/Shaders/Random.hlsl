@@ -1,23 +1,21 @@
 #ifndef RANDOM_HLSL
 #define RANDOM_HLSL
 
-StructuredBuffer<float> g_random : register(t5);
-
-cbuffer Constants : register(b1)
+// PCG hash — high quality, cheap
+uint pcg_hash(uint state)
 {
-    float time;
+    state = state * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
-// Range [0,1)
-float2 Random2D(float seed)
+// Returns float2 in [0, 1)
+float2 Random2D(uint seed)
 {
-    uint2 pixel = DispatchRaysIndex().xy;
-    uint idx = pixel.x + pixel.y * DispatchRaysDimensions().x;
-    float base = g_random.Load(idx) + seed * 0.7548776662 + time;
-
-    float r1 = frac(sin(base) * 43758.5453);
-    float r2 = frac(cos(base + 1.0) * 22578.1459);
-    return float2(abs(r1), abs(r2));
+    return float2(
+        float(pcg_hash(seed))                * (1.0 / 4294967296.0),
+        float(pcg_hash(seed ^ 0x9e3779b9u))  * (1.0 / 4294967296.0)
+    );
 }
 
 #endif // RANDOM_HLSL

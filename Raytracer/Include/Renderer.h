@@ -183,6 +183,8 @@ private:
 
 	std::shared_ptr<PassConstants> m_passConstants;
 	std::shared_ptr<StructuredBuffer<float>> m_randomBuffer;
+
+	int m_selectedLightIndex = -1;
 };
 
 template <typename T>

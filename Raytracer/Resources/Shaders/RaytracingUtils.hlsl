@@ -188,10 +188,10 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
 
 // ---- Ray utilities ----
 
-inline void GenerateCameraRay(uint2 index, uint sampleIndex, out float3 origin, out float3 direction)
+inline void GenerateCameraRay(uint2 index, uint seed, out float3 origin, out float3 direction)
 {
     float2 dims = float2(DispatchRaysDimensions().xy);
-    float2 rand_offset = Random2D(sampleIndex) - 0.5;
+    float2 rand_offset = Random2D(seed) - 0.5;
     float2 d = (((index + 0.5f + rand_offset) / dims) * 2.f - 1.f);
 
     origin = mul(viewI, float4(0, 0, 0, 1)).xyz;

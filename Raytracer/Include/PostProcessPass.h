@@ -1,5 +1,13 @@
 #pragma once
 
+struct PostProcessParams
+{
+    float exposure   = 1.0f;
+    float contrast   = 1.0f;
+    float saturation = 1.0f;
+    float lift       = 0.0f;
+};
+
 class PostProcessPass
 {
 public:
@@ -10,7 +18,7 @@ public:
     void Render(
         const Microsoft::WRL::ComPtr<ID3D12Resource>& input,
         const Microsoft::WRL::ComPtr<ID3D12Resource>& backBuffer,
-        float exposure = 1.0f);
+        const PostProcessParams& params = {});
 
     void OnResize();
 

@@ -10,24 +10,30 @@
 void RayGen()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
-    
+    uint2 dims = DispatchRaysDimensions().xy;
+    uint pixelId = launchIndex.x + launchIndex.y * dims.x;
+
     float3 accumulated = float3(0, 0, 0);
-    for (int i = 0; i < samplesPerPixel; i++)
+    for (uint i = 0; i < (uint)samplesPerPixel; i++)
     {
+        // Unique seed per pixel, sample, and frame — fully independent across all three
+        uint seed = pcg_hash(pixelId ^ (i * 2654435761u) ^ (frameIndex * 805459861u));
+
         float3 origin, direction;
-        GenerateCameraRay(launchIndex, i, origin, direction);
+        GenerateCameraRay(launchIndex, seed, origin, direction);
+        seed = pcg_hash(seed);  // advance: camera ray and bounce 0 now use different xi
 
         RayDesc ray;
         ray.Origin = origin;
         ray.Direction = direction;
         ray.TMin = RAY_TMIN;
         ray.TMax = RAY_TMAX;
-        
+
         Payload payload;
         payload.color = float3(0, 0, 0);
         payload.throughput = float3(1, 1, 1);
         payload.bounceCount = 0;
-        payload.seed = i;
+        payload.seed = seed;
         TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
         accumulated += payload.color;
     }
@@ -124,6 +130,25 @@ float3 EvalDirectBRDF(SurfaceData s, float3 L)
     return EvalSpecularDirect(s, L) + kD * EvalDiffuseDirect(s);
 }
 
+float GetLightAttenuation(float3 shadingPoint, LightData light)
+{
+    if (light.type == 0) // Directional — no falloff
+        return 1.0;
+
+    float dist = length(light.position - shadingPoint);
+    float attenuation = 1.0 / (dist * dist + EPSILON);
+
+    // Smooth range cutoff (glTF windowing function)
+    if (light.range > 0.0)
+    {
+        float ratio = dist / light.range;
+        float window = saturate(1.0 - ratio * ratio * ratio * ratio);
+        attenuation *= window * window;
+    }
+
+    return attenuation;
+}
+
 float3 CalculateDirectLightning(HitData hit, SurfaceData surface)
 {
     float3 directLighting = float3(0, 0, 0);
@@ -137,8 +162,9 @@ float3 CalculateDirectLightning(HitData hit, SurfaceData surface)
         if (visibility <= 0.0)
             continue;
 
+        float atten = GetLightAttenuation(hit.position, light);
         float3 brdf = EvalDirectBRDF(surface, L);
-        directLighting += brdf * light.color * light.intensity * visibility * max(dot(surface.N, L), 0.0);
+        directLighting += brdf * light.color * light.intensity * atten * visibility * max(dot(surface.N, L), 0.0);
     }
     return directLighting;
 }
@@ -181,8 +207,10 @@ void Hit(inout Payload payload : SV_RayPayload, Attributes attr)
     float3 F = FresnelSchlick(NdotV, surface.F0);
     float specularProb = (F.r + F.g + F.b) / 3.0;
 
-    // Stochastic path selection
-    float2 xi = Random2D(payload.bounceCount + payload.seed);
+    // Stochastic path selection — use payload.seed directly, then advance it
+    float2 xi = Random2D(payload.seed);
+    payload.seed = pcg_hash(payload.seed);  // advance: next bounce gets a different xi
+
     float pathSelector = frac(xi.x * 7.13 + xi.y * 3.97);
 
     float3 bounceDir;
@@ -214,6 +242,9 @@ void Hit(inout Payload payload : SV_RayPayload, Attributes attr)
         }
         throughput /= (1.0 - specularProb + EPSILON);
     }
+
+    // Clamp throughput to suppress firefly samples from high-variance paths
+    throughput = min(throughput, float3(5.0, 5.0, 5.0));
 
     // Trace bounce ray
     RayDesc ray;

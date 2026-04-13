@@ -12,6 +12,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
 #include "backends/imgui_impl_win32.h"
+#include "ImGuizmo.h"
 
 #include "InputElements.h"
 #include "SceneResources/ModelLoading.h"
@@ -51,6 +52,9 @@ static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enab
 static AutoCVarFloat g_accumCaptureSeconds("renderer.accumulation.captureAfterSeconds","Accumulate for N seconds then screenshot (-1 = disabled)", -1.0f, CVarFlags::EditDrag, -1.0f, 60.0f);
 static AutoCVarInt   g_screenshotCount("renderer.accumulation.screenshotCount","Number of screenshots to take after capture threshold", 0, CVarFlags::EditDrag, 0, 100);
 static AutoCVarFloat g_exposure("renderer.postprocess.exposure","Exposure multiplier applied before display", 1.0f, CVarFlags::EditDrag, 0.0f, 10.0f);
+static AutoCVarFloat g_contrast("renderer.postprocess.contrast", "Pre-ACES contrast power curve", 1.0f, CVarFlags::EditDrag, 0.1f, 3.0f);
+static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES saturation", 1.0f, CVarFlags::EditDrag, 0.0f, 2.0f);
+static AutoCVarFloat g_lift("renderer.postprocess.lift", "Post-ACES shadow lift", 0.0f, CVarFlags::EditDrag, 0.0f, 0.5f);
 
 void Renderer::Initialize()
 {
@@ -231,6 +235,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.debugMode = static_cast<int>(g_rasterizationDebugMode.Get());
 	m_passConstants->data.numBounces = g_numBounces.Get();
 	m_passConstants->data.numSamplesPerPixel = g_numSamplesPerPixel.Get();
+	m_passConstants->data.frameIndex++;
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
@@ -342,10 +347,16 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	{
 		m_raytracePass->Render();
 
+		PostProcessParams postProcessParams;
+		postProcessParams.exposure   = g_exposure.Get();
+		postProcessParams.contrast   = g_contrast.Get();
+		postProcessParams.saturation = g_saturation.Get();
+		postProcessParams.lift       = g_lift.Get();
+
 		if (g_accumulationEnabled.Get())
 		{
 			m_accumulationPass->Render(m_raytracePass->GetOutputResource());
-			m_postProcessPass->Render(m_accumulationPass->GetDisplayBuffer(), backBuffer, g_exposure.Get());
+			m_postProcessPass->Render(m_accumulationPass->GetDisplayBuffer(), backBuffer, postProcessParams);
 		}
 		else
 		{
@@ -356,7 +367,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 				D3D12_RESOURCE_STATE_COPY_SOURCE);
 			m_d3d12CommandList->ResourceBarrier(1, &transition);
 
-			m_postProcessPass->Render(m_raytracePass->GetOutputResource(), backBuffer, g_exposure.Get());
+			m_postProcessPass->Render(m_raytracePass->GetOutputResource(), backBuffer, postProcessParams);
 
 			CD3DX12_RESOURCE_BARRIER transition2 = CD3DX12_RESOURCE_BARRIER::Transition(
 				m_raytracePass->GetOutputResource().Get(),
@@ -1058,6 +1069,8 @@ void Renderer::RenderImGui()
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
+	ImGuizmo::BeginFrame();
+	ImGuizmo::SetRect(0, 0, ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
 
 	CVarSystem::Get()->DrawImguiEditor();
 	DrawImGuiDebugPanel();
@@ -1086,6 +1099,15 @@ void Renderer::DrawImGuiDebugPanel()
 	float exposure = g_exposure.Get();
 	if (ImGui::DragFloat("Exposure", &exposure, 0.05f, 0.0f, 10.0f, "%.2f"))
 		g_exposure.Set(exposure);
+	float contrast = g_contrast.Get();
+	if (ImGui::DragFloat("Contrast", &contrast, 0.01f, 0.1f, 3.0f, "%.2f"))
+		g_contrast.Set(contrast);
+	float saturation = g_saturation.Get();
+	if (ImGui::DragFloat("Saturation", &saturation, 0.01f, 0.0f, 2.0f, "%.2f"))
+		g_saturation.Set(saturation);
+	float lift = g_lift.Get();
+	if (ImGui::DragFloat("Lift", &lift, 0.005f, 0.0f, 0.5f, "%.3f"))
+		g_lift.Set(lift);
 
 	ImGui::End();
 }
@@ -1096,6 +1118,10 @@ void Renderer::DrawImGuiLightsPanel()
 
 	auto& lights = m_scene->GetLightDataCPU();
 	if (lights.empty()) return;
+
+	// Clamp selection if lights changed
+	if (m_selectedLightIndex >= static_cast<int>(lights.size()))
+		m_selectedLightIndex = -1;
 
 	ImGui::Begin("Lights");
 
@@ -1109,6 +1135,14 @@ void Renderer::DrawImGuiLightsPanel()
 		if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen))
 		{
 			bool dirty = false;
+
+			if (ImGui::Button("Select Gizmo"))
+				m_selectedLightIndex = (m_selectedLightIndex == i) ? -1 : i;
+			if (m_selectedLightIndex == i)
+			{
+				ImGui::SameLine();
+				ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "[Active]");
+			}
 
 			const char* typeNames[] = { "Directional", "Point", "Spot" };
 			int lightType = static_cast<int>(light.type);
@@ -1129,6 +1163,64 @@ void Renderer::DrawImGuiLightsPanel()
 		}
 
 		ImGui::PopID();
+	}
+
+	// Render gizmo for selected light
+	if (m_selectedLightIndex >= 0 && m_selectedLightIndex < static_cast<int>(lights.size()))
+	{
+		LightData& light = lights[m_selectedLightIndex];
+
+		const float* view = &m_camera->GetViewMatrix()._11;
+		const float* proj = &m_camera->GetProjectionMatrix()._11;
+
+		float matrix[16];
+		memset(matrix, 0, sizeof(matrix));
+
+		ImGuizmo::OPERATION op;
+		if (light.type == LightType::Directional)
+		{
+			using namespace DirectX;
+			XMVECTOR dir = XMLoadFloat3(&light.direction);
+			XMVECTOR defaultDir = XMVectorSet(0, 0, -1, 0);
+			XMVECTOR axis = XMVector3Cross(defaultDir, dir);
+			float dot = XMVectorGetX(XMVector3Dot(defaultDir, dir));
+
+			XMMATRIX rot;
+			if (XMVectorGetX(XMVector3LengthSq(axis)) < 1e-6f)
+				rot = (dot > 0) ? XMMatrixIdentity() : XMMatrixRotationY(XM_PI);
+			else
+				rot = XMMatrixRotationAxis(XMVector3Normalize(axis), acosf(std::clamp(dot, -1.0f, 1.0f)));
+
+			XMMATRIX trans = XMMatrixTranslation(light.position.x, light.position.y, light.position.z);
+			XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(matrix), rot * trans);
+			op = ImGuizmo::ROTATE;
+		}
+		else // Point (and future Spot)
+		{
+			matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1.0f;
+			matrix[12] = light.position.x;
+			matrix[13] = light.position.y;
+			matrix[14] = light.position.z;
+			op = ImGuizmo::TRANSLATE;
+		}
+
+		ImGuizmo::Manipulate(view, proj, op, ImGuizmo::WORLD, matrix);
+		if (ImGuizmo::IsUsing())
+		{
+			if (light.type == LightType::Directional)
+			{
+				using namespace DirectX;
+				XMFLOAT4X4 result;
+				memcpy(&result, matrix, sizeof(result));
+				XMMATRIX m = XMLoadFloat4x4(&result);
+				XMStoreFloat3(&light.direction, XMVector3Normalize(-m.r[2]));
+			}
+			else
+			{
+				light.position = { matrix[12], matrix[13], matrix[14] };
+			}
+			m_scene->MarkLightDataDirty();
+		}
 	}
 
 	ImGui::End();

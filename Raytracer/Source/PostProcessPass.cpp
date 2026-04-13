@@ -42,8 +42,8 @@ void PostProcessPass::CreateRootSignature()
     ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);  // UAV at u0
     rootParams[0].InitAsDescriptorTable(2, ranges);
 
-    // [1] Root constant for exposure (b0)
-    rootParams[1].InitAsConstants(1, 0);
+    // [1] Root constants for post-process params (b0): exposure, contrast, saturation, lift
+    rootParams[1].InitAsConstants(4, 0);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
         _countof(rootParams), rootParams,
@@ -112,7 +112,7 @@ void PostProcessPass::CreatePSO()
 void PostProcessPass::Render(
     const Microsoft::WRL::ComPtr<ID3D12Resource>& input,
     const Microsoft::WRL::ComPtr<ID3D12Resource>& backBuffer,
-    float exposure)
+    const PostProcessParams& params)
 {
     if (!m_initialized)
         return;
@@ -145,10 +145,9 @@ void PostProcessPass::Render(
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetComputeRootDescriptorTable(0, m_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
-    // Bind exposure as root constant (float bits cast to uint32)
-    uint32_t exposureBits;
-    memcpy(&exposureBits, &exposure, sizeof(float));
-    m_commandList->SetComputeRoot32BitConstant(1, exposureBits, 0);
+    // Bind all post-process params as root constants
+    static_assert(sizeof(PostProcessParams) == 4 * sizeof(uint32_t), "PostProcessParams must be exactly 4 floats");
+    m_commandList->SetComputeRoot32BitConstants(1, 4, &params, 0);
 
     // Transition input to SRV
     {
