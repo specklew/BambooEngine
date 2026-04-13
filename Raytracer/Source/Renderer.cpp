@@ -5,6 +5,8 @@
 #include <algorithm>
 
 #include "Camera.h"
+#include "FrameAccumulationPass.h"
+#include "PostProcessPass.h"
 #include "Utils/CVars.h"
 #include "SceneResources/GameObject.h"
 #include "imgui.h"
@@ -43,6 +45,12 @@ static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CV
 static AutoCVarEnum g_rasterizationDebugMode("renderer.rasterDebugMode", "Rasterization shader debug visualization mode", RasterDebugMode::None);
 static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world position", {0.0f, 0.0f, -10.0f});
 static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
+static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 4, CVarFlags::EditDrag, 1, 64);
+static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
+static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 1, CVarFlags::EditCheckbox);
+static AutoCVarFloat g_accumCaptureSeconds("renderer.accumulation.captureAfterSeconds","Accumulate for N seconds then screenshot (-1 = disabled)", -1.0f, CVarFlags::EditDrag, -1.0f, 60.0f);
+static AutoCVarInt   g_screenshotCount("renderer.accumulation.screenshotCount","Number of screenshots to take after capture threshold", 0, CVarFlags::EditDrag, 0, 100);
+static AutoCVarFloat g_exposure("renderer.postprocess.exposure","Exposure multiplier applied before display", 1.0f, CVarFlags::EditDrag, 0.0f, 10.0f);
 
 void Renderer::Initialize()
 {
@@ -104,10 +112,16 @@ void Renderer::Initialize()
 	m_raytracePass = std::make_shared<RaytracePass>();
 	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
+	m_accumulationPass = std::make_shared<FrameAccumulationPass>();
+	m_accumulationPass->Initialize(g_device, m_d3d12CommandList);
+
+	m_postProcessPass = std::make_shared<PostProcessPass>();
+	m_postProcessPass->Initialize(g_device, m_d3d12CommandList);
+
 	spdlog::info("Renderer initialized successfully.");
 
 	InitializeImGui();
-	
+
 	ExecuteCommandsAndReset();
 }
 float speedMultiplier = 1.0f;
@@ -215,10 +229,35 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
 	m_passConstants->data.uvCoordY = g_uvCoordY.Get();
 	m_passConstants->data.debugMode = static_cast<int>(g_rasterizationDebugMode.Get());
+	m_passConstants->data.numBounces = g_numBounces.Get();
+	m_passConstants->data.numSamplesPerPixel = g_numSamplesPerPixel.Get();
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
 	m_passConstants->Map();
+
+	if (m_scene->IsLightDataDirty())
+	{
+		m_scene->SetLightDataBuffer(CreateStructuredBuffer(m_scene->GetLightDataCPU()));
+		m_scene->ClearLightDataDirty();
+	}
+
+	// Camera change detection for accumulation reset
+	if (g_accumulationEnabled.Get())
+	{
+		auto pos = m_camera->GetPosition();
+		auto rot = m_camera->GetRotation();
+		bool cameraChanged =
+			(pos.x != m_prevCameraPos.x || pos.y != m_prevCameraPos.y || pos.z != m_prevCameraPos.z) ||
+			(rot.x != m_prevCameraRot.x || rot.y != m_prevCameraRot.y ||
+			 rot.z != m_prevCameraRot.z || rot.w != m_prevCameraRot.w);
+		if (cameraChanged)
+			m_accumulationPass->Reset();
+		m_prevCameraPos = pos;
+		m_prevCameraRot = rot;
+	}
+
+	m_accumulationPass->Update(elapsedTime);
 }
 
 void Renderer::Render(double elapsedTime, double totalTime)
@@ -301,7 +340,34 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	}
 	else
 	{
-		m_raytracePass->Render(backBuffer);
+		m_raytracePass->Render();
+
+		if (g_accumulationEnabled.Get())
+		{
+			m_accumulationPass->Render(m_raytracePass->GetOutputResource());
+			m_postProcessPass->Render(m_accumulationPass->GetDisplayBuffer(), backBuffer, g_exposure.Get());
+		}
+		else
+		{
+			// Bypass accumulation — normalize raytrace output to COPY_SOURCE for PostProcessPass
+			CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_raytracePass->GetOutputResource().Get(),
+				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+				D3D12_RESOURCE_STATE_COPY_SOURCE);
+			m_d3d12CommandList->ResourceBarrier(1, &transition);
+
+			m_postProcessPass->Render(m_raytracePass->GetOutputResource(), backBuffer, g_exposure.Get());
+
+			CD3DX12_RESOURCE_BARRIER transition2 = CD3DX12_RESOURCE_BARRIER::Transition(
+				m_raytracePass->GetOutputResource().Get(),
+				D3D12_RESOURCE_STATE_COPY_SOURCE,
+				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+			m_d3d12CommandList->ResourceBarrier(1, &transition2);
+		}
+
+		// Restore main descriptor heap for ImGui (post-process pass may have changed it)
+		ID3D12DescriptorHeap* mainHeaps[] = { m_srvCbvUavDescriptorHeap.Get() };
+		m_d3d12CommandList->SetDescriptorHeaps(_countof(mainHeaps), mainHeaps);
 	}
 
 	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_d3d12CommandList.Get());
@@ -375,14 +441,23 @@ void Renderer::OnResize()
 	CreateDepthStencilView();
 	SetScissorRect();
 	SetViewport();
-	
+
 	m_raytracePass->OnResize();
+	m_accumulationPass->OnResize();
+	m_postProcessPass->OnResize();
 
 	ExecuteCommandsAndReset();
 }
 
 void Renderer::OnMouseMove(unsigned long long btnState, int x, int y)
 {
+	if (ImGui::GetIO().WantCaptureMouse)
+	{
+		//m_lastMousePosX = x;
+		//m_lastMousePosY = y;
+		return;
+	}
+
 	if((btnState & MK_LBUTTON) != 0)
 	{
 		// Make each pixel correspond to a quarter of a degree.
@@ -983,10 +1058,80 @@ void Renderer::RenderImGui()
 	ImGui_ImplDX12_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
-	
+
 	CVarSystem::Get()->DrawImguiEditor();
+	DrawImGuiDebugPanel();
+	DrawImGuiLightsPanel();
 
 	ImGui::Render();
+}
+
+void Renderer::DrawImGuiDebugPanel()
+{
+	ImGui::Begin("Debug");
+
+	// Accumulation settings
+	ImGui::SeparatorText("Temporal Accumulation");
+	ImGui::Text("Frames accumulated: %u", m_accumulationPass->GetFrameCount());
+	ImGui::Text("Accumulated time:   %.2fs", m_accumulationPass->GetAccumulatedTime());
+	bool enabled = g_accumulationEnabled.Get();
+	if (ImGui::Checkbox("Enabled", &enabled))
+		g_accumulationEnabled.Set(enabled);
+	ImGui::SameLine();
+	if (ImGui::Button("Reset"))
+		m_accumulationPass->Reset();
+
+	// Post-process settings
+	ImGui::SeparatorText("Post-Process");
+	float exposure = g_exposure.Get();
+	if (ImGui::DragFloat("Exposure", &exposure, 0.05f, 0.0f, 10.0f, "%.2f"))
+		g_exposure.Set(exposure);
+
+	ImGui::End();
+}
+
+void Renderer::DrawImGuiLightsPanel()
+{
+	if (!m_scene) return;
+
+	auto& lights = m_scene->GetLightDataCPU();
+	if (lights.empty()) return;
+
+	ImGui::Begin("Lights");
+
+	for (int i = 0; i < static_cast<int>(lights.size()); i++)
+	{
+		LightData& light = lights[i];
+		ImGui::PushID(i);
+
+		char label[32];
+		snprintf(label, sizeof(label), "Light %d", i);
+		if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			bool dirty = false;
+
+			const char* typeNames[] = { "Directional", "Point", "Spot" };
+			int lightType = static_cast<int>(light.type);
+			if (ImGui::Combo("Type", &lightType, typeNames, 3))
+			{
+				light.type = static_cast<LightType>(lightType);
+				dirty = true;
+			}
+
+			dirty |= ImGui::DragFloat3("Position", &light.position.x, 0.1f);
+			dirty |= ImGui::DragFloat3("Direction", &light.direction.x, 0.01f, -1.0f, 1.0f);
+			dirty |= ImGui::ColorEdit3("Color", &light.color.x);
+			dirty |= ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 100.0f);
+			dirty |= ImGui::DragFloat("Range", &light.range, 0.5f, 0.0f, 1000.0f);
+
+			if (dirty)
+				m_scene->MarkLightDataDirty();
+		}
+
+		ImGui::PopID();
+	}
+
+	ImGui::End();
 }
 
 void Renderer::OnShaderReload()

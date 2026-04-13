@@ -40,11 +40,11 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
     spdlog::info("Raytracer pass initialized successfully.");
 }
 
-void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget)
+void RaytracePass::Render()
 {
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
     m_commandList->SetGraphicsRootSignature(nullptr);
-    
+
     std::vector heaps = {m_srvUavHeap.Get()};
     m_commandList->SetDescriptorHeaps(static_cast<uint32_t>(heaps.size()), heaps.data());
     m_commandList->SetComputeRootDescriptorTable(0, m_srvUavHeap->GetGPUDescriptorHandleForHeapStart());
@@ -61,21 +61,21 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
             m_outputResource.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
         m_commandList->ResourceBarrier(1, &transition);
     }
 
     D3D12_DISPATCH_RAYS_DESC desc = {};
-    
+
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();
     desc.RayGenerationShaderRecord.SizeInBytes = m_shaderBindingTable->GetRayGenSectionSize();
-    
+
     desc.MissShaderTable.StartAddress = desc.RayGenerationShaderRecord.StartAddress + desc.RayGenerationShaderRecord.SizeInBytes;
     desc.MissShaderTable.StrideInBytes = m_shaderBindingTable->GetMissEntrySize();
     desc.MissShaderTable.SizeInBytes = m_shaderBindingTable->GetMissSectionSize();
-    
+
     desc.HitGroupTable.StartAddress = desc.MissShaderTable.StartAddress + desc.MissShaderTable.SizeInBytes;
     desc.HitGroupTable.StrideInBytes = m_shaderBindingTable->GetHitEntrySize();
     desc.HitGroupTable.SizeInBytes = m_shaderBindingTable->GetHitSectionSize();
@@ -88,30 +88,15 @@ void RaytracePass::Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTa
     m_commandList->DispatchRays(&desc);
 
     {
+        CD3DX12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_outputResource.Get());
+        m_commandList->ResourceBarrier(1, &uavBarrier);
+    }
+
+    {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
             m_outputResource.Get(),
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_COPY_SOURCE);
-
-        m_commandList->ResourceBarrier(1, &transition);
-    }
-
-    {
-       CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition( 
-            renderTarget.Get(),
-            D3D12_RESOURCE_STATE_RENDER_TARGET,
-            D3D12_RESOURCE_STATE_COPY_DEST);
-
-        m_commandList->ResourceBarrier(1, &transition);
-    }
-
-    m_commandList->CopyResource(renderTarget.Get(), m_outputResource.Get());
-    
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            renderTarget.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_RENDER_TARGET);
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
         m_commandList->ResourceBarrier(1, &transition);
     }
@@ -283,7 +268,7 @@ void RaytracePass::InitializeRaytracingPipeline()
     spdlog::debug("Setting raytracing pipeline configuration");
     {
         auto pipelineConfig = raytracingPipeline.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
-        pipelineConfig->Config(4);
+        pipelineConfig->Config(8);
     }
 
     ThrowIfFailed(m_device->CreateStateObject(raytracingPipeline, IID_PPV_ARGS(&m_rtStateObject)));
@@ -461,7 +446,7 @@ void RaytracePass::CreateRaytracingOutputBuffer()
         &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
         D3D12_HEAP_FLAG_NONE,
         &outputBufferDesc,
-        D3D12_RESOURCE_STATE_COPY_SOURCE,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
         nullptr,
         IID_PPV_ARGS(&m_outputResource)));
 }

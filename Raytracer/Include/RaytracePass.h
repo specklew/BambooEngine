@@ -18,11 +18,13 @@ public:
         Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer,
         std::shared_ptr<PassConstants> passConstants);
     
-    void Render(const Microsoft::WRL::ComPtr<ID3D12Resource>& renderTarget);
+    void Render();
     void Update(double elapsedTime, double totalTime);
     void OnResize();
     void OnShaderReload();
     void OnSceneChange(std::shared_ptr<Scene> scene);
+
+    const Microsoft::WRL::ComPtr<ID3D12Resource>& GetOutputResource() const { return m_outputResource; }
     
 private:
     void InitializeRaytracingPipeline();

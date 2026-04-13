@@ -18,6 +18,8 @@ public:
         float uvCoordY = 0.0f;
         int debugMode = 0;
         uint32_t numLights = 0;
+        uint32_t numSamplesPerPixel = 4;
+        uint32_t numBounces = 1;
         DirectX::XMFLOAT3 cameraWorldPos = {0.0f, 0.0f, 0.0f};
     } data;
 

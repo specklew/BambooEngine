@@ -1,11 +1,11 @@
 #ifndef RAYTRACING_UTILS_HLSL
 #define RAYTRACING_UTILS_HLSL
 
+#include "Random.hlsl"
+
 #define MAX_TEXTURES 512
 #define VERTEX_STRIDE 48 // float3 pos + float3 normal + float4 tangent + float2 uv
 
-static const int MAX_BOUNCES = 3;
-static const int SAMPLES_PER_PIXEL = 1;
 static const float MIN_ROUGHNESS = 0.04;
 static const float RAY_TMIN = 0.01;
 static const float RAY_TMAX = 1000.0;
@@ -188,10 +188,11 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
 
 // ---- Ray utilities ----
 
-inline void GenerateCameraRay(uint2 index, out float3 origin, out float3 direction)
+inline void GenerateCameraRay(uint2 index, uint sampleIndex, out float3 origin, out float3 direction)
 {
     float2 dims = float2(DispatchRaysDimensions().xy);
-    float2 d = (((index + 0.5f) / dims) * 2.f - 1.f);
+    float2 rand_offset = Random2D(sampleIndex) - 0.5;
+    float2 d = (((index + 0.5f + rand_offset) / dims) * 2.f - 1.f);
 
     origin = mul(viewI, float4(0, 0, 0, 1)).xyz;
     float4 target = mul(projectionI, float4(d.x, -d.y, 1, 1));
@@ -227,36 +228,18 @@ float3 BarycentricCoordinates(float3 pt, float3 v0, float3 v1, float3 v2)
 
 // ---- Texture sampling ----
 
-void ComputeUVGradients(HitData data, out float2 ddxUV, out float2 ddyUV)
-{
-    uint2 launchIndex = DispatchRaysIndex().xy;
-    float3 ddxOrigin, ddxDirection, ddyOrigin, ddyDirection;
-    GenerateCameraRay(launchIndex + uint2(1, 0), ddxOrigin, ddxDirection);
-    GenerateCameraRay(launchIndex + uint2(0, 1), ddyOrigin, ddyDirection);
-
-    float3 xOffsetPoint = RayPlaneIntersection(data.tri_v0, data.tri_normal, ddxOrigin, ddxDirection);
-    float3 yOffsetPoint = RayPlaneIntersection(data.tri_v0, data.tri_normal, ddyOrigin, ddyDirection);
-
-    float3 baryX = BarycentricCoordinates(xOffsetPoint, data.tri_v0, data.tri_v1, data.tri_v2);
-    float3 baryY = BarycentricCoordinates(yOffsetPoint, data.tri_v0, data.tri_v1, data.tri_v2);
-
-    float3x2 uvMat = float3x2(data.tri_uv0, data.tri_uv1, data.tri_uv2);
-    ddxUV = mul(baryX, uvMat) - data.uv;
-    ddyUV = mul(baryY, uvMat) - data.uv;
-}
-
-float4 SampleTexture(int texIdx, float2 uv, float2 ddxUV, float2 ddyUV)
+float4 SampleTexture(int texIdx, float2 uv)
 {
     if (texIdx == -1)
         return float4(0, 0, 0, 0);
-    return g_textures[NonUniformResourceIndex(texIdx)].SampleGrad(gsamAnisotropicWrap, uv, ddxUV, ddyUV);
+    return g_textures[NonUniformResourceIndex(texIdx)].SampleLevel(gsamAnisotropicWrap, uv, 0);
 }
 
-float3 SampleWorldSpaceNormal(HitData data, float2 ddxUV, float2 ddyUV)
+float3 SampleWorldSpaceNormal(HitData data)
 {
     int normalTexIdx = g_instanceInfo[NonUniformResourceIndex(InstanceID())].normalTextureIndex;
 
-    float3 normalTS = SampleTexture(normalTexIdx, data.uv, ddxUV, ddyUV).xyz * 2.0 - 1.0;
+    float3 normalTS = SampleTexture(normalTexIdx, data.uv).xyz * 2.0 - 1.0;
 
     float3 N = data.normal;
     float3 T = normalize(data.tangent.xyz - dot(data.tangent.xyz, N) * N);
@@ -266,17 +249,17 @@ float3 SampleWorldSpaceNormal(HitData data, float2 ddxUV, float2 ddyUV)
     return normalize(mul(normalTS, TBN));
 }
 
-float3 SampleTextureColor(HitData data, float2 ddxUV, float2 ddyUV)
+float3 SampleTextureColor(HitData data)
 {
     int texIdx = g_instanceInfo[NonUniformResourceIndex(InstanceID())].textureIndex;
-    float4 col = SampleTexture(texIdx, data.uv, ddxUV, ddyUV);
+    float4 col = SampleTexture(texIdx, data.uv);
     return col.rgb;
 }
 
-float2 SampleRoughnessMetallic(HitData data, float2 ddxUV, float2 ddyUV, float roughnessFactor, float metallicFactor)
+float2 SampleRoughnessMetallic(HitData data, float roughnessFactor, float metallicFactor)
 {
     int rmTexIdx = g_instanceInfo[NonUniformResourceIndex(InstanceID())].roughnessTextureIndex;
-    float4 mr = SampleTexture(rmTexIdx, data.uv, ddxUV, ddyUV);
+    float4 mr = SampleTexture(rmTexIdx, data.uv);
     return float2(roughnessFactor * mr.g, metallicFactor * mr.b);
 }
 

@@ -44,7 +44,13 @@ public:
     [[nodiscard]] std::shared_ptr<StructuredBuffer<GeometryInfo>> GetGeometryInfoBuffer() { return m_geometryInfoBuffer; }
     [[nodiscard]] std::shared_ptr<StructuredBuffer<InstanceInfo>> GetInstanceInfoBuffer() { return m_instanceInfoBuffer; }
     [[nodiscard]] std::shared_ptr<StructuredBuffer<LightData>> GetLightDataBuffer() { return m_lightDataBuffer; }
-    
+    void SetLightDataBuffer(std::shared_ptr<StructuredBuffer<LightData>> buffer) { m_lightDataBuffer = std::move(buffer); }
+
+    std::vector<LightData>& GetLightDataCPU() { return m_lightDataCPU; }
+    void MarkLightDataDirty() { m_lightDataDirty = true; }
+    bool IsLightDataDirty() const { return m_lightDataDirty; }
+    void ClearLightDataDirty() { m_lightDataDirty = false; }
+
 private:
     friend class SceneBuilder;
     Scene() = default;
@@ -54,7 +60,9 @@ private:
     std::shared_ptr<StructuredBuffer<GeometryInfo>> m_geometryInfoBuffer;
     std::shared_ptr<StructuredBuffer<InstanceInfo>> m_instanceInfoBuffer;
     std::shared_ptr<StructuredBuffer<LightData>> m_lightDataBuffer;
-    
+    std::vector<LightData> m_lightDataCPU;
+    bool m_lightDataDirty = false;
+
     std::string m_name;
     std::shared_ptr<SceneNode> m_root;
     std::vector<std::shared_ptr<GameObject>> m_gameObjects;

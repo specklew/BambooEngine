@@ -104,6 +104,8 @@
     <ClInclude Include="Include\Camera.h" />
     <ClInclude Include="Include\Constants.h" />
     <ClInclude Include="Include\DescriptorHeapAllocator.h" />
+    <ClInclude Include="Include\FrameAccumulationPass.h" />
+    <ClInclude Include="Include\PostProcessPass.h" />
     <ClInclude Include="Include\HighResolutionClock.h" />
     <ClInclude Include="Include\InputElements.h" />
     <ClInclude Include="Include\pch.h" />
@@ -312,10 +314,14 @@
     <None Include="Resources\Shaders\RaytracingUtils.hlsl" />
     <None Include="Resources\Shaders\passConstants.hlsl" />
     <None Include="Resources\Shaders\raytracing.shadow.hlsl" />
+    <None Include="Resources\Shaders\accumulation.hlsl" />
+    <None Include="Resources\Shaders\postprocess.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
     <ClCompile Include="Source\Camera.cpp" />
     <ClCompile Include="Source\DescriptorHeapAllocator.cpp" />
+    <ClCompile Include="Source\FrameAccumulationPass.cpp" />
+    <ClCompile Include="Source\PostProcessPass.cpp" />
     <ClCompile Include="Source\HighResolutionClock.cpp" />
     <ClCompile Include="Source\InputElements.cpp" />
     <ClCompile Include="Source\RaytracePass.cpp" />
@@ -403,6 +409,8 @@
     <Content Include="Resources\Shaders\raytracing.rg.shader" />
     <Content Include="Resources\Shaders\raytracing.shadowhit.shader" />
     <Content Include="Resources\Shaders\raytracing.shadowmiss.shader" />
+    <Content Include="Resources\Shaders\accumulation.cs.shader" />
+    <Content Include="Resources\Shaders\postprocess.cs.shader" />
     <Content Include="Vendor\DXC\bin\dxcompiler.dll" />
     <Content Include="Vendor\DXC\bin\dxil.dll" />
     <Content Include="Vendor\DXC\lib\dxcompiler.lib" />

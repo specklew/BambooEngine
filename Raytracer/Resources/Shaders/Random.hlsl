@@ -8,10 +8,11 @@ cbuffer Constants : register(b1)
     float time;
 }
 
+// Range [0,1)
 float2 Random2D(float seed)
 {
     uint2 pixel = DispatchRaysIndex().xy;
-    uint idx = pixel.x + pixel.y * DispatchRaysDimensions().y;
+    uint idx = pixel.x + pixel.y * DispatchRaysDimensions().x;
     float base = g_random.Load(idx) + seed * 0.7548776662 + time;
 
     float r1 = frac(sin(base) * 43758.5453);

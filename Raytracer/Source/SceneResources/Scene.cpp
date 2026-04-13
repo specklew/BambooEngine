@@ -148,8 +148,9 @@ std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
     auto geo_info_buffer = CreateGeometryInfoBuffer(renderer, all_prims);
     auto instance_info_buffer = CreateInstanceInfoBuffer(renderer, m_gameObjects, all_prims);
     auto light_data_buffer = CreateLightDataBuffer(renderer, m_lightData);
-    
+
     Scene scene;
+    scene.m_lightDataCPU = m_lightData;
     scene.m_gameObjects = std::move(m_gameObjects);
     scene.m_models = std::move(m_models);
     scene.m_root = std::move(m_root);

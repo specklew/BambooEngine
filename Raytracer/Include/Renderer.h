@@ -4,6 +4,7 @@
 #include "Constants.h"
 #include "InputElements.h"
 #include "Keyboard.h"
+#include "SimpleMath.h"
 #include "Resources/StructuredBuffer.h"
 #include "Utils/Utils.h"
 
@@ -27,6 +28,8 @@ class Camera;
 struct Primitive;
 class DescriptorHeapAllocator;
 class RaytracePass;
+class FrameAccumulationPass;
+class PostProcessPass;
 class AccelerationStructures;
 
 
@@ -100,12 +103,19 @@ private:
 
 	void InitializeImGui();
 	void RenderImGui();
+	void DrawImGuiDebugPanel();
+	void DrawImGuiLightsPanel();
 
 	void OnShaderReload();
-	
+
 	std::shared_ptr<RaytracePass> m_raytracePass;
+	std::shared_ptr<FrameAccumulationPass> m_accumulationPass;
+	std::shared_ptr<PostProcessPass> m_postProcessPass;
 	std::vector<std::shared_ptr<AccelerationStructures>> m_accelerationStructures;
-	
+
+	DirectX::SimpleMath::Vector3 m_prevCameraPos = {};
+	DirectX::XMFLOAT4            m_prevCameraRot = { 0, 0, 0, 1 };
+
 	bool m_tearingSupport = false;
 	bool m_rasterize = true;
 	

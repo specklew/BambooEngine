@@ -10,19 +10,19 @@
 void RayGen()
 {
     uint2 launchIndex = DispatchRaysIndex().xy;
-
-    float3 origin, direction;
-    GenerateCameraRay(launchIndex, origin, direction);
-
-    RayDesc ray;
-    ray.Origin = origin;
-    ray.Direction = direction;
-    ray.TMin = RAY_TMIN;
-    ray.TMax = RAY_TMAX;
-
+    
     float3 accumulated = float3(0, 0, 0);
-    for (int i = 0; i < SAMPLES_PER_PIXEL; i++)
+    for (int i = 0; i < samplesPerPixel; i++)
     {
+        float3 origin, direction;
+        GenerateCameraRay(launchIndex, i, origin, direction);
+
+        RayDesc ray;
+        ray.Origin = origin;
+        ray.Direction = direction;
+        ray.TMin = RAY_TMIN;
+        ray.TMax = RAY_TMAX;
+        
         Payload payload;
         payload.color = float3(0, 0, 0);
         payload.throughput = float3(1, 1, 1);
@@ -32,7 +32,7 @@ void RayGen()
         accumulated += payload.color;
     }
 
-    gOutput[launchIndex] = float4(accumulated / SAMPLES_PER_PIXEL, 1.0);
+    gOutput[launchIndex] = float4(accumulated / samplesPerPixel, 1.0);
 }
 
 // ---- Miss ----
@@ -40,10 +40,9 @@ void RayGen()
 [shader("miss")]
 void Miss(inout Payload payload : SV_RayPayload)
 {
-    return;
-    float2 dims = float2(DispatchRaysDimensions().xy);
-    float ramp = DispatchRaysIndex().y / dims.y;
-    payload.color = float4(0.7, 0.8, 1.0 - 0.1 * ramp, -1.0);
+    float ramp = WorldRayDirection().y;
+    float3 baseColor = float3(0.5, 0.7, 0.9);
+    payload.color = baseColor + ramp * 0.2;
 }
 
 // ---- Closest hit ----
@@ -151,19 +150,15 @@ void Hit(inout Payload payload : SV_RayPayload, Attributes attr)
     uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
     uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
     HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
-    
-    // UV gradients for anisotropic texture filtering
-    float2 ddxUV, ddyUV;
-    ComputeUVGradients(hit, ddxUV, ddyUV);
 
     // Material
-    float3 albedo = SampleTextureColor(hit, ddxUV, ddyUV) * instance.baseColorFactor.rgb;
-    float2 rm = SampleRoughnessMetallic(hit, ddxUV, ddyUV, instance.roughnessFactor, instance.metallicFactor);
+    float3 albedo = SampleTextureColor(hit) * instance.baseColorFactor.rgb;
+    float2 rm = SampleRoughnessMetallic(hit, instance.roughnessFactor, instance.metallicFactor);
     float roughness = max(rm.x, MIN_ROUGHNESS);
     float metallic = rm.y;
 
     // Shading vectors
-    float3 N = SampleWorldSpaceNormal(hit, ddxUV, ddyUV);
+    float3 N = SampleWorldSpaceNormal(hit);
     float3 V = -WorldRayDirection();
     float NdotV = max(dot(N, V), 0.1);
 
@@ -177,7 +172,7 @@ void Hit(inout Payload payload : SV_RayPayload, Attributes attr)
     surface.roughness = roughness;
     surface.metallic  = metallic;
     
-    if (payload.bounceCount >= MAX_BOUNCES)
+    if (payload.bounceCount >= numBounces)
     {
         payload.color = CalculateDirectLightning(hit, surface);
         return;

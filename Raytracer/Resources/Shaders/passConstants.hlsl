@@ -7,6 +7,8 @@ cbuffer PassConstants : register(b3)
     float uvY;
     int debugMode;
     uint numLights;
+    uint samplesPerPixel;
+    uint numBounces;
     float3 cameraWorldPos;
 }
 
