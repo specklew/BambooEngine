@@ -5,14 +5,13 @@
 #include <algorithm>
 
 #include "Camera.h"
+#include "EditorUI.h"
 #include "FrameAccumulationPass.h"
 #include "PostProcessPass.h"
 #include "Utils/CVars.h"
 #include "SceneResources/GameObject.h"
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
-#include "backends/imgui_impl_win32.h"
-#include "ImGuizmo.h"
 
 #include "InputElements.h"
 #include "SceneResources/ModelLoading.h"
@@ -124,7 +123,7 @@ void Renderer::Initialize()
 
 	spdlog::info("Renderer initialized successfully.");
 
-	InitializeImGui();
+	InitializeEditorUI();
 
 	ExecuteCommandsAndReset();
 }
@@ -226,6 +225,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		ExecuteCommandsAndReset();
 
 		m_raytracePass->OnSceneChange(m_scene);
+		m_editorUI->SetScene(m_scene);
 
 		previousScene = g_currentScene.Get();
 	}
@@ -267,8 +267,9 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 void Renderer::Render(double elapsedTime, double totalTime)
 {
-	RenderImGui();
-	
+	m_editorUI->BeginFrame();
+	m_editorUI->EndFrame();
+
 	SetViewport();
 	SetScissorRect();
 	
@@ -410,9 +411,7 @@ void Renderer::CleanUp()
 {
 	FlushCommandQueue();
 
-	ImGui_ImplDX12_Shutdown();
-	ImGui_ImplWin32_Shutdown();
-	ImGui::DestroyContext();
+	m_editorUI->Shutdown();
 	
 	m_projectionMatrixConstantBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
 }
@@ -1029,235 +1028,13 @@ void Renderer::CreateIndexSRV()
 	g_device->CreateShaderResourceView(index_buffer->GetUnderlyingResource().Get(), &srv_desc, handle);
 }
 
-void Renderer::InitializeImGui()
+void Renderer::InitializeEditorUI()
 {
-	// Make process DPI aware and get main monitor scale
-	ImGui_ImplWin32_EnableDpiAwareness();
-	float mainScaleImGui = ImGui_ImplWin32_GetDpiScaleForMonitor(::MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY));
-	
-	IMGUI_CHECKVERSION();
-	ImGui::CreateContext();
-	ImGuiIO& io = ImGui::GetIO(); (void)io;
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad; // Enable Gamepad Controls
-	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable; // Enable Docking
-
-	ImGui::StyleColorsDark();
-
-	ImGuiStyle& style = ImGui::GetStyle();
-	style.ScaleAllSizes(mainScaleImGui);
-
-	ImGui_ImplWin32_Init(Window::Get().GetHandle());
-	
-	ImGui_ImplDX12_InitInfo init_info = {};
-	init_info.Device = g_device.Get();
-	init_info.CommandQueue = m_d3d12CommandQueue.Get();
-	init_info.NumFramesInFlight = Constants::Graphics::NUM_FRAMES;
-	init_info.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-	init_info.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-	
-	init_info.LegacySingleSrvCpuDescriptor.ptr = (m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr);
-	init_info.LegacySingleSrvGpuDescriptor.ptr = (m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart().ptr);
-	init_info.SrvDescriptorHeap = m_srvCbvUavDescriptorHeap.Get();
-	
-	ImGui_ImplDX12_Init(&init_info);
-	spdlog::info("ImGui initialized successfully.");
-}
-
-void Renderer::RenderImGui()
-{
-	ImGui_ImplDX12_NewFrame();
-	ImGui_ImplWin32_NewFrame();
-	ImGui::NewFrame();
-	ImGuizmo::BeginFrame();
-	ImGuizmo::SetRect(0, 0, ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
-	ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
-
-	CVarSystem::Get()->DrawImguiEditor();
-	DrawImGuiDebugPanel();
-	DrawImGuiLightsPanel();
-
-	ImGui::Render();
-}
-
-void Renderer::DrawImGuiDebugPanel()
-{
-	ImGui::Begin("Debug");
-
-	// Accumulation settings
-	ImGui::SeparatorText("Temporal Accumulation");
-	ImGui::Text("Frames accumulated: %u", m_accumulationPass->GetFrameCount());
-	ImGui::Text("Accumulated time:   %.2fs", m_accumulationPass->GetAccumulatedTime());
-	bool enabled = g_accumulationEnabled.Get();
-	if (ImGui::Checkbox("Enabled", &enabled))
-		g_accumulationEnabled.Set(enabled);
-	ImGui::SameLine();
-	if (ImGui::Button("Reset"))
-		m_accumulationPass->Reset();
-
-	// Post-process settings
-	ImGui::SeparatorText("Post-Process");
-	float exposure = g_exposure.Get();
-	if (ImGui::DragFloat("Exposure", &exposure, 0.05f, 0.0f, 10.0f, "%.2f"))
-		g_exposure.Set(exposure);
-	float contrast = g_contrast.Get();
-	if (ImGui::DragFloat("Contrast", &contrast, 0.01f, 0.1f, 3.0f, "%.2f"))
-		g_contrast.Set(contrast);
-	float saturation = g_saturation.Get();
-	if (ImGui::DragFloat("Saturation", &saturation, 0.01f, 0.0f, 2.0f, "%.2f"))
-		g_saturation.Set(saturation);
-	float lift = g_lift.Get();
-	if (ImGui::DragFloat("Lift", &lift, 0.005f, 0.0f, 0.5f, "%.3f"))
-		g_lift.Set(lift);
-
-	ImGui::End();
-}
-
-void Renderer::DrawImGuiLightsPanel()
-{
-	if (!m_scene) return;
-
-	auto& lights = m_scene->GetLightDataCPU();
-
-	// Clamp selection if lights changed
-	if (m_selectedLightIndex >= static_cast<int>(lights.size()))
-		m_selectedLightIndex = -1;
-
-	ImGui::Begin("Lights");
-
-	for (int i = 0; i < static_cast<int>(lights.size()); i++)
-	{
-		LightData& light = lights[i];
-		ImGui::PushID(i);
-
-		char label[32];
-		snprintf(label, sizeof(label), "Light %d", i);
-		if (ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen))
-		{
-			bool dirty = false;
-
-			if (ImGui::Button("Select Gizmo"))
-				m_selectedLightIndex = (m_selectedLightIndex == i) ? -1 : i;
-			if (m_selectedLightIndex == i)
-			{
-				ImGui::SameLine();
-				ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "[Active]");
-			}
-			ImGui::SameLine();
-			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
-			if (ImGui::Button("Delete"))
-			{
-				lights.erase(lights.begin() + i);
-				m_scene->MarkLightDataDirty();
-				if (m_selectedLightIndex == i)
-					m_selectedLightIndex = -1;
-				else if (m_selectedLightIndex > i)
-					m_selectedLightIndex--;
-				ImGui::PopStyleColor();
-				ImGui::PopID();
-				break;
-			}
-			ImGui::PopStyleColor();
-
-			const char* typeNames[] = { "Directional", "Point", "Spot" };
-			int lightType = static_cast<int>(light.type);
-			if (ImGui::Combo("Type", &lightType, typeNames, 3))
-			{
-				light.type = static_cast<LightType>(lightType);
-				dirty = true;
-			}
-
-			dirty |= ImGui::DragFloat3("Position", &light.position.x, 0.1f);
-			dirty |= ImGui::DragFloat3("Direction", &light.direction.x, 0.01f, -1.0f, 1.0f);
-			dirty |= ImGui::ColorEdit3("Color", &light.color.x);
-			dirty |= ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, 100.0f);
-			dirty |= ImGui::DragFloat("Range", &light.range, 0.5f, 0.0f, 1000.0f);
-
-			if (dirty)
-				m_scene->MarkLightDataDirty();
-		}
-
-		ImGui::PopID();
-	}
-	
-	ImGui::Spacing();
-	ImGui::Separator();
-	ImGui::Spacing();
-	
-	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.6f, 0.1f, 1.0f));
-	if (ImGui::Button("+", ImVec2(ImGui::GetContentRegionAvail().x, 0)))
-	{
-		LightData newLight{};
-		newLight.type = LightType::Point;
-		newLight.position = { 0.0f, 2.0f, 0.0f };
-		newLight.direction = { 0.0f, -1.0f, 0.0f };
-		newLight.color = { 1.0f, 1.0f, 1.0f };
-		newLight.intensity = 3.0f;
-		newLight.range = 20.0f;
-		lights.push_back(newLight);
-		m_scene->MarkLightDataDirty();
-	}
-	ImGui::PopStyleColor();
-
-	// Render gizmo for selected light
-	if (m_selectedLightIndex >= 0 && m_selectedLightIndex < static_cast<int>(lights.size()))
-	{
-		LightData& light = lights[m_selectedLightIndex];
-
-		const float* view = &m_camera->GetViewMatrix()._11;
-		const float* proj = &m_camera->GetProjectionMatrix()._11;
-
-		float matrix[16];
-		memset(matrix, 0, sizeof(matrix));
-
-		ImGuizmo::OPERATION op;
-		if (light.type == LightType::Directional)
-		{
-			using namespace DirectX;
-			XMVECTOR dir = XMLoadFloat3(&light.direction);
-			XMVECTOR defaultDir = XMVectorSet(0, 0, -1, 0);
-			XMVECTOR axis = XMVector3Cross(defaultDir, dir);
-			float dot = XMVectorGetX(XMVector3Dot(defaultDir, dir));
-
-			XMMATRIX rot;
-			if (XMVectorGetX(XMVector3LengthSq(axis)) < 1e-6f)
-				rot = (dot > 0) ? XMMatrixIdentity() : XMMatrixRotationY(XM_PI);
-			else
-				rot = XMMatrixRotationAxis(XMVector3Normalize(axis), acosf(std::clamp(dot, -1.0f, 1.0f)));
-
-			XMMATRIX trans = XMMatrixTranslation(light.position.x, light.position.y, light.position.z);
-			XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(matrix), rot * trans);
-			op = ImGuizmo::ROTATE;
-		}
-		else // Point (and future Spot)
-		{
-			matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1.0f;
-			matrix[12] = light.position.x;
-			matrix[13] = light.position.y;
-			matrix[14] = light.position.z;
-			op = ImGuizmo::TRANSLATE;
-		}
-
-		ImGuizmo::Manipulate(view, proj, op, ImGuizmo::WORLD, matrix);
-		if (ImGuizmo::IsUsing())
-		{
-			if (light.type == LightType::Directional)
-			{
-				using namespace DirectX;
-				XMFLOAT4X4 result;
-				memcpy(&result, matrix, sizeof(result));
-				XMMATRIX m = XMLoadFloat4x4(&result);
-				XMStoreFloat3(&light.direction, XMVector3Normalize(-m.r[2]));
-			}
-			else
-			{
-				light.position = { matrix[12], matrix[13], matrix[14] };
-			}
-			m_scene->MarkLightDataDirty();
-		}
-	}
-
-	ImGui::End();
+	m_editorUI = std::make_shared<EditorUI>();
+	m_editorUI->Initialize(g_device, m_d3d12CommandQueue, m_srvCbvUavDescriptorHeap);
+	m_editorUI->SetCamera(m_camera);
+	m_editorUI->SetScene(m_scene);
+	m_editorUI->SetAccumulationPass(m_accumulationPass);
 }
 
 void Renderer::OnShaderReload()

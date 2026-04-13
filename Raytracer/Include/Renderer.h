@@ -101,10 +101,7 @@ private:
 	void CreateVertexSRV();
 	void CreateIndexSRV();
 
-	void InitializeImGui();
-	void RenderImGui();
-	void DrawImGuiDebugPanel();
-	void DrawImGuiLightsPanel();
+	void InitializeEditorUI();
 
 	void OnShaderReload();
 
@@ -184,7 +181,7 @@ private:
 	std::shared_ptr<PassConstants> m_passConstants;
 	std::shared_ptr<StructuredBuffer<float>> m_randomBuffer;
 
-	int m_selectedLightIndex = -1;
+	std::shared_ptr<class EditorUI> m_editorUI;
 };
 
 template <typename T>

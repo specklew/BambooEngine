@@ -105,6 +105,7 @@
     <ClInclude Include="Include\Constants.h" />
     <ClInclude Include="Include\DescriptorHeapAllocator.h" />
     <ClInclude Include="Include\FrameAccumulationPass.h" />
+    <ClInclude Include="Include\EditorUI.h" />
     <ClInclude Include="Include\PostProcessPass.h" />
     <ClInclude Include="Include\HighResolutionClock.h" />
     <ClInclude Include="Include\InputElements.h" />
@@ -326,6 +327,7 @@
     <ClCompile Include="Source\HighResolutionClock.cpp" />
     <ClCompile Include="Source\InputElements.cpp" />
     <ClCompile Include="Source\RaytracePass.cpp" />
+    <ClCompile Include="Source\EditorUI.cpp" />
     <ClCompile Include="Source\Renderer.cpp" />
     <ClCompile Include="Source\ResourceManager\ResourceManager.cpp" />
     <ClCompile Include="Source\ResourceManager\ResourceManagerTypes.cpp" />
