@@ -46,7 +46,7 @@ static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CV
 static AutoCVarEnum g_rasterizationDebugMode("renderer.rasterDebugMode", "Rasterization shader debug visualization mode", RasterDebugMode::None);
 static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world position", {0.0f, 0.0f, -10.0f});
 static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
-static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 4, CVarFlags::EditDrag, 1, 64);
+static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 1, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_accumCaptureSeconds("renderer.accumulation.captureAfterSeconds","Accumulate for N seconds then screenshot (-1 = disabled)", -1.0f, CVarFlags::EditDrag, -1.0f, 60.0f);
@@ -1071,6 +1071,7 @@ void Renderer::RenderImGui()
 	ImGui::NewFrame();
 	ImGuizmo::BeginFrame();
 	ImGuizmo::SetRect(0, 0, ImGui::GetIO().DisplaySize.x, ImGui::GetIO().DisplaySize.y);
+	ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
 
 	CVarSystem::Get()->DrawImguiEditor();
 	DrawImGuiDebugPanel();
@@ -1117,7 +1118,6 @@ void Renderer::DrawImGuiLightsPanel()
 	if (!m_scene) return;
 
 	auto& lights = m_scene->GetLightDataCPU();
-	if (lights.empty()) return;
 
 	// Clamp selection if lights changed
 	if (m_selectedLightIndex >= static_cast<int>(lights.size()))
@@ -1143,6 +1143,21 @@ void Renderer::DrawImGuiLightsPanel()
 				ImGui::SameLine();
 				ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "[Active]");
 			}
+			ImGui::SameLine();
+			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.1f, 0.1f, 1.0f));
+			if (ImGui::Button("Delete"))
+			{
+				lights.erase(lights.begin() + i);
+				m_scene->MarkLightDataDirty();
+				if (m_selectedLightIndex == i)
+					m_selectedLightIndex = -1;
+				else if (m_selectedLightIndex > i)
+					m_selectedLightIndex--;
+				ImGui::PopStyleColor();
+				ImGui::PopID();
+				break;
+			}
+			ImGui::PopStyleColor();
 
 			const char* typeNames[] = { "Directional", "Point", "Spot" };
 			int lightType = static_cast<int>(light.type);
@@ -1164,6 +1179,25 @@ void Renderer::DrawImGuiLightsPanel()
 
 		ImGui::PopID();
 	}
+	
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+	
+	ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.1f, 0.6f, 0.1f, 1.0f));
+	if (ImGui::Button("+", ImVec2(ImGui::GetContentRegionAvail().x, 0)))
+	{
+		LightData newLight{};
+		newLight.type = LightType::Point;
+		newLight.position = { 0.0f, 2.0f, 0.0f };
+		newLight.direction = { 0.0f, -1.0f, 0.0f };
+		newLight.color = { 1.0f, 1.0f, 1.0f };
+		newLight.intensity = 3.0f;
+		newLight.range = 20.0f;
+		lights.push_back(newLight);
+		m_scene->MarkLightDataDirty();
+	}
+	ImGui::PopStyleColor();
 
 	// Render gizmo for selected light
 	if (m_selectedLightIndex >= 0 && m_selectedLightIndex < static_cast<int>(lights.size()))
