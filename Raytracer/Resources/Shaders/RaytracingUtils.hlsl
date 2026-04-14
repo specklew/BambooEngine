@@ -106,6 +106,8 @@ StructuredBuffer<LightData> g_lightData : register(t6);
 
 Texture2D g_textures[MAX_TEXTURES] : register(t7);
 
+Texture2D g_skybox : register(t0, space1);
+
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);
 SamplerState gsamLinearWrap : register(s2);

@@ -104,6 +104,7 @@ private:
 	void InitializeEditorUI();
 
 	void OnShaderReload();
+	void LoadSkybox(const std::wstring& path);
 
 	std::shared_ptr<RaytracePass> m_raytracePass;
 	std::shared_ptr<FrameAccumulationPass> m_accumulationPass;
@@ -180,6 +181,7 @@ private:
 
 	std::shared_ptr<PassConstants> m_passConstants;
 	std::shared_ptr<StructuredBuffer<float>> m_randomBuffer;
+	Microsoft::WRL::ComPtr<ID3D12Resource> m_skyboxResource;
 
 	std::shared_ptr<class EditorUI> m_editorUI;
 };

@@ -400,12 +400,18 @@ void RaytracePass::CreateGlobalRootSignature()
     texture_range.RegisterSpace = 0;
     texture_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
     texture_range.OffsetInDescriptorsFromTableStart = 6;
-    
 
-    D3D12_DESCRIPTOR_RANGE ranges[6] = {cbvRange, rtRange, tlasRange, vertex_range, index_range, texture_range};
+    D3D12_DESCRIPTOR_RANGE skybox_range;
+    skybox_range.BaseShaderRegister = 0;
+    skybox_range.NumDescriptors = 1;
+    skybox_range.RegisterSpace = 1;
+    skybox_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    skybox_range.OffsetInDescriptorsFromTableStart = Constants::Graphics::SKYBOX_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE ranges[7] = {cbvRange, rtRange, tlasRange, vertex_range, index_range, texture_range, skybox_range};
 
     CD3DX12_ROOT_PARAMETER rootParameters[7];
-    rootParameters[0].InitAsDescriptorTable(6, ranges);
+    rootParameters[0].InitAsDescriptorTable(7, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
     rootParameters[3].InitAsShaderResourceView(5, 0); // Random buffer

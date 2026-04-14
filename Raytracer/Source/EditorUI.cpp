@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "EditorUI.h"
 
+#include <commdlg.h>
+
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
 #include "backends/imgui_impl_win32.h"
@@ -117,6 +119,9 @@ void EditorUI::DrawDebugPanel()
 	auto* lift = CVarSystem::Get()->GetFloatCVar(StringId("renderer.postprocess.lift"));
 	if (lift && ImGui::DragFloat("Lift", lift, 0.005f, 0.0f, 0.5f, "%.3f"))
 		CVarSystem::Get()->SetCVarFloat(StringId("renderer.postprocess.lift"), *lift);
+
+	// Skybox
+	DrawSkyboxSection();
 
 	ImGui::End();
 }
@@ -266,4 +271,36 @@ void EditorUI::DrawLightsPanel()
 	}
 
 	ImGui::End();
+}
+
+void EditorUI::DrawSkyboxSection()
+{
+	ImGui::SeparatorText("Skybox");
+
+	// Display current skybox filename
+	char nameUtf8[256];
+	WideCharToMultiByte(CP_UTF8, 0, m_currentSkyboxName.c_str(), -1, nameUtf8, sizeof(nameUtf8), nullptr, nullptr);
+	ImGui::Text("Current: %s", nameUtf8);
+
+	if (ImGui::Button("Load Skybox") && m_onSkyboxLoad)
+	{
+		wchar_t filePath[MAX_PATH] = {};
+		OPENFILENAMEW ofn = {};
+		ofn.lStructSize = sizeof(ofn);
+		ofn.hwndOwner = Window::Get().GetHandle();
+		ofn.lpstrFilter = L"DDS Cubemap (*.dds)\0*.dds\0All Files\0*.*\0";
+		ofn.lpstrFile = filePath;
+		ofn.nMaxFile = MAX_PATH;
+		ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+		if (GetOpenFileNameW(&ofn))
+		{
+			m_onSkyboxLoad(filePath);
+
+			// Extract filename for display
+			std::wstring full(filePath);
+			auto pos = full.find_last_of(L"\\/");
+			m_currentSkyboxName = (pos != std::wstring::npos) ? full.substr(pos + 1) : full;
+		}
+	}
 }

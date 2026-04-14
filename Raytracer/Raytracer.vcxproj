@@ -417,6 +417,9 @@
     <Content Include="Resources\Shaders\raytracing.shadowmiss.shader" />
     <Content Include="Resources\Shaders\accumulation.cs.shader" />
     <Content Include="Resources\Shaders\postprocess.cs.shader" />
+    <None Include="Resources\Textures\citrus_orchard_road_puresky_4k.hdr" />
+    <Content Include="Resources\Textures\qwantani_dusk_2_puresky_2k.dds" />
+    <Content Include="Resources\Textures\qwantani_dusk_2_puresky_2k.hdr" />
     <Content Include="Vendor\DXC\bin\dxcompiler.dll" />
     <Content Include="Vendor\DXC\bin\dxil.dll" />
     <Content Include="Vendor\DXC\lib\dxcompiler.lib" />

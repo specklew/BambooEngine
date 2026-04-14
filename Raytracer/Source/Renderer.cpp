@@ -5,6 +5,7 @@
 #include <algorithm>
 
 #include "Camera.h"
+#include "DDSTextureLoader/DDSTextureLoader12.h"
 #include "EditorUI.h"
 #include "FrameAccumulationPass.h"
 #include "PostProcessPass.h"
@@ -122,6 +123,8 @@ void Renderer::Initialize()
 	m_postProcessPass->Initialize(g_device, m_d3d12CommandList);
 
 	spdlog::info("Renderer initialized successfully.");
+
+	LoadSkybox(L"Resources/Textures/citrus_orchard_road_puresky_4k.dds");
 
 	InitializeEditorUI();
 
@@ -723,7 +726,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES;
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 1; // +1 for skybox cubemap
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -1035,6 +1038,75 @@ void Renderer::InitializeEditorUI()
 	m_editorUI->SetCamera(m_camera);
 	m_editorUI->SetScene(m_scene);
 	m_editorUI->SetAccumulationPass(m_accumulationPass);
+	m_editorUI->SetSkyboxLoadCallback([this](const std::wstring& path) {
+		ExecuteCommandsAndReset();
+		LoadSkybox(path);
+	});
+}
+
+void Renderer::LoadSkybox(const std::wstring& path)
+{
+	ComPtr<ID3D12Resource> textureResource;
+	std::unique_ptr<uint8_t[]> ddsData;
+	std::vector<D3D12_SUBRESOURCE_DATA> subresources;
+
+	HRESULT hr = DirectX::LoadDDSTextureFromFile(
+		g_device.Get(), path.c_str(),
+		&textureResource, ddsData, subresources);
+
+	if (FAILED(hr))
+	{
+		spdlog::error("Failed to load skybox DDS: {}", std::system_category().message(hr));
+		return;
+	}
+
+	// Upload subresources
+	const UINT64 uploadSize = GetRequiredIntermediateSize(textureResource.Get(), 0, static_cast<UINT>(subresources.size()));
+
+	ComPtr<ID3D12Resource> uploadBuffer;
+	auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadSize);
+	ThrowIfFailed(g_device->CreateCommittedResource(
+		&heapProps, D3D12_HEAP_FLAG_NONE,
+		&bufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr, IID_PPV_ARGS(&uploadBuffer)));
+
+	{
+		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(textureResource.Get(),
+			D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
+		m_d3d12CommandList->ResourceBarrier(1, &barrier);
+	}
+
+	UpdateSubresources(m_d3d12CommandList.Get(), textureResource.Get(), uploadBuffer.Get(),
+		0, 0, static_cast<UINT>(subresources.size()), subresources.data());
+
+	{
+		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(textureResource.Get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		m_d3d12CommandList->ResourceBarrier(1, &barrier);
+	}
+
+	// Create SRV at SKYBOX_DESCRIPTOR_INDEX
+	auto desc = textureResource->GetDesc();
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.Format = desc.Format;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDesc.Texture2D.MostDetailedMip = 0;
+	srvDesc.Texture2D.MipLevels = desc.MipLevels;
+
+	UINT descriptorSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(
+		m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+		Constants::Graphics::SKYBOX_DESCRIPTOR_INDEX, descriptorSize);
+
+	g_device->CreateShaderResourceView(textureResource.Get(), &srvDesc, srvHandle);
+
+	m_skyboxResource = textureResource;
+
+	ExecuteCommandsAndReset();
+	spdlog::info("Skybox loaded successfully.");
 }
 
 void Renderer::OnShaderReload()

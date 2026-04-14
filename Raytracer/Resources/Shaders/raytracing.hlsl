@@ -46,9 +46,10 @@ void RayGen()
 [shader("miss")]
 void Miss(inout Payload payload : SV_RayPayload)
 {
-    float ramp = WorldRayDirection().y;
-    float3 baseColor = float3(0.5, 0.7, 0.9);
-    payload.color = baseColor + ramp * 0.2;
+    float3 dir = normalize(WorldRayDirection());
+    float u = atan2(dir.z, dir.x) / (2.0 * PI) + 0.5;
+    float v = -asin(clamp(dir.y, -1.0, 1.0)) / PI + 0.5;
+    payload.color = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
 }
 
 // ---- Closest hit ----
