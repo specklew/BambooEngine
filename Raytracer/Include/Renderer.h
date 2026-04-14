@@ -189,12 +189,15 @@ private:
 template <typename T>
 std::shared_ptr<StructuredBuffer<T>> Renderer::CreateStructuredBuffer(const std::vector<T>& data)
 {
-	auto buffer_size = sizeof(T) * data.size();
+	const auto data_size = sizeof(T) * data.size();
+	auto buffer_size = std::max(data_size, sizeof(T)); // D3D12 disallows 0-byte resources
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> upload_buffer;
 
 	auto cpuData = static_cast<BYTE*>(malloc(buffer_size));
-	memcpy(cpuData, data.data(), buffer_size);
+	memset(cpuData, 0, buffer_size);
+	if (data_size > 0)
+		memcpy(cpuData, data.data(), data_size);
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> default_buffer = RenderingUtils::CreateDefaultBuffer(g_device.Get(), m_d3d12CommandList.Get(), cpuData, buffer_size, upload_buffer);
 	auto structured_buffer = std::make_shared<StructuredBuffer<T>>(g_device, default_buffer, data.size());

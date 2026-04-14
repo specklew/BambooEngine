@@ -2,6 +2,7 @@
 #include "SceneResources/ModelLoading.h"
 
 #include <filesystem>
+#include <unordered_map>
 #include <tinygltf/tiny_gltf.h>
 #include <spdlog/spdlog.h>
 
@@ -253,7 +254,19 @@ static bool LoadTinyGLTFModel(const std::filesystem::path &path, tinygltf::Model
     return true;
 }
 
-static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygltf::Model& model, tinygltf::Primitive& primitive, std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices)
+static std::shared_ptr<Texture> GetOrCreateTexture(Renderer& renderer, const tinygltf::Model& model, int textureIndex, std::unordered_map<int, std::shared_ptr<Texture>>& textureCache)
+{
+    int sourceIndex = model.textures[textureIndex].source;
+    auto it = textureCache.find(sourceIndex);
+    if (it != textureCache.end())
+        return it->second;
+
+    auto texture = renderer.CreateTextureFromGLTF(model.images[sourceIndex]);
+    textureCache[sourceIndex] = texture;
+    return texture;
+}
+
+static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygltf::Model& model, tinygltf::Primitive& primitive, std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices, std::unordered_map<int, std::shared_ptr<Texture>>& textureCache)
 {
     assert(primitive.indices >= 0 && "Failed loading glTF model. Mesh primitive must have indices");
 
@@ -276,20 +289,17 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     {
         if (int albedo_index = model.materials[primitive.material].pbrMetallicRoughness.baseColorTexture.index; albedo_index >= 0)
         {
-            const tinygltf::Image albedo_image = model.images[model.textures[albedo_index].source];
-            material->m_albedoTexture = renderer.CreateTextureFromGLTF(albedo_image);
+            material->m_albedoTexture = GetOrCreateTexture(renderer, model, albedo_index, textureCache);
         }
 
         if (int normal_texture_index = model.materials[primitive.material].normalTexture.index; normal_texture_index >= 0)
         {
-            const tinygltf::Image normal_texture = model.images[model.textures[normal_texture_index].source];
-            material->m_normalTexture = renderer.CreateTextureFromGLTF(normal_texture);
+            material->m_normalTexture = GetOrCreateTexture(renderer, model, normal_texture_index, textureCache);
         }
 
         if (int metallic_roughness_index = model.materials[primitive.material].pbrMetallicRoughness.metallicRoughnessTexture.index; metallic_roughness_index >= 0)
         {
-            const tinygltf::Image metallic_roughness_image = model.images[model.textures[metallic_roughness_index].source];
-            material->m_metallicRoughnessTexture = renderer.CreateTextureFromGLTF(metallic_roughness_image);
+            material->m_metallicRoughnessTexture = GetOrCreateTexture(renderer, model, metallic_roughness_index, textureCache);
         }
 
         const auto& pbr = model.materials[primitive.material].pbrMetallicRoughness;
@@ -573,17 +583,18 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
-    
+    std::unordered_map<int, std::shared_ptr<Texture>> textureCache;
+
     for (auto gltf_model : model.meshes)
     {
         auto current_model = std::make_shared<Model>();
-        
+
         for (auto& primitive : gltf_model.primitives)
         {
-            auto prim = LoadPrimitive(renderer, model, primitive, vertices, indices);
+            auto prim = LoadPrimitive(renderer, model, primitive, vertices, indices, textureCache);
             current_model->AddMesh(prim);
         }
-        
+
         scene_builder.AddModel(current_model);
     }
 

@@ -14,6 +14,7 @@ namespace ModelLoading
         SPONZA,
         SIMPLE_INSTANCING,
         DUCK,
+        BISTRO_EXT,
     };
 
     inline std::vector<std::string> scenePaths = {
@@ -22,6 +23,7 @@ namespace ModelLoading
         "resources/models/sponza/gltf/sponza.gltf",
         "resources/models/simpleinstancing.glb",
         "resources/models/duck.glb",
+        "resources/models/bistroexterior.nogit.glb"
     };
 
     inline std::string ScenePath(const LOADED_SCENES scene) { return scenePaths[scene]; }
