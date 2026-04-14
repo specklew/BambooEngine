@@ -11,6 +11,7 @@
 #include "Camera.h"
 #include "Constants.h"
 #include "FrameAccumulationPass.h"
+#include "RaytracePass.h"
 #include "SceneResources/Scene.h"
 #include "SceneResources/LightData.h"
 #include "Window.h"
@@ -119,6 +120,9 @@ void EditorUI::DrawDebugPanel()
 	auto* lift = CVarSystem::Get()->GetFloatCVar(StringId("renderer.postprocess.lift"));
 	if (lift && ImGui::DragFloat("Lift", lift, 0.005f, 0.0f, 0.5f, "%.3f"))
 		CVarSystem::Get()->SetCVarFloat(StringId("renderer.postprocess.lift"), *lift);
+
+	// Raytracing technique
+	DrawTechniqueSection();
 
 	// Scene
 	DrawSceneSection();
@@ -335,5 +339,26 @@ void EditorUI::DrawSceneSection()
 			auto pos = full.find_last_of(L"\\/");
 			m_currentSceneName = (pos != std::wstring::npos) ? full.substr(pos + 1) : full;
 		}
+	}
+}
+
+void EditorUI::DrawTechniqueSection()
+{
+	const auto& registry = RaytracePass::GetRegistry();
+	if (registry.empty())
+		return;
+
+	ImGui::SeparatorText("Raytracing Technique");
+
+	// Build label array for ImGui combo
+	std::vector<const char*> names;
+	names.reserve(registry.size());
+	for (const auto& entry : registry)
+		names.push_back(entry.name.c_str());
+
+	if (ImGui::Combo("Technique", &m_currentTechniqueIndex, names.data(), static_cast<int>(names.size())))
+	{
+		if (m_onDifferentTechniquePicked)
+			m_onDifferentTechniquePicked(m_currentTechniqueIndex);
 	}
 }

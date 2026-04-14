@@ -27,12 +27,14 @@ public:
 	void SetSkyboxLoadCallback(std::function<void(const std::wstring&)> callback) { m_onSkyboxLoad = std::move(callback); }
 	void SetOnDifferentScenePicked(std::function<void(const std::wstring&)> callback) { m_onDifferentScenePicked = std::move(callback); }
 	void SetCurrentSceneName(const std::wstring& name) { m_currentSceneName = name; }
+	void SetOnDifferentTechniquePicked(std::function<void(int)> callback) { m_onDifferentTechniquePicked = std::move(callback); }
 
 private:
 	void DrawDebugPanel();
 	void DrawLightsPanel();
 	void DrawSkyboxSection();
 	void DrawSceneSection();
+	void DrawTechniqueSection();
 
 	std::shared_ptr<Scene> m_scene;
 	std::shared_ptr<Camera> m_camera;
@@ -42,4 +44,6 @@ private:
 	std::wstring m_currentSkyboxName = L"citrus_orchard_road_puresky_4k.dds";
 	std::function<void(const std::wstring&)> m_onDifferentScenePicked;
 	std::wstring m_currentSceneName = L"abeautifulgame.glb";
+	std::function<void(int)> m_onDifferentTechniquePicked;
+	int m_currentTechniqueIndex = 0;
 };

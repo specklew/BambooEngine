@@ -18,6 +18,7 @@
 #include "SceneResources/ModelLoading.h"
 #include "SceneResources/Primitive.h"
 #include "RaytracePass.h"
+#include "Techniques/PathTracingPass.h"
 #include "SceneResources/Scene.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
@@ -111,7 +112,8 @@ void Renderer::Initialize()
 	}
 	
 	m_randomBuffer = CreateStructuredBuffer<float>(randomData);
-	m_raytracePass = std::make_shared<RaytracePass>();
+	const auto& registry = RaytracePass::GetRegistry();
+	m_raytracePass = registry.empty() ? std::make_shared<RaytracePass>() : registry[0].create();
 	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
 	m_accumulationPass = std::make_shared<FrameAccumulationPass>();
@@ -1035,6 +1037,15 @@ void Renderer::InitializeEditorUI()
 
 		m_raytracePass->OnSceneChange(m_scene);
 		m_editorUI->SetScene(m_scene);
+	});
+	m_editorUI->SetOnDifferentTechniquePicked([this](int index) {
+		const auto& registry = RaytracePass::GetRegistry();
+		if (index < 0 || index >= static_cast<int>(registry.size()))
+			return;
+		spdlog::info("Switching raytracing technique to: {}", registry[index].name);
+		auto newPass = registry[index].create();
+		newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+		m_raytracePass = std::move(newPass);
 	});
 }
 
