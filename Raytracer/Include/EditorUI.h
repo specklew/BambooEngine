@@ -41,7 +41,7 @@ private:
 	std::shared_ptr<FrameAccumulationPass> m_accumulationPass;
 	int m_selectedLightIndex = -1;
 	std::function<void(const std::wstring&)> m_onSkyboxLoad;
-	std::wstring m_currentSkyboxName = L"citrus_orchard_road_puresky_4k.dds";
+	std::wstring m_currentSkyboxName = L"qwantani_dusk_2_puresky_2k.dds";
 	std::function<void(const std::wstring&)> m_onDifferentScenePicked;
 	std::wstring m_currentSceneName = L"abeautifulgame.glb";
 	std::function<void(int)> m_onDifferentTechniquePicked;

@@ -124,7 +124,7 @@ void Renderer::Initialize()
 
 	spdlog::info("Renderer initialized successfully.");
 
-	LoadSkybox(L"Resources/Textures/citrus_orchard_road_puresky_4k.dds");
+	LoadSkybox(L"Resources/Textures/qwantani_dusk_2_puresky_2k.dds");
 
 	InitializeEditorUI();
 
