@@ -219,9 +219,9 @@ void FrameAccumulationPass::Update(double elapsedTime)
 
 void FrameAccumulationPass::Reset()
 {
-    m_frameCount = 0;
+    m_frameCount      = 0;
     m_accumulatedTime = 0.0;
-    m_pendingScreenshots = 0;
+    m_resetCount++;
 }
 
 void FrameAccumulationPass::OnResize()

@@ -19,6 +19,7 @@
 #include "SceneResources/Primitive.h"
 #include "RaytracePass.h"
 #include "Techniques/PathTracingPass.h"
+#include "ScreenshotManager.h"
 #include "SceneResources/Scene.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
@@ -49,8 +50,6 @@ static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 1, CVarFlags::EditCheckbox);
-static AutoCVarFloat g_accumCaptureSeconds("renderer.accumulation.captureAfterSeconds","Accumulate for N seconds then screenshot (-1 = disabled)", -1.0f, CVarFlags::EditDrag, -1.0f, 60.0f);
-static AutoCVarInt   g_screenshotCount("renderer.accumulation.screenshotCount","Number of screenshots to take after capture threshold", 0, CVarFlags::EditDrag, 0, 100);
 static AutoCVarFloat g_exposure("renderer.postprocess.exposure","Exposure multiplier applied before display", 1.0f, CVarFlags::EditDrag, 0.0f, 10.0f);
 static AutoCVarFloat g_contrast("renderer.postprocess.contrast", "Pre-ACES contrast power curve", 1.0f, CVarFlags::EditDrag, 0.1f, 3.0f);
 static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES saturation", 1.0f, CVarFlags::EditDrag, 0.0f, 2.0f);
@@ -121,6 +120,9 @@ void Renderer::Initialize()
 
 	m_postProcessPass = std::make_shared<PostProcessPass>();
 	m_postProcessPass->Initialize(g_device, m_d3d12CommandList);
+
+	m_screenshotManager = std::make_shared<ScreenshotManager>();
+	m_screenshotManager->Initialize(g_device, m_d3d12CommandList);
 
 	spdlog::info("Renderer initialized successfully.");
 
@@ -246,6 +248,10 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		m_prevCameraRot = rot;
 	}
 
+	// Tick screenshot before advancing accumulatedTime so the check reads the pre-update value
+	if (!m_rasterize)
+		m_screenshotManager->Tick(*m_accumulationPass, elapsedTime);
+
 	m_accumulationPass->Update(elapsedTime);
 }
 
@@ -364,6 +370,10 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		// Restore main descriptor heap for ImGui (post-process pass may have changed it)
 		ID3D12DescriptorHeap* mainHeaps[] = { m_srvCbvUavDescriptorHeap.Get() };
 		m_d3d12CommandList->SetDescriptorHeaps(_countof(mainHeaps), mainHeaps);
+
+		// Issue screenshot readback copy if this frame was chosen by Tick()
+		if (m_screenshotManager->IsCaptureDue())
+			m_screenshotManager->RecordCopy(m_postProcessPass->GetOutputBuffer());
 	}
 
 	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_d3d12CommandList.Get());
@@ -389,6 +399,10 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	FlushCommandQueue();
 	ResetCommandList();
+
+	// Map readback buffer and write PNG; GPU is guaranteed done after FlushCommandQueue
+	if (m_screenshotManager->IsCaptureDue())
+		m_screenshotManager->FinishCapture();
 }
 
 void Renderer::CleanUp()
@@ -1037,6 +1051,12 @@ void Renderer::InitializeEditorUI()
 
 		m_raytracePass->OnSceneChange(m_scene);
 		m_editorUI->SetScene(m_scene);
+	});
+	m_editorUI->SetScreenshotRequestCallback([this](float seconds) {
+		m_screenshotManager->Arm(*m_accumulationPass, seconds);
+	});
+	m_editorUI->SetScreenshotPendingGetter([this]() {
+		return m_screenshotManager->IsPending();
 	});
 	m_editorUI->SetOnDifferentTechniquePicked([this](int index) {
 		const auto& registry = RaytracePass::GetRegistry();

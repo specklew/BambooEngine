@@ -22,6 +22,10 @@ public:
 
     void OnResize();
 
+    // Returns the post-process output texture (DXGI_FORMAT_R8G8B8A8_UNORM).
+    // In D3D12_RESOURCE_STATE_COPY_SOURCE after Render().
+    const Microsoft::WRL::ComPtr<ID3D12Resource>& GetOutputBuffer() const { return m_outputBuffer; }
+
 private:
     void CreateResources();
     void CreateRootSignature();

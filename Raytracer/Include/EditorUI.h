@@ -28,6 +28,8 @@ public:
 	void SetOnDifferentScenePicked(std::function<void(const std::wstring&)> callback) { m_onDifferentScenePicked = std::move(callback); }
 	void SetCurrentSceneName(const std::wstring& name) { m_currentSceneName = name; }
 	void SetOnDifferentTechniquePicked(std::function<void(int)> callback) { m_onDifferentTechniquePicked = std::move(callback); }
+	void SetScreenshotRequestCallback(std::function<void(float)> callback) { m_onScreenshotRequest = std::move(callback); }
+	void SetScreenshotPendingGetter(std::function<bool()> getter)          { m_isScreenshotPending = std::move(getter); }
 
 private:
 	void DrawDebugPanel();
@@ -46,4 +48,7 @@ private:
 	std::wstring m_currentSceneName = L"abeautifulgame.glb";
 	std::function<void(int)> m_onDifferentTechniquePicked;
 	int m_currentTechniqueIndex = 0;
+	std::function<void(float)> m_onScreenshotRequest;
+	std::function<bool()>      m_isScreenshotPending;
+	float m_screenshotSeconds = 1.0f;
 };

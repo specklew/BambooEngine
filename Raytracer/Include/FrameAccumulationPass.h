@@ -14,8 +14,9 @@ public:
     void Reset();
     void OnResize();
 
-    uint32_t GetFrameCount() const { return m_frameCount; }
-    double GetAccumulatedTime() const { return m_accumulatedTime; }
+    uint32_t GetFrameCount()    const { return m_frameCount; }
+    double   GetAccumulatedTime() const { return m_accumulatedTime; }
+    uint32_t GetResetCount()    const { return m_resetCount; }
     const Microsoft::WRL::ComPtr<ID3D12Resource>& GetDisplayBuffer() const { return m_displayBuffer; }
 
 private:
@@ -34,6 +35,6 @@ private:
 
     uint32_t m_frameCount      = 0;
     double   m_accumulatedTime = 0.0;
-    int      m_pendingScreenshots = 0;
-    bool     m_initialized = false;
+    uint32_t m_resetCount      = 0;
+    bool     m_initialized     = false;
 };
