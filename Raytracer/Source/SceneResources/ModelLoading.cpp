@@ -332,18 +332,6 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     return std::make_shared<Primitive>(vertex_view, index_view, material);
 }
 
-std::vector<std::shared_ptr<Scene>> ModelLoading::LoadAllScenes(Renderer& renderer)
-{
-    std::vector<std::shared_ptr<Scene>> scenes;
-    
-    for (const std::string& scenePath : scenePaths)
-    {
-        scenes.push_back(LoadScene(renderer, AssetId(scenePath.c_str(), scenePath.size())));
-    }
-
-    return std::move(scenes);
-}
-
 static DirectX::SimpleMath::Vector3 ReadNodePosition(const tinygltf::Node& node)
 {
     if (node.translation.size() == 3)

@@ -38,7 +38,6 @@
 
 using namespace Microsoft::WRL;
 
-static AutoCVarEnum g_currentScene("renderer.initialScene", "Specifies which scene to load on startup.", ModelLoading::LOADED_SCENES::A_BEAUTIFUL_GAME);
 static AutoCVarFloat g_cameraSpeed("renderer.camera.speed", "Specifies the base speed of camera", 1.0f, CVarFlags::EditDrag, 0.1f, 100.0f);
 static AutoCVarFloat g_cameraScrollFactor("renderer.camera.scrollFactor", "Multiplier per scroll tick for camera speed", 1.2f, CVarFlags::EditDrag, 1.01f, 3.0f);
 static AutoCVarFloat g_uvCoordX("renderer.uv.x", "Texture uv x offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
@@ -89,8 +88,7 @@ void Renderer::Initialize()
 	CreateDescriptorHeaps();
 	CreateWorldProjCBV();
 
-	m_scene = ModelLoading::LoadScene(*this, AssetId(ModelLoading::ScenePath(g_currentScene.Get())));
-	previousScene = g_currentScene.Get();
+	m_scene = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb"));
 
 	CreateVertexSRV();
 	CreateIndexSRV();
@@ -213,25 +211,6 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	memcpy(&m_mappedData[0], &constants, sizeof(constants));
 
 	m_raytracePass->Update(elapsedTime, totalTime);
-
-	if (previousScene != g_currentScene.Get())
-	{
-		spdlog::info("Scene has been changed. Loading: {}", ModelLoading::ScenePath(g_currentScene.Get()));
-
-		g_textureIndex = 0;
-		
-		m_scene = ModelLoading::LoadScene(*this, AssetId(ModelLoading::ScenePath(g_currentScene.Get())));
-		
-		CreateVertexSRV();
-		CreateIndexSRV();
-
-		ExecuteCommandsAndReset();
-
-		m_raytracePass->OnSceneChange(m_scene);
-		m_editorUI->SetScene(m_scene);
-
-		previousScene = g_currentScene.Get();
-	}
 
 	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
 	m_passConstants->data.uvCoordY = g_uvCoordY.Get();
@@ -1041,6 +1020,21 @@ void Renderer::InitializeEditorUI()
 	m_editorUI->SetSkyboxLoadCallback([this](const std::wstring& path) {
 		ExecuteCommandsAndReset();
 		LoadSkybox(path);
+	});
+	m_editorUI->SetOnDifferentScenePicked([this](const std::wstring& path) {
+		char pathUtf8[MAX_PATH];
+		WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, pathUtf8, sizeof(pathUtf8), nullptr, nullptr);
+		spdlog::info("Scene has been changed. Loading: {}", pathUtf8);
+
+		g_textureIndex = 0;
+		m_scene = ModelLoading::LoadScene(*this, AssetId(pathUtf8));
+
+		CreateVertexSRV();
+		CreateIndexSRV();
+		ExecuteCommandsAndReset();
+
+		m_raytracePass->OnSceneChange(m_scene);
+		m_editorUI->SetScene(m_scene);
 	});
 }
 

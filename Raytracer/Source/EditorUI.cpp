@@ -120,6 +120,9 @@ void EditorUI::DrawDebugPanel()
 	if (lift && ImGui::DragFloat("Lift", lift, 0.005f, 0.0f, 0.5f, "%.3f"))
 		CVarSystem::Get()->SetCVarFloat(StringId("renderer.postprocess.lift"), *lift);
 
+	// Scene
+	DrawSceneSection();
+
 	// Skybox
 	DrawSkyboxSection();
 
@@ -301,6 +304,36 @@ void EditorUI::DrawSkyboxSection()
 			std::wstring full(filePath);
 			auto pos = full.find_last_of(L"\\/");
 			m_currentSkyboxName = (pos != std::wstring::npos) ? full.substr(pos + 1) : full;
+		}
+	}
+}
+
+void EditorUI::DrawSceneSection()
+{
+	ImGui::SeparatorText("Scene");
+
+	char nameUtf8[256];
+	WideCharToMultiByte(CP_UTF8, 0, m_currentSceneName.c_str(), -1, nameUtf8, sizeof(nameUtf8), nullptr, nullptr);
+	ImGui::Text("Current: %s", nameUtf8);
+
+	if (ImGui::Button("Load Scene") && m_onDifferentScenePicked)
+	{
+		wchar_t filePath[MAX_PATH] = {};
+		OPENFILENAMEW ofn = {};
+		ofn.lStructSize = sizeof(ofn);
+		ofn.hwndOwner = Window::Get().GetHandle();
+		ofn.lpstrFilter = L"glTF (*.gltf;*.glb)\0*.gltf;*.glb\0All Files\0*.*\0";
+		ofn.lpstrFile = filePath;
+		ofn.nMaxFile = MAX_PATH;
+		ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+		if (GetOpenFileNameW(&ofn))
+		{
+			m_onDifferentScenePicked(filePath);
+
+			std::wstring full(filePath);
+			auto pos = full.find_last_of(L"\\/");
+			m_currentSceneName = (pos != std::wstring::npos) ? full.substr(pos + 1) : full;
 		}
 	}
 }

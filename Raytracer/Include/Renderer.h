@@ -164,8 +164,6 @@ private:
 	float m_phi = DirectX::XM_PIDIV4;
 	float m_radius = 5.0f;
 
-	int previousScene;
-	
 	DirectX::XMFLOAT4X4 m_world = MathUtils::XMFloat4x4Identity();
 
 	std::shared_ptr<Camera> m_camera;

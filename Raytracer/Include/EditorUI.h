@@ -25,11 +25,14 @@ public:
 	void SetCamera(std::shared_ptr<Camera> camera) { m_camera = camera; }
 	void SetAccumulationPass(std::shared_ptr<FrameAccumulationPass> pass) { m_accumulationPass = pass; }
 	void SetSkyboxLoadCallback(std::function<void(const std::wstring&)> callback) { m_onSkyboxLoad = std::move(callback); }
+	void SetOnDifferentScenePicked(std::function<void(const std::wstring&)> callback) { m_onDifferentScenePicked = std::move(callback); }
+	void SetCurrentSceneName(const std::wstring& name) { m_currentSceneName = name; }
 
 private:
 	void DrawDebugPanel();
 	void DrawLightsPanel();
 	void DrawSkyboxSection();
+	void DrawSceneSection();
 
 	std::shared_ptr<Scene> m_scene;
 	std::shared_ptr<Camera> m_camera;
@@ -37,4 +40,6 @@ private:
 	int m_selectedLightIndex = -1;
 	std::function<void(const std::wstring&)> m_onSkyboxLoad;
 	std::wstring m_currentSkyboxName = L"citrus_orchard_road_puresky_4k.dds";
+	std::function<void(const std::wstring&)> m_onDifferentScenePicked;
+	std::wstring m_currentSceneName = L"abeautifulgame.glb";
 };
