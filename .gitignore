@@ -401,3 +401,7 @@ FodyWeavers.xsd
 
 # Exclude files that are marked not for git
 *.nogit.*
+Raytracer/Screenshots/
+.claude/
+.opencode/
+CLAUDE.*

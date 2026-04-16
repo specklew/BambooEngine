@@ -15,5 +15,5 @@ void main(uint3 tid : SV_DispatchThreadID)
     float  w       = 1.0 / float(max(frameCount, 1u));
     float3 accum   = lerp(gAccum[id].rgb, current, w);
     gAccum[id]    = float4(accum, 1.0);
-    gDisplay[id]  = float4(saturate(accum), 1.0);
+    gDisplay[id]  = float4(accum, 1.0);
 }

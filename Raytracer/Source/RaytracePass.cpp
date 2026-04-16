@@ -437,7 +437,7 @@ void RaytracePass::CreateRaytracingOutputBuffer()
     D3D12_RESOURCE_DESC outputBufferDesc = {};
     outputBufferDesc.DepthOrArraySize = 1;
     outputBufferDesc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    outputBufferDesc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+    outputBufferDesc.Format           = DXGI_FORMAT_R16G16B16A16_FLOAT;
     outputBufferDesc.Width            = Window::Get().GetWidth();
     outputBufferDesc.Height           = Window::Get().GetHeight();
     outputBufferDesc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;

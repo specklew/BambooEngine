@@ -92,7 +92,7 @@ void FrameAccumulationPass::CreateResources()
         m_accumulationBuffer->SetName(L"FrameAccumulation Buffer");
     }
 
-    // Display buffer (R8G8B8A8_UNORM)
+    // Display buffer (R16G16B16A16_FLOAT — HDR, tonemapped by PostProcessPass)
     {
         D3D12_RESOURCE_DESC desc = {};
         desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -101,7 +101,7 @@ void FrameAccumulationPass::CreateResources()
         desc.Height = height;
         desc.DepthOrArraySize = 1;
         desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
         desc.SampleDesc.Count = 1;
         desc.SampleDesc.Quality = 0;
         desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -148,7 +148,7 @@ void FrameAccumulationPass::Render(
 
     // Create SRV for current frame at slot 0 (t0)
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.Texture2D.MipLevels = 1;
@@ -163,7 +163,7 @@ void FrameAccumulationPass::Render(
 
     // Create UAV for display buffer at slot 2 (u1)
     cpuHandle.Offset(1, descriptorSize);
-    uavDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     m_device->CreateUnorderedAccessView(m_displayBuffer.Get(), nullptr, &uavDesc, cpuHandle);
 
     // Bind root signature and PSO
