@@ -21,6 +21,7 @@ struct Material
         int roughness_index = -1;
         float metallicFactor = 1.0f;
         float roughnessFactor = 1.0f;
+        bool isOpaque{true};
     } m_data;
 
 private:

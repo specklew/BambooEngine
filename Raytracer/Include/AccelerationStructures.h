@@ -24,7 +24,8 @@ public:
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
         std::vector<BufferView> vertexBuffers,
-        std::vector<BufferView> indexBuffers);
+        std::vector<BufferView> indexBuffers,
+        bool isOpaque = true);
     
     void CreateTopLevelAS(
         Microsoft::WRL::ComPtr<ID3D12Device5> device,

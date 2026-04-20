@@ -1,6 +1,7 @@
 #define MAX_TEXTURES 512
 #include "RasterDebugMode.h"
 #include "passConstants.hlsl"
+#include "consts.hlsl"
 
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);

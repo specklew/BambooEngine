@@ -1,8 +1,8 @@
 #ifndef BRDF_HLSL
 #define BRDF_HLSL
 
-static const float PI = 3.14159265359;
-static const float EPSILON = 0.001;
+#include "consts.hlsl"
+
 static const float3 DIELECTRIC_F0 = float3(0.04, 0.04, 0.04);
 
 // ---- Cook-Torrance BRDF components ----

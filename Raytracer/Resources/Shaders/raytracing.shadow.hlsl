@@ -1,6 +1,7 @@
 ﻿#ifndef RAYTRACER_SHADOW_HLSL
 #define RAYTRACER_SHADOW_HLSL
 
+#include "consts.hlsl"
 #include "RaytracingUtils.hlsl"
 
 struct ShadowPayload
@@ -46,6 +47,17 @@ float TraceShadow(float3 shadingPoint, LightData light)
 [shader("anyhit")]
 void ShadowHit(inout ShadowPayload payload : SV_RayPayload, Attributes attr)
 {
+    InstanceInfo instance = g_instanceInfo[InstanceID()];
+    uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
+    uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
+    HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
+    
+    float4 albedo = SampleTextureColor(hit) * instance.baseColorFactor;
+    if (albedo.a < EPSILON)
+    {
+        IgnoreHit();
+    }
+    
     payload.visibility = 0.0;
     AcceptHitAndEndSearch();
 }

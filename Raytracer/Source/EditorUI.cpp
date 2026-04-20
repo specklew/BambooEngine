@@ -102,7 +102,7 @@ void EditorUI::DrawDebugPanel()
 	if (ImGui::Button("Reset") && m_accumulationPass)
 		m_accumulationPass->Reset();
 
-	ImGui::DragFloat("Capture time (s)", &m_screenshotSeconds, 0.1f, 0.05f, 60.0f, "%.2f");
+	ImGui::DragFloat("Capture time (s)", &m_screenshotSeconds, 0.1f, 0.00f, 60.0f, "%.2f");
 	if (ImGui::Button("Take Screenshot") && m_onScreenshotRequest)
 		m_onScreenshotRequest(m_screenshotSeconds);
 	if (m_isScreenshotPending && m_isScreenshotPending() && m_accumulationPass)

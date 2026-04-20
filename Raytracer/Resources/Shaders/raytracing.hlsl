@@ -1,6 +1,10 @@
+#ifndef RAYTRACING_HLSL
+#define RAYTRACING_HLSL
+
 #include "BRDF.hlsl"
 #include "Random.hlsl"
 #include "RaytracingUtils.hlsl"
+#include "consts.hlsl"
 #include "raytracing.shadow.hlsl"
 #include "passConstants.hlsl"
 
@@ -34,11 +38,11 @@ void RayGen()
         payload.throughput = float3(1, 1, 1);
         payload.bounceCount = 0;
         payload.seed = seed;
-        TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+        TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
         accumulated += payload.color;
     }
 
-    gOutput[launchIndex] = float4(accumulated / samplesPerPixel, 1.0);
+    gOutput[launchIndex] = min(float4(accumulated / samplesPerPixel, 1.0), 100.0f);
 }
 
 // ---- Miss ----
@@ -75,7 +79,7 @@ float3 EvalSpecularBounce(SurfaceData s, float3 H, float3 bounceDir)
         return float3(0, 0, 0);
 
     float NdotH = max(dot(s.N, H), EPSILON);
-    float NdotL = max(dot(s.N, bounceDir), 0.1);
+    float NdotL = max(dot(s.N, bounceDir), EPSILON);
     float VdotH = max(dot(s.V, H), EPSILON);
 
     float3 F = FresnelSchlick(VdotH, s.F0);
@@ -101,7 +105,7 @@ float3 EvalDiffuseBounce(SurfaceData s, float3 kD, float3 bounceDir)
 float3 EvalSpecularDirect(SurfaceData s, float3 L)
 {
     float3 H = normalize(s.V + L);
-    float NdotL = max(dot(s.N, L), 0.1);
+    float NdotL = max(dot(s.N, L), EPSILON);
     float NdotH = max(dot(s.N, H), EPSILON);
     float VdotH = max(dot(s.V, H), EPSILON);
 
@@ -109,7 +113,7 @@ float3 EvalSpecularDirect(SurfaceData s, float3 L)
     float  G = GeometrySmith(s.NdotV, NdotL, s.roughness);
     float  D = DistributionGGX(NdotH, s.roughness);
 
-    return min((F * G * D) / (4.0 * s.NdotV * NdotL + EPSILON), float3(1, 1, 1));
+    return (F * G * D) / (4.0 * s.NdotV * NdotL + EPSILON);
 }
 
 // Lambertian diffuse for a known light direction: albedo / PI.
@@ -170,8 +174,23 @@ float3 CalculateDirectLightning(HitData hit, SurfaceData surface)
     return directLighting;
 }
 
+[shader("anyhit")]
+void AnyHit(inout Payload : SV_RayPayload, in Attributes attr)
+{
+    InstanceInfo instance = g_instanceInfo[InstanceID()];
+    uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
+    uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
+    HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
+    
+    float4 albedo = SampleTextureColor(hit) * instance.baseColorFactor;
+    if (albedo.a < EPSILON)
+    {
+        IgnoreHit();
+    }
+}
+
 [shader("closesthit")]
-void Hit(inout Payload payload : SV_RayPayload, Attributes attr)
+void Hit(inout Payload payload : SV_RayPayload, in Attributes attr)
 {
     InstanceInfo instance = g_instanceInfo[InstanceID()];
     uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
@@ -244,9 +263,6 @@ void Hit(inout Payload payload : SV_RayPayload, Attributes attr)
         throughput /= (1.0 - specularProb + EPSILON);
     }
 
-    // Clamp throughput to suppress firefly samples from high-variance paths
-    throughput = min(throughput, float3(5.0, 5.0, 5.0));
-
     // Trace bounce ray
     RayDesc ray;
     ray.Origin = hit.position;
@@ -263,3 +279,4 @@ void Hit(inout Payload payload : SV_RayPayload, Attributes attr)
     payload.throughput = throughput * payload.throughput;
 }
 
+#endif

@@ -322,6 +322,7 @@
     <None Include="Resources\Shaders\raytracing.shadow.hlsl" />
     <None Include="Resources\Shaders\accumulation.hlsl" />
     <None Include="Resources\Shaders\postprocess.hlsl" />
+    <None Include="Resources\Shaders\utils.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
     <ClCompile Include="Source\Camera.cpp" />
@@ -417,6 +418,7 @@
   <ItemGroup>
     <Content Include="Resources\Shaders\colorShader.ps.shader" />
     <Content Include="Resources\Shaders\colorShader.vs.shader" />
+    <Content Include="Resources\Shaders\raytracing.ah.shader" />
     <Content Include="Resources\Shaders\raytracing.ch.shader" />
     <Content Include="Resources\Shaders\raytracing.ms.shader" />
     <Content Include="Resources\Shaders\raytracing.rg.shader" />
@@ -424,6 +426,7 @@
     <Content Include="Resources\Shaders\raytracing.shadowmiss.shader" />
     <Content Include="Resources\Shaders\accumulation.cs.shader" />
     <Content Include="Resources\Shaders\postprocess.cs.shader" />
+    <None Include="Resources\Shaders\consts.hlsl" />
     <Content Include="Resources\Textures\qwantani_dusk_2_puresky_2k.dds" />
     <Content Include="Resources\Textures\qwantani_dusk_2_puresky_2k.hdr" />
     <Content Include="Vendor\DXC\bin\dxcompiler.dll" />

@@ -38,6 +38,7 @@ private:
     State m_state      = State::Idle;
     bool  m_captureDue    = false;
     bool  m_copyRecorded  = false; // set by RecordCopy, guards FinishCapture
+    bool m_wasTargetExceeded = false;
 
     float    m_targetSeconds  = 0.0f;
     uint32_t m_resetCountAtArm = 0;

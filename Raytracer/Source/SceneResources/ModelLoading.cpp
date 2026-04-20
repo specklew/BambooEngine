@@ -301,6 +301,11 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
         {
             material->m_metallicRoughnessTexture = GetOrCreateTexture(renderer, model, metallic_roughness_index, textureCache);
         }
+        
+        if (model.materials[primitive.material].alphaMode != "OPAQUE")
+        {
+            material->m_data.isOpaque = false;
+        }
 
         const auto& pbr = model.materials[primitive.material].pbrMetallicRoughness;
         const auto& bcf = pbr.baseColorFactor;
@@ -417,7 +422,8 @@ static std::shared_ptr<AccelerationStructures> BuildAccelerationStructures(const
                 renderer.g_device.Get(),
                 renderer.GetCommandList(),
                 vertex_buffers,
-                index_buffers);
+                index_buffers,
+                prim->GetMaterial()->m_data.isOpaque);
 
             modelBLASes.emplace(prim, std::make_shared<AccelerationStructureBuffers>(bottomLevelBuffers));
         }
@@ -572,7 +578,7 @@ std::shared_ptr<Scene> ModelLoading::LoadScene(Renderer& renderer, const AssetId
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     std::unordered_map<int, std::shared_ptr<Texture>> textureCache;
-
+    
     for (auto gltf_model : model.meshes)
     {
         auto current_model = std::make_shared<Model>();

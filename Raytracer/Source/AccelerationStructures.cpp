@@ -18,7 +18,8 @@ AccelerationStructureBuffers AccelerationStructures::CreateBottomLevelAS(
     Microsoft::WRL::ComPtr<ID3D12Device5> device,
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
     std::vector<BufferView> vertexBuffers,
-    std::vector<BufferView> indexBuffers)
+    std::vector<BufferView> indexBuffers,
+    bool isOpaque)
 {
     spdlog::debug("Creating bottom level AS");
     
@@ -36,7 +37,7 @@ AccelerationStructureBuffers AccelerationStructures::CreateBottomLevelAS(
 
         spdlog::debug("Adding vertex buffer with name {}: {} vertices and {} indicies.", GetName(vertexBuffer.Get()), vertexCount, indexCount);
         bottomLevelGenerator.AddVertexBuffer(vertexBuffer.Get(), vertexOffset, vertexCount, sizeof(Vertex),
-            indexBuffer.Get(), indexOffset, indexCount, nullptr, 0);
+            indexBuffer.Get(), indexOffset, indexCount, nullptr, 0, isOpaque);
     }
 
     uint64_t scratchSizeInBytes = 0;

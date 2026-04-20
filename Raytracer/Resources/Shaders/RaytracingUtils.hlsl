@@ -251,11 +251,11 @@ float3 SampleWorldSpaceNormal(HitData data)
     return normalize(mul(normalTS, TBN));
 }
 
-float3 SampleTextureColor(HitData data)
+float4 SampleTextureColor(HitData data)
 {
     int texIdx = g_instanceInfo[NonUniformResourceIndex(InstanceID())].textureIndex;
     float4 col = SampleTexture(texIdx, data.uv);
-    return col.rgb;
+    return col;
 }
 
 float2 SampleRoughnessMetallic(HitData data, float roughnessFactor, float metallicFactor)

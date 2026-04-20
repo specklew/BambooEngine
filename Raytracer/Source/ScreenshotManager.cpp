@@ -24,12 +24,17 @@ void ScreenshotManager::Arm(FrameAccumulationPass& accum, float seconds)
 {
     if (m_state != State::Idle)
         return;
-
-    accum.Reset();
+    
+    if (seconds >= FLT_EPSILON)
+    {
+        accum.Reset();
+    }
+    
     m_resetCountAtArm = accum.GetResetCount();
     m_targetSeconds   = seconds;
     m_captureDue      = false;
     m_copyRecorded    = false;
+    m_wasTargetExceeded = false;
     m_state           = State::Pending;
     spdlog::info("Screenshot armed: accumulating for {:.2f}s", seconds);
 }
@@ -50,12 +55,19 @@ void ScreenshotManager::Tick(FrameAccumulationPass& accum, double elapsedTime)
     // Capture on the last frame where accumulatedTime <= T,
     // i.e. the next Update() would push it past T.
     const float t = static_cast<float>(accum.GetAccumulatedTime());
-    if (t <= m_targetSeconds && (t + static_cast<float>(elapsedTime)) > m_targetSeconds)
+    if (t + static_cast<float>(elapsedTime) > m_targetSeconds)
     {
         spdlog::info("Screenshot capture triggered at {:.3f}s (target {:.2f}s)", t, m_targetSeconds);
         m_captureDue = true;
         m_state      = State::Idle;
+        
+        if (t > m_targetSeconds)
+        {
+            m_wasTargetExceeded = true;
+            spdlog::warn("Screenshot trigger after target time! The results might have better fidelity than in standard test.");
+        }
     }
+    
 }
 
 void ScreenshotManager::RecordCopy(const Microsoft::WRL::ComPtr<ID3D12Resource>& source)
@@ -153,6 +165,9 @@ std::string ScreenshotManager::MakeFilename() const
     struct tm tm_info = {};
     localtime_s(&tm_info, &t);
     char buf[64];
-    std::strftime(buf, sizeof(buf), "screenshots/%Y-%m-%d_%H-%M-%S.png", &tm_info);
+    std::string format = "screenshots/%Y-%m-%d_%H-%M-%S";
+    if (m_wasTargetExceeded) format += "-EXCEEDED";
+    format += ".png";
+    std::strftime(buf, sizeof(buf), format.c_str(), &tm_info);
     return buf;
 }
