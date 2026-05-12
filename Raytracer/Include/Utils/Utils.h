@@ -3,6 +3,7 @@
 
 void ThrowIfFailed(HRESULT hr);
 std::string ConvertWcharToString(const wchar_t* wstr);
+std::string ToLowerAscii(std::string s);
 char* FormatTempString(const char* format, ...);
 
 void ReadTextFromFile(const char* szFilepath, char* buffer, int bufferSize);

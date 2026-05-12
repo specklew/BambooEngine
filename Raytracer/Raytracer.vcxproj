@@ -115,6 +115,8 @@
     <ClInclude Include="Include\Techniques\PathTracingPass.h" />
     <ClInclude Include="Include\Techniques\AmbientOcclusionPass.h" />
     <ClInclude Include="Include\ScreenshotManager.h" />
+    <ClInclude Include="Include\PlacesManager.h" />
+    <ClInclude Include="Include\SceneBookmarksPanel.h" />
     <ClInclude Include="Include\Renderer.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManager.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManagerTypes.h" />
@@ -335,6 +337,8 @@
     <ClCompile Include="Source\Techniques\PathTracingPass.cpp" />
     <ClCompile Include="Source\Techniques\AmbientOcclusionPass.cpp" />
     <ClCompile Include="Source\ScreenshotManager.cpp" />
+    <ClCompile Include="Source\PlacesManager.cpp" />
+    <ClCompile Include="Source\SceneBookmarksPanel.cpp" />
     <ClCompile Include="Source\EditorUI.cpp" />
     <ClCompile Include="Source\Renderer.cpp" />
     <ClCompile Include="Source\ResourceManager\ResourceManager.cpp" />

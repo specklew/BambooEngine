@@ -26,6 +26,9 @@ public:
 
     [[nodiscard]] DirectX::XMFLOAT3 GetEulerDegrees() const;
 
+    [[nodiscard]] float GetFovYRadians() const { return m_fovYRadians; }
+    void SetFovYRadians(float fovYRadians);
+
     [[nodiscard]] DirectX::SimpleMath::Vector3 GetForward() const { return m_forward; }
     [[nodiscard]] DirectX::SimpleMath::Vector3 GetRight() const { return m_right; }
     [[nodiscard]] DirectX::SimpleMath::Vector3 GetUp() const { return m_up; }

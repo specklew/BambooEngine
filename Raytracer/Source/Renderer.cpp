@@ -8,8 +8,10 @@
 #include "DDSTextureLoader/DDSTextureLoader12.h"
 #include "EditorUI.h"
 #include "FrameAccumulationPass.h"
+#include "PlacesManager.h"
 #include "PostProcessPass.h"
 #include "Utils/CVars.h"
+#include "Utils/Utils.h"
 #include "SceneResources/GameObject.h"
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
@@ -34,11 +36,25 @@
 #include "Utils/PassConstants.h"
 #include "RasterDebugMode.h"
 
+#include <filesystem>
+
 #ifdef _DEBUG
 #define ENABLE_GPU_BASED_VALIDATION 1
 #endif
 
 using namespace Microsoft::WRL;
+
+namespace
+{
+    std::string ExtractModelName(const std::string& path)
+    {
+        return ToLowerAscii(std::filesystem::path(path).stem().string());
+    }
+    std::string ExtractModelName(const std::wstring& path)
+    {
+        return ToLowerAscii(std::filesystem::path(path).stem().string());
+    }
+}
 
 static AutoCVarFloat g_cameraSpeed("renderer.camera.speed", "Specifies the base speed of camera", 1.0f, CVarFlags::EditDrag, 0.1f, 100.0f);
 static AutoCVarFloat g_cameraScrollFactor("renderer.camera.scrollFactor", "Multiplier per scroll tick for camera speed", 1.2f, CVarFlags::EditDrag, 1.01f, 3.0f);
@@ -61,6 +77,10 @@ void Renderer::Initialize()
 
 	m_camera = std::make_shared<Camera>();
 	m_keyboardTracker = std::make_shared<DirectX::Keyboard::KeyboardStateTracker>();
+
+	m_placesManager = std::make_shared<PlacesManager>();
+	m_placesManager->Load();
+	m_placesManager->SetCamera(*m_camera);
 	
 	SetupDeviceAndDebug();
 	CheckTearingSupport();
@@ -89,6 +109,7 @@ void Renderer::Initialize()
 	CreateWorldProjCBV();
 
 	m_scene = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb"));
+	m_placesManager->OnSceneChanged(ExtractModelName(std::string("resources/models/abeautifulgame.glb")));
 
 	CreateVertexSRV();
 	CreateIndexSRV();
@@ -135,12 +156,35 @@ void Renderer::Initialize()
 float speedMultiplier = 1.0f;
 void Renderer::Update(double elapsedTime, double totalTime)
 {
-	// Apply any CVar edits from ImGui (CVar → camera)
-	m_camera->SetPosition(g_cameraPos.Get());
+	// Apply CVar edits from ImGui only when the CVar value actually changed since last frame.
+	// Applying every frame would stomp camera state set via other paths (e.g. PlacesManager::GoTo).
 	{
-		auto rot = g_cameraRot.Get();
-		m_camera->SetRotation(DirectX::SimpleMath::Quaternion::CreateFromYawPitchRoll(
-			DirectX::XMConvertToRadians(rot.y), DirectX::XMConvertToRadians(rot.x), DirectX::XMConvertToRadians(rot.z)));
+	    static bool s_init = false;
+	    static DirectX::XMFLOAT3 s_prevCvarPos = {};
+	    static DirectX::XMFLOAT3 s_prevCvarRot = {};
+	    const DirectX::XMFLOAT3 curCvarPos = g_cameraPos.Get();
+	    const DirectX::XMFLOAT3 curCvarRot = g_cameraRot.Get();
+	    if (!s_init)
+	    {
+	        m_camera->SetPosition(curCvarPos);
+	        m_camera->SetRotation(DirectX::SimpleMath::Quaternion::CreateFromYawPitchRoll(
+	                DirectX::XMConvertToRadians(curCvarRot.y),
+	                DirectX::XMConvertToRadians(curCvarRot.x),
+	                DirectX::XMConvertToRadians(curCvarRot.z)));
+	        s_init = true;
+	    }
+	    else
+	    {
+            if (curCvarPos.x != s_prevCvarPos.x || curCvarPos.y != s_prevCvarPos.y || curCvarPos.z != s_prevCvarPos.z)
+                    m_camera->SetPosition(curCvarPos);
+            if (curCvarRot.x != s_prevCvarRot.x || curCvarRot.y != s_prevCvarRot.y || curCvarRot.z != s_prevCvarRot.z)
+                    m_camera->SetRotation(DirectX::SimpleMath::Quaternion::CreateFromYawPitchRoll(
+                            DirectX::XMConvertToRadians(curCvarRot.y),
+                            DirectX::XMConvertToRadians(curCvarRot.x),
+                            DirectX::XMConvertToRadians(curCvarRot.z)));
+	    }
+	    s_prevCvarPos = curCvarPos;
+	    s_prevCvarRot = curCvarRot;
 	}
 
 	auto key_state = DirectX::Keyboard::Get().GetState();
@@ -253,6 +297,9 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		m_screenshotManager->Tick(*m_accumulationPass, elapsedTime);
 
 	m_accumulationPass->Update(elapsedTime);
+
+	if (m_placesManager)
+		m_placesManager->Tick();
 }
 
 void Renderer::Render(double elapsedTime, double totalTime)
@@ -1033,6 +1080,7 @@ void Renderer::InitializeEditorUI()
 	m_editorUI->SetCamera(m_camera);
 	m_editorUI->SetScene(m_scene);
 	m_editorUI->SetAccumulationPass(m_accumulationPass);
+	m_editorUI->SetPlacesManager(m_placesManager);
 	m_editorUI->SetSkyboxLoadCallback([this](const std::wstring& path) {
 		ExecuteCommandsAndReset();
 		LoadSkybox(path);
@@ -1051,9 +1099,12 @@ void Renderer::InitializeEditorUI()
 
 		m_raytracePass->OnSceneChange(m_scene);
 		m_editorUI->SetScene(m_scene);
+		if (m_placesManager)
+			m_placesManager->OnSceneChanged(ExtractModelName(path));
 	});
-	m_editorUI->SetScreenshotRequestCallback([this](float seconds) {
-		m_screenshotManager->Arm(*m_accumulationPass, seconds);
+	m_editorUI->SetScreenshotRequestCallback([this](float seconds, std::string modelName, std::string placeName) {
+		ScreenshotMetadata meta = BuildScreenshotMetadata(modelName, placeName);
+		m_screenshotManager->Arm(*m_accumulationPass, seconds, std::move(meta));
 	});
 	m_editorUI->SetScreenshotPendingGetter([this]() {
 		return m_screenshotManager->IsPending();
@@ -1350,4 +1401,34 @@ void Renderer::ExecuteCommandsAndReset()
 	// After all it seems that the FlushGPU method was not functioning correctly, I never quite researched why that was the case. But it seems that there was an issue with the fence value.
 	// There was a unique fence value for each allocator (frame) and somehow it was not being updated properly. TODO: Check out why was that for the next iteration of the engine.
 	ResetCommandList();
+}
+
+ScreenshotMetadata Renderer::BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const
+{
+    ScreenshotMetadata m;
+    m.modelName = modelName;
+    m.placeName = placeName;
+
+    if (m_camera)
+    {
+        m.cameraPosition = m_camera->GetPosition();
+        m.cameraRotation = m_camera->GetRotation();
+        m.cameraFov      = m_camera->GetFovYRadians();
+    }
+
+    const auto& registry = RaytracePass::GetRegistry();
+    const int techIndex = m_editorUI ? m_editorUI->GetCurrentTechniqueIndex() : 0;
+    if (techIndex >= 0 && techIndex < static_cast<int>(registry.size()))
+        m.techniqueName = registry[techIndex].name;
+
+    m.postProcessEnabled = true;
+    m.exposure   = g_exposure.Get();
+    m.contrast   = g_contrast.Get();
+    m.saturation = g_saturation.Get();
+    m.lift       = g_lift.Get();
+
+    m.samplesPerPixel = static_cast<uint32_t>(g_numSamplesPerPixel.Get());
+    m.bounces         = static_cast<uint32_t>(g_numBounces.Get());
+
+    return m;
 }

@@ -32,6 +32,8 @@ class FrameAccumulationPass;
 class PostProcessPass;
 class AccelerationStructures;
 class ScreenshotManager;
+class PlacesManager;
+struct ScreenshotMetadata;
 
 
 
@@ -184,6 +186,9 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_skyboxResource;
 
 	std::shared_ptr<class EditorUI> m_editorUI;
+	std::shared_ptr<PlacesManager> m_placesManager;
+
+	ScreenshotMetadata BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const;
 };
 
 template <typename T>

@@ -11,6 +11,7 @@
 #include "Camera.h"
 #include "Constants.h"
 #include "FrameAccumulationPass.h"
+#include "PlacesManager.h"
 #include "RaytracePass.h"
 #include "SceneResources/Scene.h"
 #include "SceneResources/LightData.h"
@@ -72,6 +73,8 @@ void EditorUI::BeginFrame()
 	CVarSystem::Get()->DrawImguiEditor();
 	DrawDebugPanel();
 	DrawLightsPanel();
+	if (m_placesManager)
+		m_bookmarksPanel.Draw(*m_placesManager);
 }
 
 void EditorUI::EndFrame()
@@ -91,20 +94,16 @@ void EditorUI::DrawDebugPanel()
 		ImGui::Text("Accumulated time:   %.2fs", m_accumulationPass->GetAccumulatedTime());
 	}
 
-	auto* enabledPtr = CVarSystem::Get()->GetIntCVar(StringId("renderer.accumulation.enabled"));
-	if (enabledPtr)
-	{
-		bool enabled = *enabledPtr != 0;
-		if (ImGui::Checkbox("Enabled", &enabled))
-			CVarSystem::Get()->SetCVarInt(StringId("renderer.accumulation.enabled"), enabled ? 1 : 0);
-	}
-	ImGui::SameLine();
 	if (ImGui::Button("Reset") && m_accumulationPass)
 		m_accumulationPass->Reset();
 
 	ImGui::DragFloat("Capture time (s)", &m_screenshotSeconds, 0.1f, 0.00f, 60.0f, "%.2f");
 	if (ImGui::Button("Take Screenshot") && m_onScreenshotRequest)
-		m_onScreenshotRequest(m_screenshotSeconds);
+	{
+		std::string scene = m_placesManager ? m_placesManager->GetCurrentScene()    : std::string();
+		std::string place = m_placesManager ? m_placesManager->GetActivePlaceName() : std::string();
+		m_onScreenshotRequest(m_screenshotSeconds, std::move(scene), std::move(place));
+	}
 	if (m_isScreenshotPending && m_isScreenshotPending() && m_accumulationPass)
 	{
 		ImGui::SameLine();
@@ -113,25 +112,6 @@ void EditorUI::DrawDebugPanel()
 			m_accumulationPass->GetAccumulatedTime(),
 			m_screenshotSeconds);
 	}
-
-	// Post-process settings
-	ImGui::SeparatorText("Post-Process");
-
-	auto* exposure = CVarSystem::Get()->GetFloatCVar(StringId("renderer.postprocess.exposure"));
-	if (exposure && ImGui::DragFloat("Exposure", exposure, 0.05f, 0.0f, 10.0f, "%.2f"))
-		CVarSystem::Get()->SetCVarFloat(StringId("renderer.postprocess.exposure"), *exposure);
-
-	auto* contrast = CVarSystem::Get()->GetFloatCVar(StringId("renderer.postprocess.contrast"));
-	if (contrast && ImGui::DragFloat("Contrast", contrast, 0.01f, 0.1f, 3.0f, "%.2f"))
-		CVarSystem::Get()->SetCVarFloat(StringId("renderer.postprocess.contrast"), *contrast);
-
-	auto* saturation = CVarSystem::Get()->GetFloatCVar(StringId("renderer.postprocess.saturation"));
-	if (saturation && ImGui::DragFloat("Saturation", saturation, 0.01f, 0.0f, 2.0f, "%.2f"))
-		CVarSystem::Get()->SetCVarFloat(StringId("renderer.postprocess.saturation"), *saturation);
-
-	auto* lift = CVarSystem::Get()->GetFloatCVar(StringId("renderer.postprocess.lift"));
-	if (lift && ImGui::DragFloat("Lift", lift, 0.005f, 0.0f, 0.5f, "%.3f"))
-		CVarSystem::Get()->SetCVarFloat(StringId("renderer.postprocess.lift"), *lift);
 
 	// Raytracing technique
 	DrawTechniqueSection();

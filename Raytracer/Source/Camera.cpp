@@ -63,6 +63,12 @@ void Camera::AddRotationEuler(float pitch, float yaw, float roll)
     AddRotationEuler(DirectX::XMFLOAT3(pitch, yaw, roll));
 }
 
+void Camera::SetFovYRadians(float fovYRadians)
+{
+    m_fovYRadians = fovYRadians;
+    UpdateMatrices();
+}
+
 void Camera::UpdateMatrices()
 {
     m_forward = Vector3::Transform(Vector3(0, 0, 1), Quaternion(m_rotation));

@@ -1,7 +1,32 @@
 #pragma once
 #include <string>
+#include <DirectXMath.h>
 
 class FrameAccumulationPass;
+
+struct ScreenshotMetadata
+{
+    DirectX::XMFLOAT3 cameraPosition{};
+    DirectX::XMFLOAT4 cameraRotation{ 0.0f, 0.0f, 0.0f, 1.0f };
+    float             cameraFov = 0.0f;
+
+    std::string modelName;
+    std::string placeName;
+    std::string techniqueName;
+
+    bool  postProcessEnabled = true;
+    float exposure   = 1.0f;
+    float contrast   = 1.0f;
+    float saturation = 1.0f;
+    float lift       = 0.0f;
+
+    uint32_t samplesPerPixel = 0;
+    uint32_t bounces         = 0;
+    uint32_t frameIndex      = 0;
+    float    accumulatedTime = 0.0f;
+    uint32_t renderWidth     = 0;
+    uint32_t renderHeight    = 0;
+};
 
 class ScreenshotManager
 {
@@ -10,21 +35,17 @@ public:
         Microsoft::WRL::ComPtr<ID3D12Device5>              device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList);
 
-    // Reset accumulation and start waiting for T seconds; ignored while already pending
-    void Arm(FrameAccumulationPass& accum, float seconds);
+    // Reset accumulation and start waiting for T seconds; ignored while already pending.
+    // metadata is captured at arm time and written to a sidecar JSON when the PNG is saved.
+    void Arm(FrameAccumulationPass& accum, float seconds, ScreenshotMetadata metadata);
 
     // Call each frame BEFORE accumulationPass.Update(elapsedTime)
-    // Checks the pre-update accumulated time to determine whether this is the
-    // last frame satisfying accumulatedTime <= T
     void Tick(FrameAccumulationPass& accum, double elapsedTime);
 
     // Issue CopyTextureRegion into the readback buffer.
-    // Call in Render() AFTER post-process and BEFORE command list close.
-    // Source must be in D3D12_RESOURCE_STATE_COPY_SOURCE.
     void RecordCopy(const Microsoft::WRL::ComPtr<ID3D12Resource>& source);
 
-    // Map readback buffer and write PNG.
-    // Call AFTER FlushCommandQueue so the GPU copy is complete.
+    // Map readback buffer and write PNG + sidecar JSON.
     void FinishCapture();
 
     bool IsPending()    const { return m_state == State::Pending; }
@@ -32,16 +53,18 @@ public:
     float GetTargetSeconds()    const { return m_targetSeconds; }
 
 private:
-    std::string MakeFilename() const;
+    std::string MakeFilenameStem() const;
+    void        WriteSidecarJson(const std::string& jsonPath) const;
 
     enum class State { Idle, Pending };
     State m_state      = State::Idle;
     bool  m_captureDue    = false;
-    bool  m_copyRecorded  = false; // set by RecordCopy, guards FinishCapture
-    bool m_wasTargetExceeded = false;
+    bool  m_copyRecorded  = false;
 
     float    m_targetSeconds  = 0.0f;
     uint32_t m_resetCountAtArm = 0;
+
+    ScreenshotMetadata m_pendingMeta;
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
