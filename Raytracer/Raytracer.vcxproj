@@ -118,6 +118,7 @@
     <ClInclude Include="Include\PlacesManager.h" />
     <ClInclude Include="Include\SceneBookmarksPanel.h" />
     <ClInclude Include="Include\VoxelizationPass.h" />
+    <ClInclude Include="Include\LightInjectionPass.h" />
     <ClInclude Include="Include\Renderer.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManager.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManagerTypes.h" />
@@ -329,6 +330,7 @@
     <None Include="Resources\Shaders\voxelGrid.hlsli" />
     <None Include="Resources\Shaders\voxelize.hlsl" />
     <None Include="Resources\Shaders\clearVoxels.hlsl" />
+    <None Include="Resources\Shaders\lightInjection.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
     <ClCompile Include="Source\Camera.cpp" />
@@ -344,6 +346,7 @@
     <ClCompile Include="Source\PlacesManager.cpp" />
     <ClCompile Include="Source\SceneBookmarksPanel.cpp" />
     <ClCompile Include="Source\VoxelizationPass.cpp" />
+    <ClCompile Include="Source\LightInjectionPass.cpp" />
     <ClCompile Include="Source\EditorUI.cpp" />
     <ClCompile Include="Source\Renderer.cpp" />
     <ClCompile Include="Source\ResourceManager\ResourceManager.cpp" />
@@ -438,6 +441,10 @@
     <Content Include="Resources\Shaders\voxelize.vs.shader" />
     <Content Include="Resources\Shaders\voxelize.ps.shader" />
     <Content Include="Resources\Shaders\clearVoxels.cs.shader" />
+    <Content Include="Resources\Shaders\lightInjection.rg.shader" />
+    <Content Include="Resources\Shaders\lightInjection.ms.shader" />
+    <Content Include="Resources\Shaders\lightInjection.ch.shader" />
+    <Content Include="Resources\Shaders\lightInjection.ah.shader" />
     <None Include="Resources\Shaders\consts.hlsl" />
     <Content Include="Resources\Textures\qwantani_dusk_2_puresky_2k.dds" />
     <Content Include="Resources\Textures\qwantani_dusk_2_puresky_2k.hdr" />

@@ -28,6 +28,7 @@ class Camera;
 struct Primitive;
 class DescriptorHeapAllocator;
 class RaytracePass;
+class LightInjectionPass;
 class FrameAccumulationPass;
 class PostProcessPass;
 class AccelerationStructures;
@@ -109,8 +110,10 @@ private:
 
 	void OnShaderReload();
 	void LoadSkybox(const std::wstring& path);
+	void WriteVoxelUavsToGlobalHeap();
 
 	std::shared_ptr<RaytracePass> m_raytracePass;
+	std::shared_ptr<LightInjectionPass> m_lightInjectionPass;
 	std::shared_ptr<FrameAccumulationPass> m_accumulationPass;
 	std::shared_ptr<PostProcessPass> m_postProcessPass;
 	std::shared_ptr<ScreenshotManager> m_screenshotManager;

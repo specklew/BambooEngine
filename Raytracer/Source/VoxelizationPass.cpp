@@ -67,18 +67,23 @@ void VoxelizationPass::CreateResources()
         m_occupancyTex->SetName(L"VoxelOccupancy");
     }
 
-    // SH9 slices (7× R32G32B32A32_FLOAT)
-    for (uint32_t i = 0; i < kSh9Slices; ++i)
+    // Packed irradiance + VPL count (Texture3D<uint>, uint atomics from injection pass)
     {
         D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Tex3D(
-            DXGI_FORMAT_R32G32B32A32_FLOAT, m_gridDim, m_gridDim, m_gridDim, 1,
+            DXGI_FORMAT_R32_UINT, m_gridDim, m_gridDim, m_gridDim, 1,
             D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
         ThrowIfFailed(m_device->CreateCommittedResource(
             &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
-            IID_PPV_ARGS(&m_sh9Textures[i])));
-        wchar_t name[32]; swprintf_s(name, L"VoxelSH9[%u]", i);
-        m_sh9Textures[i]->SetName(name);
+            IID_PPV_ARGS(&m_irradianceTex)));
+        m_irradianceTex->SetName(L"VoxelIrradiance");
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+            IID_PPV_ARGS(&m_vplCountTex)));
+        m_vplCountTex->SetName(L"VoxelVplCount");
     }
 
     // Grid constants CB (upload heap, persistently mapped)
@@ -99,38 +104,26 @@ void VoxelizationPass::CreateDescriptorHeap()
 {
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
     heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.NumDescriptors = 1 + kSh9Slices; // 1 occupancy + 7 SH
+    heapDesc.NumDescriptors = 3; // occupancy + irradiance + vpl count
     heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_descHeap)));
 
     UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     CD3DX12_CPU_DESCRIPTOR_HANDLE handle(m_descHeap->GetCPUDescriptorHandleForHeapStart());
 
-    {
-        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format               = DXGI_FORMAT_R32_UINT;
-        uavDesc.ViewDimension        = D3D12_UAV_DIMENSION_TEXTURE3D;
-        uavDesc.Texture3D.WSize      = m_gridDim;
-        m_device->CreateUnorderedAccessView(m_occupancyTex.Get(), nullptr, &uavDesc, handle);
-        handle.Offset(1, inc);
-    }
-    for (uint32_t i = 0; i < kSh9Slices; ++i)
-    {
-        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format               = DXGI_FORMAT_R32G32B32A32_FLOAT;
-        uavDesc.ViewDimension        = D3D12_UAV_DIMENSION_TEXTURE3D;
-        uavDesc.Texture3D.WSize      = m_gridDim;
-        m_device->CreateUnorderedAccessView(m_sh9Textures[i].Get(), nullptr, &uavDesc, handle);
-        handle.Offset(1, inc);
-    }
+    WriteUintTex3DUav(m_occupancyTex.Get(), handle);
+    handle.Offset(1, inc);
+    WriteUintTex3DUav(m_irradianceTex.Get(), handle);
+    handle.Offset(1, inc);
+    WriteUintTex3DUav(m_vplCountTex.Get(), handle);
 }
 
 void VoxelizationPass::CreateRootSignatures()
 {
-    // Clear root sig: CBV b0 (gGridDim/clear params), descriptor table of 8 UAVs (u0..u7)
+    // Clear root sig: root constants b0 (gGridDim), descriptor table of 3 UAVs (u0..u2)
     {
         CD3DX12_DESCRIPTOR_RANGE uavRange;
-        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1 + kSh9Slices, 0);
+        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 3, 0);
 
         CD3DX12_ROOT_PARAMETER params[2];
         params[0].InitAsConstants(4, 0); // 4 uints at b0
@@ -222,14 +215,36 @@ void VoxelizationPass::CreatePSOs()
     }
 }
 
-void VoxelizationPass::WriteOccupancyUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const
+void VoxelizationPass::WriteUintTex3DUav(ID3D12Resource* resource, D3D12_CPU_DESCRIPTOR_HANDLE dest) const
 {
-    if (!m_occupancyTex) return;
+    if (!resource) return;
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.Format          = DXGI_FORMAT_R32_UINT;
     uavDesc.ViewDimension   = D3D12_UAV_DIMENSION_TEXTURE3D;
     uavDesc.Texture3D.WSize = m_gridDim;
-    m_device->CreateUnorderedAccessView(m_occupancyTex.Get(), nullptr, &uavDesc, dest);
+    m_device->CreateUnorderedAccessView(resource, nullptr, &uavDesc, dest);
+}
+
+void VoxelizationPass::WriteOccupancyUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const
+{
+    WriteUintTex3DUav(m_occupancyTex.Get(), dest);
+}
+
+void VoxelizationPass::WriteIrradianceUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const
+{
+    WriteUintTex3DUav(m_irradianceTex.Get(), dest);
+}
+
+void VoxelizationPass::WriteVplCountUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const
+{
+    WriteUintTex3DUav(m_vplCountTex.Get(), dest);
+}
+
+void VoxelizationPass::SetRuntimeParams(bool injectUseAvg, float heatScale)
+{
+    m_gridConstants.injectUseAvg = injectUseAvg ? 1u : 0u;
+    m_gridConstants.heatScale    = heatScale;
+    WriteGridConstantsCB();
 }
 
 void VoxelizationPass::RecreateForNewDim(uint32_t newDim)
@@ -241,8 +256,8 @@ void VoxelizationPass::RecreateForNewDim(uint32_t newDim)
     m_gridDim = newDim;
 
     m_occupancyTex.Reset();
-    for (uint32_t i = 0; i < kSh9Slices; ++i)
-        m_sh9Textures[i].Reset();
+    m_irradianceTex.Reset();
+    m_vplCountTex.Reset();
     m_descHeap.Reset();
 
     CreateResources();
@@ -307,10 +322,10 @@ void VoxelizationPass::DispatchClear()
     const uint32_t groups = (m_gridDim + 7) / 8;
     m_commandList->Dispatch(groups, groups, groups);
 
-    D3D12_RESOURCE_BARRIER barriers[1 + kSh9Slices];
+    D3D12_RESOURCE_BARRIER barriers[3];
     barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_occupancyTex.Get());
-    for (uint32_t i = 0; i < kSh9Slices; ++i)
-        barriers[1 + i] = CD3DX12_RESOURCE_BARRIER::UAV(m_sh9Textures[i].Get());
+    barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_irradianceTex.Get());
+    barriers[2] = CD3DX12_RESOURCE_BARRIER::UAV(m_vplCountTex.Get());
     m_commandList->ResourceBarrier(_countof(barriers), barriers);
 }
 

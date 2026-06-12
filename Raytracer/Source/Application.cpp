@@ -32,6 +32,10 @@ void Application::Run()
 
 void Application::GameLoop()
 {
+	constexpr double kFpsTitleUpdateInterval = 0.5; // seconds between title refreshes
+	double fpsAccumulatedTime = 0.0;
+	uint32_t fpsFrameCount = 0;
+
 	MSG msg = {};
 	while (msg.message != WM_QUIT)
 	{
@@ -45,6 +49,21 @@ void Application::GameLoop()
 
 		m_renderer->Update(m_clock.GetDeltaSeconds(), m_clock.GetTotalSeconds());
 		m_renderer->Render(m_clock.GetDeltaSeconds(), m_clock.GetTotalSeconds());
+
+		fpsAccumulatedTime += m_clock.GetDeltaSeconds();
+		fpsFrameCount++;
+		if (fpsAccumulatedTime >= kFpsTitleUpdateInterval)
+		{
+			const double fps = fpsFrameCount / fpsAccumulatedTime;
+			const double frameMs = 1000.0 * fpsAccumulatedTime / fpsFrameCount;
+
+			wchar_t suffix[64];
+			swprintf_s(suffix, L"%.0f FPS (%.2f ms)", fps, frameMs);
+			Window::Get().SetTitleSuffix(suffix);
+
+			fpsAccumulatedTime = 0.0;
+			fpsFrameCount = 0;
+		}
 	}
 }
 

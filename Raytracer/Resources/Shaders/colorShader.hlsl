@@ -39,7 +39,9 @@ Texture2D gTextures[MAX_TEXTURES] : register(t3, space0);
 
 ByteAddressBuffer g_indices : register(t2);
 
-RWTexture3D<uint> gVoxelOccupancy : register(u1);
+RWTexture3D<uint> gVoxelOccupancy  : register(u1);
+RWTexture3D<uint> gVoxelIrradiance : register(u2);
+RWTexture3D<uint> gVoxelVplCount   : register(u3);
 
 cbuffer VoxelGridCB : register(b4)
 {
@@ -47,6 +49,21 @@ cbuffer VoxelGridCB : register(b4)
     float  voxVoxelSize;
     float3 voxGridMax;
     uint   voxGridDim;
+    uint   voxInjectUseAvg;
+    uint   _voxReserved0;
+    float  voxHeatScale;
+    uint   _voxPad0;
+}
+
+// Black -> red -> yellow -> white heat ramp, t in [0, 1]
+float3 HeatColor(float t)
+{
+    t = saturate(t);
+    float3 c;
+    c.r = saturate(t * 3.0);
+    c.g = saturate(t * 3.0 - 1.0);
+    c.b = saturate(t * 3.0 - 2.0);
+    return c;
 }
 
 struct VertexIn
@@ -144,19 +161,35 @@ float4 pixel(VertexOut pin) : SV_Target
     debugData.roughness = roughness;
     debugData.metallic = metallic;
 
-    if (debugMode == 8 && voxGridDim > 0)
+    if ((debugMode == 8 || debugMode == 9) && voxGridDim > 0)
     {
         int3 vidx = int3(floor((pin.PosW - voxGridMin) / voxVoxelSize));
         if (all(vidx >= 0) && all(vidx < int(voxGridDim)))
         {
-            uint occ = gVoxelOccupancy[vidx];
-            if (occ != 0u)
+            if (debugMode == 9)
             {
-                float3 cellColor = float3(
-                    float((vidx.x * 73u) & 0xFFu) / 255.0,
-                    float((vidx.y * 151u) & 0xFFu) / 255.0,
-                    float((vidx.z * 211u) & 0xFFu) / 255.0);
-                return float4(cellColor, 1.0);
+                // VoxelIrradiance — heat map of injection pass output
+                uint packedIrr = gVoxelIrradiance[vidx];
+                uint count = gVoxelVplCount[vidx];
+                if (count > 0u)
+                {
+                    float irradiance = (float(packedIrr) / 100.0) / float(count);
+                    float t = 1.0 - exp(-irradiance * voxHeatScale);
+                    return float4(HeatColor(t), 1.0);
+                }
+            }
+            else
+            {
+                // Voxels — hash-colored occupancy
+                uint occ = gVoxelOccupancy[vidx];
+                if (occ != 0u)
+                {
+                    float3 cellColor = float3(
+                        float((vidx.x * 73u) & 0xFFu) / 255.0,
+                        float((vidx.y * 151u) & 0xFFu) / 255.0,
+                        float((vidx.z * 211u) & 0xFFu) / 255.0);
+                    return float4(cellColor, 1.0);
+                }
             }
         }
         return float4(0.05, 0.05, 0.05, 1.0);

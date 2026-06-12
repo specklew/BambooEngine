@@ -15,6 +15,9 @@ public:
 	long GetHeight() const;
 	HWND GetHandle() const;
 
+	// Replaces the title-bar text, keeping the application name as prefix
+	void SetTitleSuffix(const std::wstring& suffix);
+
 	LRESULT CALLBACK MsgProc(
 		HWND hWnd,
 		UINT message,
@@ -32,4 +35,5 @@ private:
 	HINSTANCE m_hInstance;
 	HWND m_windowHandle;
 	RECT m_windowRect;
+	std::wstring m_baseTitle;
 };

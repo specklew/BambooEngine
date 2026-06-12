@@ -48,6 +48,12 @@ protected:
     virtual void InitializeRaytracingPipeline();
     virtual void CreateShaderBindingTable();
 
+    // Output buffer + heap descriptor writes — auxiliary passes without their own
+    // full-screen output (e.g. light injection) override these to skip clobbering
+    // the shared heap's output UAV slot.
+    virtual void CreateRaytracingOutputBuffer();
+    virtual void CreateShaderResourceHeap();
+
     // Shared device/command interfaces
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
@@ -87,6 +93,4 @@ protected:
 
 private:
     void LoadShaders();
-    void CreateRaytracingOutputBuffer();
-    void CreateShaderResourceHeap();
 };

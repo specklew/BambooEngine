@@ -23,6 +23,7 @@
 #include "Techniques/PathTracingPass.h"
 #include "ScreenshotManager.h"
 #include "VoxelizationPass.h"
+#include "LightInjectionPass.h"
 #include "RasterDebugMode.h"
 #include "SceneResources/Scene.h"
 #include "ResourceManager/ResourceManager.h"
@@ -73,6 +74,9 @@ static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES 
 static AutoCVarFloat g_lift("renderer.postprocess.lift", "Post-ACES shadow lift", 0.0f, CVarFlags::EditDrag, 0.0f, 0.5f);
 static AutoCVarInt   g_voxelGridDim("voxel.gridDim", "Voxel grid resolution (one axis)", 64, CVarFlags::EditDrag, 32, 256);
 static AutoCVarFloat g_voxelAabbPad("voxel.aabbPadCells", "Voxel grid padding in cells (unused V1)", 0.5f, CVarFlags::EditDrag, 0.0f, 4.0f);
+static AutoCVarInt   g_voxelInjectEnabled("voxel.inject.enabled", "Enable VXPG light injection pass", 1, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accumulation: 1 = average (add + count), 0 = max", 1, CVarFlags::EditCheckbox);
+static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
 
 void Renderer::Initialize()
 {
@@ -151,14 +155,13 @@ void Renderer::Initialize()
 	m_voxelizationPass = std::make_shared<VoxelizationPass>();
 	m_voxelizationPass->Initialize(g_device, m_d3d12CommandList, m_rootSignature);
 
-	{
-		auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-		D3D12_CPU_DESCRIPTOR_HANDLE voxelSlot = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		voxelSlot.ptr += static_cast<SIZE_T>(Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX) * descSize;
-		m_voxelizationPass->WriteOccupancyUavTo(voxelSlot);
-	}
+	WriteVoxelUavsToGlobalHeap();
 
 	m_voxelizationPass->OnSceneLoaded(*m_scene);
+
+	m_lightInjectionPass = std::make_shared<LightInjectionPass>();
+	m_lightInjectionPass->SetVoxelizationPass(m_voxelizationPass);
+	m_lightInjectionPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
 	spdlog::info("Renderer initialized successfully.");
 
@@ -324,18 +327,23 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	if (m_voxelizationPass && m_scene)
 	{
-		const bool needsVoxelize = !m_rasterize || g_rasterizationDebugMode.Get() == RasterDebugMode::Voxels;
+		const auto debugMode = g_rasterizationDebugMode.Get();
+		const bool needsVoxelize = !m_rasterize
+			|| debugMode == RasterDebugMode::Voxels
+			|| debugMode == RasterDebugMode::VoxelIrradiance;
 		if (needsVoxelize)
 		{
+			m_voxelizationPass->SetRuntimeParams(
+				g_voxelInjectUseAvg.Get() != 0,
+				g_voxelHeatScale.Get());
+
 			m_voxelizationPass->RunFrame(*m_scene, static_cast<uint32_t>(g_voxelGridDim.Get()));
 
 			if (m_voxelizationPass->DidResize())
-			{
-				auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-				D3D12_CPU_DESCRIPTOR_HANDLE voxelSlot = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-				voxelSlot.ptr += static_cast<SIZE_T>(Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX) * descSize;
-				m_voxelizationPass->WriteOccupancyUavTo(voxelSlot);
-			}
+				WriteVoxelUavsToGlobalHeap();
+
+			if (m_lightInjectionPass && g_voxelInjectEnabled.Get() != 0)
+				m_lightInjectionPass->Render();
 		}
 	}
 
@@ -803,7 +811,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 2; // +1 skybox, +1 voxel occupancy
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 4; // +1 skybox, +1 voxel occupancy, +1 voxel irradiance, +1 voxel vpl count
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -888,9 +896,10 @@ void Renderer::CreateRasterizationRootSignature()
 	textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	textureRange.OffsetInDescriptorsFromTableStart = 6;
 
+	// u1 = occupancy, u2 = packed irradiance, u3 = vpl count (contiguous heap slots 519..521)
 	D3D12_DESCRIPTOR_RANGE voxelOccupancyRange;
 	voxelOccupancyRange.BaseShaderRegister = 1;
-	voxelOccupancyRange.NumDescriptors = 1;
+	voxelOccupancyRange.NumDescriptors = 3;
 	voxelOccupancyRange.RegisterSpace = 0;
 	voxelOccupancyRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 	voxelOccupancyRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX;
@@ -1141,6 +1150,8 @@ void Renderer::InitializeEditorUI()
 		ExecuteCommandsAndReset();
 
 		m_raytracePass->OnSceneChange(m_scene);
+		if (m_lightInjectionPass)
+			m_lightInjectionPass->OnSceneChange(m_scene);
 		m_editorUI->SetScene(m_scene);
 		if (m_placesManager)
 			m_placesManager->OnSceneChanged(ExtractModelName(path));
@@ -1163,6 +1174,25 @@ void Renderer::InitializeEditorUI()
 		newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 		m_raytracePass = std::move(newPass);
 	});
+}
+
+void Renderer::WriteVoxelUavsToGlobalHeap()
+{
+	if (!m_voxelizationPass)
+		return;
+
+	auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+
+	D3D12_CPU_DESCRIPTOR_HANDLE slot = heapStart;
+	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX) * descSize;
+	m_voxelizationPass->WriteOccupancyUavTo(slot);
+
+	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::VOXEL_IRRADIANCE_DESCRIPTOR_INDEX) * descSize;
+	m_voxelizationPass->WriteIrradianceUavTo(slot);
+
+	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::VOXEL_VPL_COUNT_DESCRIPTOR_INDEX) * descSize;
+	m_voxelizationPass->WriteVplCountUavTo(slot);
 }
 
 void Renderer::LoadSkybox(const std::wstring& path)
@@ -1244,6 +1274,8 @@ void Renderer::OnShaderReload()
 	spdlog::info("Creating pipeline state for new shaders...");
 	CreatePipelineState();
 	m_raytracePass->OnShaderReload();
+	if (m_lightInjectionPass)
+		m_lightInjectionPass->OnShaderReload();
 
 	FlushCommandQueue();
 	ResetCommandList();

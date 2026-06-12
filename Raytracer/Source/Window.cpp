@@ -59,9 +59,19 @@ Window::~Window()
 	delete instance;
 }
 
+void Window::SetTitleSuffix(const std::wstring& suffix)
+{
+	if (!m_windowHandle)
+		return;
+
+	std::wstring title = suffix.empty() ? m_baseTitle : m_baseTitle + L" — " + suffix;
+	SetWindowTextW(m_windowHandle, title.c_str());
+}
+
 HRESULT Window::Initialize()
 {
-	std::wstring windowTitle = L"Raytracer";
+	m_baseTitle = L"Raytracer";
+	std::wstring windowTitle = m_baseTitle;
 
 	int argc;
 	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
