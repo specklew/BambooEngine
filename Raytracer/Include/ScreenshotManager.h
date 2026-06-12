@@ -48,6 +48,9 @@ public:
     // Map readback buffer and write PNG + sidecar JSON.
     void FinishCapture();
 
+    // Output folder for saved screenshots, relative to the working directory.
+    static const char* GetScreenshotsDirectory();
+
     bool IsPending()    const { return m_state == State::Pending; }
     bool IsCaptureDue() const { return m_captureDue; }
     float GetTargetSeconds()    const { return m_targetSeconds; }

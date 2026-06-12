@@ -2,6 +2,8 @@
 #include "EditorUI.h"
 
 #include <commdlg.h>
+#include <shellapi.h>
+#include <filesystem>
 
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
@@ -15,6 +17,7 @@
 #include "RaytracePass.h"
 #include "SceneResources/Scene.h"
 #include "SceneResources/LightData.h"
+#include "ScreenshotManager.h"
 #include "Window.h"
 
 void EditorUI::Initialize(
@@ -96,6 +99,16 @@ void EditorUI::DrawDebugPanel()
 
 	if (ImGui::Button("Reset") && m_accumulationPass)
 		m_accumulationPass->Reset();
+
+	ImGui::SameLine();
+	if (ImGui::Button("Open Screenshots Folder"))
+	{
+		std::error_code ec;
+		std::filesystem::create_directories(ScreenshotManager::GetScreenshotsDirectory(), ec);
+		const std::wstring absPath = std::filesystem::absolute(ScreenshotManager::GetScreenshotsDirectory(), ec).wstring();
+		if (!ec)
+			ShellExecuteW(nullptr, L"open", absPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+	}
 
 	ImGui::DragFloat("Capture time (s)", &m_screenshotSeconds, 0.1f, 0.00f, 60.0f, "%.2f");
 	if (ImGui::Button("Take Screenshot") && m_onScreenshotRequest)

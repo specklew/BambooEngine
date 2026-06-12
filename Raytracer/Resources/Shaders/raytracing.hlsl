@@ -243,7 +243,8 @@ void Hit(inout Payload payload : SV_RayPayload, in Attributes attr)
         throughput = EvalSpecularBounce(surface, H, bounceDir);
         if (all(throughput == 0))
         {
-            payload.color = float3(0, 0, 0);
+            // Invalid bounce sample — keep the direct light at this vertex
+            payload.color = CalculateDirectLightning(hit, surface);
             payload.bounceCount++;
             return;
         }
@@ -256,7 +257,8 @@ void Hit(inout Payload payload : SV_RayPayload, in Attributes attr)
         throughput = EvalDiffuseBounce(surface, kD, bounceDir);
         if (all(throughput == 0))
         {
-            payload.color = float3(0, 0, 0);
+            // Invalid bounce sample — keep the direct light at this vertex
+            payload.color = CalculateDirectLightning(hit, surface);
             payload.bounceCount++;
             return;
         }

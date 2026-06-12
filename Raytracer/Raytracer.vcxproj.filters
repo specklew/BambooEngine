@@ -225,6 +225,12 @@
     <ClInclude Include="Include\LightInjectionPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Techniques\GuidedPathTracingPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\GuidingDebugView.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\ResourceManager\ResourceManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -675,6 +681,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\LightInjectionPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Techniques\GuidedPathTracingPass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\ResourceManager\ResourceManager.cpp">

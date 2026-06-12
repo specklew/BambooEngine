@@ -10,6 +10,7 @@ cbuffer PassConstants : register(b3)
     uint samplesPerPixel;
     uint numBounces;
     uint frameIndex;
+    uint guidingFlags; // bit 0 = power MIS heuristic (also fills the implicit pad before float3)
     float3 cameraWorldPos;
 }
 

@@ -21,6 +21,7 @@ public:
         uint32_t numSamplesPerPixel = 4;
         uint32_t numBounces = 1;
         uint32_t frameIndex = 0;
+        uint32_t guidingFlags = 0; // bit 0 = power MIS; doubles as the pad HLSL inserts before float3
         DirectX::XMFLOAT3 cameraWorldPos = {0.0f, 0.0f, 0.0f};
     } data;
 

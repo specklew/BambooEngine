@@ -25,6 +25,7 @@
 #include "VoxelizationPass.h"
 #include "LightInjectionPass.h"
 #include "RasterDebugMode.h"
+#include "GuidingDebugView.h"
 #include "SceneResources/Scene.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
@@ -77,6 +78,8 @@ static AutoCVarFloat g_voxelAabbPad("voxel.aabbPadCells", "Voxel grid padding in
 static AutoCVarInt   g_voxelInjectEnabled("voxel.inject.enabled", "Enable VXPG light injection pass", 1, CVarFlags::EditCheckbox);
 static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accumulation: 1 = average (add + count), 0 = max", 1, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
+static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 0, CVarFlags::EditCheckbox);
+static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization (MisWeights: R = BSDF, G = guide)", GuidingDebugView::None);
 
 void Renderer::Initialize()
 {
@@ -140,7 +143,12 @@ void Renderer::Initialize()
 	
 	m_randomBuffer = CreateStructuredBuffer<float>(randomData);
 	const auto& registry = RaytracePass::GetRegistry();
-	m_raytracePass = registry.empty() ? std::make_shared<RaytracePass>() : registry[0].create();
+	// Default to vanilla path tracing regardless of static-init registration order
+	auto defaultEntry = std::find_if(registry.begin(), registry.end(),
+		[](const TechniqueEntry& e) { return e.name == "Path Tracing"; });
+	if (defaultEntry == registry.end() && !registry.empty())
+		defaultEntry = registry.begin();
+	m_raytracePass = (defaultEntry == registry.end()) ? std::make_shared<RaytracePass>() : defaultEntry->create();
 	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
 	m_accumulationPass = std::make_shared<FrameAccumulationPass>();
@@ -284,6 +292,10 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.numBounces = g_numBounces.Get();
 	m_passConstants->data.numSamplesPerPixel = g_numSamplesPerPixel.Get();
 	m_passConstants->data.frameIndex++;
+	m_passConstants->data.guidingFlags =
+		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
+		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 3u) << 1);
+	static_assert(static_cast<int>(GuidingDebugView::MisWeights) == 3, "GuidingDebugView must fit in 2 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();

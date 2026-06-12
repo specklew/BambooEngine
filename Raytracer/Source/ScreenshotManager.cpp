@@ -172,6 +172,11 @@ void ScreenshotManager::RecordCopy(const Microsoft::WRL::ComPtr<ID3D12Resource>&
     m_copyRecorded = true;
 }
 
+const char* ScreenshotManager::GetScreenshotsDirectory()
+{
+    return kScreenshotsDir;
+}
+
 void ScreenshotManager::FinishCapture()
 {
     if (!m_captureDue)
