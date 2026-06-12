@@ -1,6 +1,8 @@
 ﻿#include "pch.h"
 #include "SceneResources/ModelLoading.h"
 
+#include <algorithm>
+#include <cfloat>
 #include <filesystem>
 #include <unordered_map>
 #include <tinygltf/tiny_gltf.h>
@@ -330,11 +332,26 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     vertex_view.offsetBytes = outVertices.size() * sizeof(Vertex);
     vertex_view.size = vertices.size() * sizeof(Vertex);
 
+    DirectX::XMFLOAT3 local_min{  FLT_MAX,  FLT_MAX,  FLT_MAX };
+    DirectX::XMFLOAT3 local_max{ -FLT_MAX, -FLT_MAX, -FLT_MAX };
+    for (const Vertex& v : vertices)
+    {
+        local_min.x = std::min(local_min.x, v.Pos.x);
+        local_min.y = std::min(local_min.y, v.Pos.y);
+        local_min.z = std::min(local_min.z, v.Pos.z);
+        local_max.x = std::max(local_max.x, v.Pos.x);
+        local_max.y = std::max(local_max.y, v.Pos.y);
+        local_max.z = std::max(local_max.z, v.Pos.z);
+    }
+
     // Need to be done here after buffer views to have correct offset.
     outVertices.insert(outVertices.end(), vertices.begin(), vertices.end());
     outIndices.insert(outIndices.end(), indices.begin(), indices.end());
-    
-    return std::make_shared<Primitive>(vertex_view, index_view, material);
+
+    auto prim = std::make_shared<Primitive>(vertex_view, index_view, material);
+    prim->m_localAabbMin = local_min;
+    prim->m_localAabbMax = local_max;
+    return prim;
 }
 
 static DirectX::SimpleMath::Vector3 ReadNodePosition(const tinygltf::Node& node)

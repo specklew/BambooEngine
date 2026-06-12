@@ -34,6 +34,7 @@ class AccelerationStructures;
 class ScreenshotManager;
 class PlacesManager;
 struct ScreenshotMetadata;
+class VoxelizationPass;
 
 
 
@@ -187,6 +188,7 @@ private:
 
 	std::shared_ptr<class EditorUI> m_editorUI;
 	std::shared_ptr<PlacesManager> m_placesManager;
+	std::shared_ptr<VoxelizationPass> m_voxelizationPass;
 
 	ScreenshotMetadata BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const;
 };

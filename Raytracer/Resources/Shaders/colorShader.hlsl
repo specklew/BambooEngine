@@ -39,6 +39,16 @@ Texture2D gTextures[MAX_TEXTURES] : register(t3, space0);
 
 ByteAddressBuffer g_indices : register(t2);
 
+RWTexture3D<uint> gVoxelOccupancy : register(u1);
+
+cbuffer VoxelGridCB : register(b4)
+{
+    float3 voxGridMin;
+    float  voxVoxelSize;
+    float3 voxGridMax;
+    uint   voxGridDim;
+}
+
 struct VertexIn
 {
     float3 PosL  : POSITION;
@@ -133,6 +143,24 @@ float4 pixel(VertexOut pin) : SV_Target
     debugData.uv = pin.TexCoord;
     debugData.roughness = roughness;
     debugData.metallic = metallic;
+
+    if (debugMode == 8 && voxGridDim > 0)
+    {
+        int3 vidx = int3(floor((pin.PosW - voxGridMin) / voxVoxelSize));
+        if (all(vidx >= 0) && all(vidx < int(voxGridDim)))
+        {
+            uint occ = gVoxelOccupancy[vidx];
+            if (occ != 0u)
+            {
+                float3 cellColor = float3(
+                    float((vidx.x * 73u) & 0xFFu) / 255.0,
+                    float((vidx.y * 151u) & 0xFFu) / 255.0,
+                    float((vidx.z * 211u) & 0xFFu) / 255.0);
+                return float4(cellColor, 1.0);
+            }
+        }
+        return float4(0.05, 0.05, 0.05, 1.0);
+    }
 
     float4 debugResult = ApplyRasterDebugMode(debugMode, debugData);
     if (debugResult.x >= 0) return debugResult;

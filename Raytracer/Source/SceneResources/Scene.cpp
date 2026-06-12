@@ -1,6 +1,8 @@
 ﻿#include "pch.h"
 #include "SceneResources/Scene.h"
 
+#include <cfloat>
+
 #include "SceneResources/GameObject.h"
 #include "Model.h"
 #include "Renderer.h"
@@ -136,6 +138,53 @@ static std::shared_ptr<StructuredBuffer<LightData>> CreateLightDataBuffer(Render
     return renderer.CreateStructuredBuffer(lightData);
 }
 
+static void ComputeWorldAabb(const std::vector<std::shared_ptr<GameObject>>& gameObjects, DirectX::XMFLOAT3& outMin, DirectX::XMFLOAT3& outMax)
+{
+    using namespace DirectX;
+    XMVECTOR vmin = XMVectorReplicate( FLT_MAX);
+    XMVECTOR vmax = XMVectorReplicate(-FLT_MAX);
+    bool any_seen = false;
+
+    for (const auto& go : gameObjects)
+    {
+        const auto model = go->GetModel();
+        if (!model) continue;
+
+        const XMMATRIX world = go->GetWorldMatrix();
+
+        for (const auto& primitive : model->GetMeshes())
+        {
+            const XMFLOAT3 lmin = primitive->m_localAabbMin;
+            const XMFLOAT3 lmax = primitive->m_localAabbMax;
+            if (lmin.x > lmax.x) continue; // empty primitive
+
+            const XMFLOAT3 corners[8] = {
+                { lmin.x, lmin.y, lmin.z }, { lmax.x, lmin.y, lmin.z },
+                { lmin.x, lmax.y, lmin.z }, { lmax.x, lmax.y, lmin.z },
+                { lmin.x, lmin.y, lmax.z }, { lmax.x, lmin.y, lmax.z },
+                { lmin.x, lmax.y, lmax.z }, { lmax.x, lmax.y, lmax.z },
+            };
+            for (const XMFLOAT3& c : corners)
+            {
+                XMVECTOR p = XMVector3Transform(XMLoadFloat3(&c), world);
+                vmin = XMVectorMin(vmin, p);
+                vmax = XMVectorMax(vmax, p);
+                any_seen = true;
+            }
+        }
+    }
+
+    if (!any_seen)
+    {
+        outMin = { -1.0f, -1.0f, -1.0f };
+        outMax = {  1.0f,  1.0f,  1.0f };
+        return;
+    }
+
+    XMStoreFloat3(&outMin, vmin);
+    XMStoreFloat3(&outMax, vmax);
+}
+
 std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
 {
     assert(!m_isBuilt && "Scene has already been built");
@@ -151,6 +200,7 @@ std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
 
     Scene scene;
     scene.m_lightDataCPU = m_lightData;
+    ComputeWorldAabb(m_gameObjects, scene.m_aabbMin, scene.m_aabbMax);
     scene.m_gameObjects = std::move(m_gameObjects);
     scene.m_models = std::move(m_models);
     scene.m_root = std::move(m_root);
@@ -161,7 +211,11 @@ std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
     scene.m_geometryInfoBuffer = std::move(geo_info_buffer);
     scene.m_instanceInfoBuffer = std::move(instance_info_buffer);
     scene.m_lightDataBuffer = std::move(light_data_buffer);
-    
+
+    spdlog::info("Scene AABB: min=({:.3f},{:.3f},{:.3f}) max=({:.3f},{:.3f},{:.3f})",
+        scene.m_aabbMin.x, scene.m_aabbMin.y, scene.m_aabbMin.z,
+        scene.m_aabbMax.x, scene.m_aabbMax.y, scene.m_aabbMax.z);
+
     return std::make_shared<Scene>(std::move(scene));
 }
 

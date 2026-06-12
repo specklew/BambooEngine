@@ -117,6 +117,7 @@
     <ClInclude Include="Include\ScreenshotManager.h" />
     <ClInclude Include="Include\PlacesManager.h" />
     <ClInclude Include="Include\SceneBookmarksPanel.h" />
+    <ClInclude Include="Include\VoxelizationPass.h" />
     <ClInclude Include="Include\Renderer.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManager.h" />
     <ClInclude Include="Include\ResourceManager\ResourceManagerTypes.h" />
@@ -325,6 +326,9 @@
     <None Include="Resources\Shaders\accumulation.hlsl" />
     <None Include="Resources\Shaders\postprocess.hlsl" />
     <None Include="Resources\Shaders\utils.hlsl" />
+    <None Include="Resources\Shaders\voxelGrid.hlsli" />
+    <None Include="Resources\Shaders\voxelize.hlsl" />
+    <None Include="Resources\Shaders\clearVoxels.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
     <ClCompile Include="Source\Camera.cpp" />
@@ -339,6 +343,7 @@
     <ClCompile Include="Source\ScreenshotManager.cpp" />
     <ClCompile Include="Source\PlacesManager.cpp" />
     <ClCompile Include="Source\SceneBookmarksPanel.cpp" />
+    <ClCompile Include="Source\VoxelizationPass.cpp" />
     <ClCompile Include="Source\EditorUI.cpp" />
     <ClCompile Include="Source\Renderer.cpp" />
     <ClCompile Include="Source\ResourceManager\ResourceManager.cpp" />
@@ -430,6 +435,9 @@
     <Content Include="Resources\Shaders\raytracing.shadowmiss.shader" />
     <Content Include="Resources\Shaders\accumulation.cs.shader" />
     <Content Include="Resources\Shaders\postprocess.cs.shader" />
+    <Content Include="Resources\Shaders\voxelize.vs.shader" />
+    <Content Include="Resources\Shaders\voxelize.ps.shader" />
+    <Content Include="Resources\Shaders\clearVoxels.cs.shader" />
     <None Include="Resources\Shaders\consts.hlsl" />
     <Content Include="Resources\Textures\qwantani_dusk_2_puresky_2k.dds" />
     <Content Include="Resources\Textures\qwantani_dusk_2_puresky_2k.hdr" />

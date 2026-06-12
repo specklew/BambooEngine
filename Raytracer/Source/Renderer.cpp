@@ -22,6 +22,8 @@
 #include "RaytracePass.h"
 #include "Techniques/PathTracingPass.h"
 #include "ScreenshotManager.h"
+#include "VoxelizationPass.h"
+#include "RasterDebugMode.h"
 #include "SceneResources/Scene.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
@@ -34,7 +36,6 @@
 #include "SceneResources/Model.h"
 #include "tinygltf/tiny_gltf.h"
 #include "Utils/PassConstants.h"
-#include "RasterDebugMode.h"
 
 #include <filesystem>
 
@@ -70,6 +71,8 @@ static AutoCVarFloat g_exposure("renderer.postprocess.exposure","Exposure multip
 static AutoCVarFloat g_contrast("renderer.postprocess.contrast", "Pre-ACES contrast power curve", 1.0f, CVarFlags::EditDrag, 0.1f, 3.0f);
 static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES saturation", 1.0f, CVarFlags::EditDrag, 0.0f, 2.0f);
 static AutoCVarFloat g_lift("renderer.postprocess.lift", "Post-ACES shadow lift", 0.0f, CVarFlags::EditDrag, 0.0f, 0.5f);
+static AutoCVarInt   g_voxelGridDim("voxel.gridDim", "Voxel grid resolution (one axis)", 64, CVarFlags::EditDrag, 32, 256);
+static AutoCVarFloat g_voxelAabbPad("voxel.aabbPadCells", "Voxel grid padding in cells (unused V1)", 0.5f, CVarFlags::EditDrag, 0.0f, 4.0f);
 
 void Renderer::Initialize()
 {
@@ -144,6 +147,18 @@ void Renderer::Initialize()
 
 	m_screenshotManager = std::make_shared<ScreenshotManager>();
 	m_screenshotManager->Initialize(g_device, m_d3d12CommandList);
+
+	m_voxelizationPass = std::make_shared<VoxelizationPass>();
+	m_voxelizationPass->Initialize(g_device, m_d3d12CommandList, m_rootSignature);
+
+	{
+		auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+		D3D12_CPU_DESCRIPTOR_HANDLE voxelSlot = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+		voxelSlot.ptr += static_cast<SIZE_T>(Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX) * descSize;
+		m_voxelizationPass->WriteOccupancyUavTo(voxelSlot);
+	}
+
+	m_voxelizationPass->OnSceneLoaded(*m_scene);
 
 	spdlog::info("Renderer initialized successfully.");
 
@@ -307,6 +322,23 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	m_editorUI->BeginFrame();
 	m_editorUI->EndFrame();
 
+	if (m_voxelizationPass && m_scene)
+	{
+		const bool needsVoxelize = !m_rasterize || g_rasterizationDebugMode.Get() == RasterDebugMode::Voxels;
+		if (needsVoxelize)
+		{
+			m_voxelizationPass->RunFrame(*m_scene, static_cast<uint32_t>(g_voxelGridDim.Get()));
+
+			if (m_voxelizationPass->DidResize())
+			{
+				auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+				D3D12_CPU_DESCRIPTOR_HANDLE voxelSlot = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+				voxelSlot.ptr += static_cast<SIZE_T>(Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX) * descSize;
+				m_voxelizationPass->WriteOccupancyUavTo(voxelSlot);
+			}
+		}
+	}
+
 	SetViewport();
 	SetScissorRect();
 	
@@ -354,7 +386,10 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		m_d3d12CommandList->SetGraphicsRootSignature(m_rootSignature.Get());
 		
 		m_d3d12CommandList->SetGraphicsRootConstantBufferView(3, m_passConstants->GetGpuVirtualAddress());
-		
+
+		if (m_voxelizationPass)
+			m_d3d12CommandList->SetGraphicsRootConstantBufferView(4, m_voxelizationPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+
 		for (const auto& go : m_scene->GetGameObjects())
 		{
 			auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
@@ -768,7 +803,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 1; // +1 for skybox cubemap
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 2; // +1 skybox, +1 voxel occupancy
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -807,8 +842,8 @@ void Renderer::CreateWorldProjCBV()
 
 void Renderer::CreateRasterizationRootSignature()
 {
-	constexpr int num_params = 4;
-	
+	constexpr int num_params = 5;
+
 	CD3DX12_ROOT_PARAMETER rootParameters[num_params];
 	
 	D3D12_DESCRIPTOR_RANGE cbvRange;
@@ -853,12 +888,20 @@ void Renderer::CreateRasterizationRootSignature()
 	textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	textureRange.OffsetInDescriptorsFromTableStart = 6;
 
-	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, vertexRange, indexRange, textureRange};
-	
-	rootParameters[0].InitAsDescriptorTable(6, ranges);
+	D3D12_DESCRIPTOR_RANGE voxelOccupancyRange;
+	voxelOccupancyRange.BaseShaderRegister = 1;
+	voxelOccupancyRange.NumDescriptors = 1;
+	voxelOccupancyRange.RegisterSpace = 0;
+	voxelOccupancyRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+	voxelOccupancyRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX;
+
+	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, vertexRange, indexRange, textureRange, voxelOccupancyRange};
+
+	rootParameters[0].InitAsDescriptorTable(_countof(ranges), ranges);
 	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer
 	rootParameters[2].InitAsConstantBufferView(2); // Material buffer
 	rootParameters[3].InitAsConstantBufferView(3); // Pass constants
+	rootParameters[4].InitAsConstantBufferView(4); // Voxel grid constants
 
 	auto static_samplers = GetStaticSamplers();
 	
@@ -1101,6 +1144,8 @@ void Renderer::InitializeEditorUI()
 		m_editorUI->SetScene(m_scene);
 		if (m_placesManager)
 			m_placesManager->OnSceneChanged(ExtractModelName(path));
+		if (m_voxelizationPass)
+			m_voxelizationPass->OnSceneLoaded(*m_scene);
 	});
 	m_editorUI->SetScreenshotRequestCallback([this](float seconds, std::string modelName, std::string placeName) {
 		ScreenshotMetadata meta = BuildScreenshotMetadata(modelName, placeName);

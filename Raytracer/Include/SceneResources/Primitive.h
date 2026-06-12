@@ -2,6 +2,8 @@
 
 #include "pch.h"
 
+#include <cfloat>
+
 #include "Material.h"
 #include "Resources/BufferView.h"
 
@@ -27,7 +29,10 @@ struct Primitive
 
     BufferView m_indexBufferOffset;
     BufferView m_vertexBufferOffset;
-    
+
+    DirectX::XMFLOAT3 m_localAabbMin{  FLT_MAX,  FLT_MAX,  FLT_MAX };
+    DirectX::XMFLOAT3 m_localAabbMax{ -FLT_MAX, -FLT_MAX, -FLT_MAX };
+
     [[nodiscard]] std::shared_ptr<Material> GetMaterial() const { return m_material; }
     BufferView GetVertexView() const { return m_vertexBufferOffset; }
     BufferView GetIndexView() const { return m_indexBufferOffset; }

@@ -12,6 +12,7 @@ enum class RasterDebugMode : int
 	Tangents = 5,
 	UVs = 6,
 	Roughness = 7,
+	Voxels = 8,
 };
 
 #else // HLSL

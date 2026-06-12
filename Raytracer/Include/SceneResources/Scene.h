@@ -51,6 +51,9 @@ public:
     bool IsLightDataDirty() const { return m_lightDataDirty; }
     void ClearLightDataDirty() { m_lightDataDirty = false; }
 
+    [[nodiscard]] const DirectX::XMFLOAT3& GetAabbMin() const { return m_aabbMin; }
+    [[nodiscard]] const DirectX::XMFLOAT3& GetAabbMax() const { return m_aabbMax; }
+
 private:
     friend class SceneBuilder;
     Scene() = default;
@@ -69,6 +72,9 @@ private:
     std::vector<std::shared_ptr<Model>> m_models;
 
     std::shared_ptr<AccelerationStructures> m_rtRepresentation;
+
+    DirectX::XMFLOAT3 m_aabbMin{ 0.0f, 0.0f, 0.0f };
+    DirectX::XMFLOAT3 m_aabbMax{ 0.0f, 0.0f, 0.0f };
 };
 
 class SceneBuilder
