@@ -102,11 +102,19 @@ void LightInjectionPass::CreateGlobalRootSignature()
     voxelVplCountRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     voxelVplCountRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_VPL_COUNT_DESCRIPTOR_INDEX;
 
-    D3D12_DESCRIPTOR_RANGE ranges[9] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
-                                        texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange};
+    D3D12_DESCRIPTOR_RANGE shadingPointsRange;
+    shadingPointsRange.BaseShaderRegister = 3; // u3
+    shadingPointsRange.NumDescriptors = 1;
+    shadingPointsRange.RegisterSpace = 0;
+    shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    shadingPointsRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::SHADINGPOINTS_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE ranges[10] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
+                                        texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
+                                        shadingPointsRange};
 
     CD3DX12_ROOT_PARAMETER rootParameters[8];
-    rootParameters[0].InitAsDescriptorTable(9, ranges);
+    rootParameters[0].InitAsDescriptorTable(10, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
     rootParameters[3].InitAsShaderResourceView(5, 0); // Random buffer
@@ -142,6 +150,44 @@ void LightInjectionPass::CreateShaderResourceHeap()
     srvDesc.Shader4ComponentMapping                  = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.RaytracingAccelerationStructure.Location = m_currentScene->GetAccelerationStructures()->GetTopLevelAS().p_result->GetGPUVirtualAddress();
     m_device->CreateShaderResourceView(nullptr, &srvDesc, srvHandle);
+
+    // ShadingPoints G-buffer (re)created here so window resize (which re-runs
+    // CreateShaderResourceHeap) resizes it to the new render dimensions.
+    CreateShadingPointsResource();
+}
+
+void LightInjectionPass::CreateShadingPointsResource()
+{
+    m_shadingPointsTex.Reset();
+
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Format           = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    desc.Width            = Window::Get().GetWidth();
+    desc.Height           = Window::Get().GetHeight();
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels        = 1;
+    desc.SampleDesc.Count = 1;
+    desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    ThrowIfFailed(m_device->CreateCommittedResource(
+        &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&m_shadingPointsTex)));
+    m_shadingPointsTex->SetName(L"VXPG ShadingPoints");
+
+    // UAV at the shared heap's ShadingPoints slot — bound via the global root
+    // signature's u3 range so the injection raygen/closest-hit can write it.
+    auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
+    D3D12_CPU_DESCRIPTOR_HANDLE uavHandle;
+    uavHandle.ptr = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart().ptr
+                  + Constants::Graphics::SHADINGPOINTS_DESCRIPTOR_INDEX * increment;
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+    uavDesc.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    m_device->CreateUnorderedAccessView(m_shadingPointsTex.Get(), nullptr, &uavDesc, uavHandle);
 }
 
 void LightInjectionPass::Render()
@@ -184,8 +230,9 @@ void LightInjectionPass::Render()
     m_commandList->SetPipelineState1(m_rtStateObject.Get());
     m_commandList->DispatchRays(&desc);
 
-    D3D12_RESOURCE_BARRIER barriers[2];
+    D3D12_RESOURCE_BARRIER barriers[3];
     barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_voxelPass->GetIrradianceTexture().Get());
     barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_voxelPass->GetVplCountTexture().Get());
+    barriers[2] = CD3DX12_RESOURCE_BARRIER::UAV(m_shadingPointsTex.Get());
     m_commandList->ResourceBarrier(_countof(barriers), barriers);
 }

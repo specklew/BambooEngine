@@ -325,6 +325,7 @@
     <None Include="Resources\Shaders\colorShader.hlsl" />
     <None Include="Resources\Shaders\raytracing.hlsl" />
     <None Include="Resources\Shaders\BRDF.hlsl" />
+    <None Include="Resources\Shaders\Octahedral.hlsl" />
     <None Include="Resources\Shaders\Random.hlsl" />
     <None Include="Resources\Shaders\RaytracingUtils.hlsl" />
     <None Include="Resources\Shaders\passConstants.hlsl" />

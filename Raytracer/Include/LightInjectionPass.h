@@ -15,6 +15,9 @@ public:
 
     void Render() override;
 
+    // Primary-hit G-buffer (worldPos + octahedral normal), consumed by superpixel clustering.
+    Microsoft::WRL::ComPtr<ID3D12Resource> GetShadingPointsTexture() const { return m_shadingPointsTex; }
+
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;
@@ -24,5 +27,8 @@ protected:
     void CreateShaderResourceHeap() override;
 
 private:
-    std::shared_ptr<VoxelizationPass> m_voxelPass;
+    void CreateShadingPointsResource();
+
+    std::shared_ptr<VoxelizationPass>      m_voxelPass;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_shadingPointsTex;
 };

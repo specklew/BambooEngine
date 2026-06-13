@@ -843,7 +843,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 4; // +1 skybox, +1 voxel occupancy, +1 voxel irradiance, +1 voxel vpl count
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 5; // +1 skybox, +3 voxel occupancy/irradiance/vplcount, +1 shadingpoints
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 

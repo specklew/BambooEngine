@@ -4,11 +4,20 @@
 // Reuses scene bindings, BRDF helpers, surface setup and shadow tracing
 // from the main path tracing shader.
 #include "raytracing.hlsl"
+#include "Octahedral.hlsl"
 
 // ---- VXPG light injection resources ----
 
 RWTexture3D<uint> gVoxelIrradiance : register(u1);
 RWTexture3D<uint> gVoxelVplCount   : register(u2);
+
+// ShadingPoints G-buffer: primary-hit worldPos in .xyz, octahedral-packed
+// normal (bit-cast) in .w. Consumed by superpixel clustering (Stage B).
+RWTexture2D<float4> gShadingPoints : register(u3);
+
+// Sentinel for pixels whose primary ray missed: far position, zero-packed
+// normal. Clustering treats these as invalid (normal gate fails).
+static const float4 SHADINGPOINT_INVALID = float4(1e30, 1e30, 1e30, 0.0);
 
 cbuffer VoxelGridCB : register(b4)
 {
@@ -44,6 +53,9 @@ struct InjectPayload
 [shader("miss")]
 void InjectMiss(inout InjectPayload payload : SV_RayPayload)
 {
+    // Only the primary ray (bounce 0) drives the ShadingPoints G-buffer.
+    if (payload.bounce == 0)
+        gShadingPoints[DispatchRaysIndex().xy] = SHADINGPOINT_INVALID;
     payload.flags = 0;
 }
 
@@ -96,6 +108,12 @@ void InjectHit(inout InjectPayload payload : SV_RayPayload, in Attributes attr)
 
     if (payload.bounce == 0)
     {
+        // Persist the primary shading point for superpixel clustering. Written
+        // here (closest hit) where world position + normal are both available;
+        // valid regardless of whether the VPL bounce below succeeds.
+        gShadingPoints[DispatchRaysIndex().xy] =
+            float4(hit.position, asfloat(UnitVectorToUnorm32Octahedron(N)));
+
         // Sample one BSDF direction for the VPL ray (same stochastic
         // specular/diffuse selection as the path tracer)
         float3 F = FresnelSchlick(NdotV, surface.F0);
