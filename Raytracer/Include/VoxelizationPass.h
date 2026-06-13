@@ -34,6 +34,8 @@ public:
     Microsoft::WRL::ComPtr<ID3D12Resource> GetIrradianceTexture() const { return m_irradianceTex; }
     Microsoft::WRL::ComPtr<ID3D12Resource> GetVplCountTexture() const { return m_vplCountTex; }
     Microsoft::WRL::ComPtr<ID3D12Resource> GetGridConstantsBuffer() const { return m_gridConstantsCB; }
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> GetDescriptorHeap() const { return m_descHeap; } // [0]=occupancy [1]=irradiance [2]=vpl count
+    uint32_t GetGridDim() const { return m_gridDim; }
     const VoxelGridConstants&              GetGridConstants() const { return m_gridConstants; }
 
     void WriteOccupancyUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;

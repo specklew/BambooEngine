@@ -24,6 +24,8 @@
 #include "ScreenshotManager.h"
 #include "VoxelizationPass.h"
 #include "LightInjectionPass.h"
+#include "VoxelGuidingBuildPass.h"
+#include "Techniques/GuidedPathTracingPass.h"
 #include "RasterDebugMode.h"
 #include "GuidingDebugView.h"
 #include "SceneResources/Scene.h"
@@ -171,6 +173,10 @@ void Renderer::Initialize()
 	m_lightInjectionPass->SetVoxelizationPass(m_voxelizationPass);
 	m_lightInjectionPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
+	m_voxelGuidingBuildPass = std::make_shared<VoxelGuidingBuildPass>();
+	m_voxelGuidingBuildPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass);
+	WireGuidingResources();
+
 	spdlog::info("Renderer initialized successfully.");
 
 	LoadSkybox(L"Resources/Textures/qwantani_dusk_2_puresky_2k.dds");
@@ -294,8 +300,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.frameIndex++;
 	m_passConstants->data.guidingFlags =
 		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
-		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 3u) << 1);
-	static_assert(static_cast<int>(GuidingDebugView::MisWeights) == 3, "GuidingDebugView must fit in 2 bits of guidingFlags");
+		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 7u) << 1);
+	static_assert(static_cast<int>(GuidingDebugView::GuideAcceptance) <= 7, "GuidingDebugView must fit in 3 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
@@ -355,7 +361,12 @@ void Renderer::Render(double elapsedTime, double totalTime)
 				WriteVoxelUavsToGlobalHeap();
 
 			if (m_lightInjectionPass && g_voxelInjectEnabled.Get() != 0)
+			{
 				m_lightInjectionPass->Render();
+
+				if (m_voxelGuidingBuildPass)
+					m_voxelGuidingBuildPass->Run();
+			}
 		}
 	}
 
@@ -1185,7 +1196,14 @@ void Renderer::InitializeEditorUI()
 		auto newPass = registry[index].create();
 		newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 		m_raytracePass = std::move(newPass);
+		WireGuidingResources();
 	});
+}
+
+void Renderer::WireGuidingResources()
+{
+	if (auto guided = std::dynamic_pointer_cast<GuidedPathTracingPass>(m_raytracePass))
+		guided->SetGuidingResources(m_voxelizationPass, m_voxelGuidingBuildPass);
 }
 
 void Renderer::WriteVoxelUavsToGlobalHeap()

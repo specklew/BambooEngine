@@ -252,7 +252,7 @@ void VoxelizationPass::RecreateForNewDim(uint32_t newDim)
     newDim = std::clamp(newDim, 4u, 512u);
     if (newDim == m_gridDim) return;
 
-    spdlog::info("VoxelizationPass: resizing grid {} -> {}", m_gridDim, newDim);
+    spdlog::debug("VoxelizationPass: resizing grid {} -> {}", m_gridDim, newDim);
     m_gridDim = newDim;
 
     m_occupancyTex.Reset();
@@ -296,7 +296,7 @@ void VoxelizationPass::OnSceneLoaded(const Scene& scene)
     WriteGridConstantsCB();
     m_haveScene = true;
 
-    spdlog::info("VoxelizationPass: gridMin=({:.3f},{:.3f},{:.3f}) gridMax=({:.3f},{:.3f},{:.3f}) voxelSize={:.4f}",
+    spdlog::debug("VoxelizationPass: gridMin=({:.3f},{:.3f},{:.3f}) gridMax=({:.3f},{:.3f},{:.3f}) voxelSize={:.4f}",
         m_gridConstants.gridMin.x, m_gridConstants.gridMin.y, m_gridConstants.gridMin.z,
         m_gridConstants.gridMax.x, m_gridConstants.gridMax.y, m_gridConstants.gridMax.z,
         m_gridConstants.voxelSize);

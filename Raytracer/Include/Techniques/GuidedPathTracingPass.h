@@ -2,11 +2,32 @@
 
 #include "RaytracePass.h"
 
-// VXPG guided path tracing technique. Stage A: MIS between BSDF sampling and
-// a uniform-sphere guide at the first bounce (validates MIS plumbing against
-// vanilla PT). Stage B will swap the guide for the voxel irradiance CDF.
+class VoxelizationPass;
+class VoxelGuidingBuildPass;
+
+// VXPG guided path tracing technique. Two-sample MIS at the first bounce
+// between BSDF sampling and the voxel irradiance distribution (CDF over
+// compacted voxels, cone sampling toward the chosen voxel). Falls back to a
+// uniform-sphere guide when no guiding data exists.
 class GuidedPathTracingPass : public RaytracePass
 {
+public:
+    // Wired by the Renderer after construction (registry factory takes no args)
+    void SetGuidingResources(
+        const std::shared_ptr<VoxelizationPass>& voxelPass,
+        const std::shared_ptr<VoxelGuidingBuildPass>& buildPass)
+    {
+        m_voxelPass = voxelPass;
+        m_buildPass = buildPass;
+    }
+
+    void Render() override;
+
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
+    void CreateGlobalRootSignature() override;
+
+private:
+    std::shared_ptr<VoxelizationPass>     m_voxelPass;
+    std::shared_ptr<VoxelGuidingBuildPass> m_buildPass;
 };

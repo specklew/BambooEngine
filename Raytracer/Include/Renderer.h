@@ -29,6 +29,7 @@ struct Primitive;
 class DescriptorHeapAllocator;
 class RaytracePass;
 class LightInjectionPass;
+class VoxelGuidingBuildPass;
 class FrameAccumulationPass;
 class PostProcessPass;
 class AccelerationStructures;
@@ -111,6 +112,7 @@ private:
 	void OnShaderReload();
 	void LoadSkybox(const std::wstring& path);
 	void WriteVoxelUavsToGlobalHeap();
+	void WireGuidingResources();
 
 	std::shared_ptr<RaytracePass> m_raytracePass;
 	std::shared_ptr<LightInjectionPass> m_lightInjectionPass;
@@ -192,6 +194,7 @@ private:
 	std::shared_ptr<class EditorUI> m_editorUI;
 	std::shared_ptr<PlacesManager> m_placesManager;
 	std::shared_ptr<VoxelizationPass> m_voxelizationPass;
+	std::shared_ptr<VoxelGuidingBuildPass> m_voxelGuidingBuildPass;
 
 	ScreenshotMetadata BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const;
 };

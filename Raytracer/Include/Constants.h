@@ -15,5 +15,7 @@ namespace Constants
         constexpr int VOXEL_IRRADIANCE_DESCRIPTOR_INDEX = VOXEL_OCCUPANCY_DESCRIPTOR_INDEX + 1; // 520
         constexpr int VOXEL_VPL_COUNT_DESCRIPTOR_INDEX = VOXEL_IRRADIANCE_DESCRIPTOR_INDEX + 1; // 521
         constexpr int STATIC_SAMPLERS_COUNT = 6;
+        // Max voxels in the compacted guiding distribution (matches SIByL VXGuider_MAX_CAPACITY)
+        constexpr int VOXEL_GUIDING_CAPACITY = 131072;
     }
 }
