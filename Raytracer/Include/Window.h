@@ -5,7 +5,7 @@ class Application;
 class Window
 {
 public:
-	static HRESULT Create(HINSTANCE hInstance, RECT windowRect, Application* app);
+	static HRESULT Create(HINSTANCE hInstance, RECT windowRect, Application* app, bool hidden = false);
 	static Window& Get();
 
 	Window(const Window&) = delete;
@@ -35,5 +35,6 @@ private:
 	HINSTANCE m_hInstance;
 	HWND m_windowHandle;
 	RECT m_windowRect;
+	bool m_hidden = false;
 	std::wstring m_baseTitle;
 };

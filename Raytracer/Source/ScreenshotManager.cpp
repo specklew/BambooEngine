@@ -177,6 +177,12 @@ const char* ScreenshotManager::GetScreenshotsDirectory()
     return kScreenshotsDir;
 }
 
+void ScreenshotManager::SetOutputTarget(const std::string& dir, const std::string& stem)
+{
+    m_outDir  = dir;
+    m_outStem = stem;
+}
+
 void ScreenshotManager::FinishCapture()
 {
     if (!m_captureDue)
@@ -202,15 +208,16 @@ void ScreenshotManager::FinishCapture()
     D3D12_RANGE writeRange = { 0, 0 };
     m_readbackBuffer->Unmap(0, &writeRange);
 
+    const std::string dir = m_outDir.empty() ? std::string(kScreenshotsDir) : m_outDir;
     std::error_code ec;
-    std::filesystem::create_directories(kScreenshotsDir, ec);
+    std::filesystem::create_directories(dir, ec);
 
     m_pendingMeta.renderWidth  = m_captureWidth;
     m_pendingMeta.renderHeight = m_captureHeight;
 
-    const std::string stem    = MakeFilenameStem();
-    const std::string pngPath = std::string(kScreenshotsDir) + "/" + stem + ".png";
-    const std::string jsonPath = std::string(kScreenshotsDir) + "/" + stem + ".json";
+    const std::string stem    = m_outStem.empty() ? MakeFilenameStem() : m_outStem;
+    const std::string pngPath = dir + "/" + stem + ".png";
+    const std::string jsonPath = dir + "/" + stem + ".json";
 
     if (stbi_write_png(
             pngPath.c_str(),

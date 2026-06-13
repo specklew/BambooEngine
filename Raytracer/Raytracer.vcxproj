@@ -101,6 +101,8 @@
   <ItemGroup>
     <ClInclude Include="Include\AccelerationStructures.h" />
     <ClInclude Include="Include\Application.h" />
+    <ClInclude Include="Include\Headless.h" />
+    <ClInclude Include="Include\HeadlessRunner.h" />
     <ClInclude Include="Include\Camera.h" />
     <ClInclude Include="Include\Constants.h" />
     <ClInclude Include="Include\DescriptorHeapAllocator.h" />
@@ -344,6 +346,8 @@
     <None Include="Resources\Shaders\supervoxelCluster.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
+    <ClCompile Include="Source\Headless.cpp" />
+    <ClCompile Include="Source\HeadlessRunner.cpp" />
     <ClCompile Include="Source\Camera.cpp" />
     <ClCompile Include="Source\DescriptorHeapAllocator.cpp" />
     <ClCompile Include="Source\FrameAccumulationPass.cpp" />

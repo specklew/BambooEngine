@@ -30,6 +30,12 @@
     <ClInclude Include="Include\Application.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Headless.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\HeadlessRunner.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\HighResolutionClock.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -597,6 +603,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Application.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Headless.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\HeadlessRunner.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\HIghResolutionClock.cpp">

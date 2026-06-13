@@ -3,23 +3,55 @@
 #include "Application.h"
 
 #include "Window.h"
+#include "Headless.h"
+#include "HeadlessRunner.h"
 #include "ResourceManager/ResourceManager.h"
+
+#include <cstdlib>
 
 Application::Application(HINSTANCE hInstance) : m_hInstance(hInstance)
 {
 	m_renderer = std::make_shared<Renderer>();
 }
 
-void Application::Run()
+int Application::Run()
 {
 	SetupLoggingLevel();
 
 	m_keyboard = std::make_unique<DirectX::Keyboard>();
-	
-	Window::Create(m_hInstance, { 0, 0, 1280, 720 }, this);
-	
+
+	int argc = 0;
+	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	const HeadlessArgs headlessArgs = ParseHeadlessArgs(argc, argv);
+	LocalFree(argv);
+
+	HeadlessConfig headlessConfig;
+	const LONG winW = 1280, winH = 720;
+	RECT windowRect = { 0, 0, winW, winH };
+	if (headlessArgs.headless)
+	{
+		headlessConfig = LoadHeadlessConfig("SavedUserData/headless.json");
+		windowRect = { 0, 0, static_cast<LONG>(headlessConfig.width), static_cast<LONG>(headlessConfig.height) };
+	}
+
+	Window::Create(m_hInstance, windowRect, this, headlessArgs.headless);
+
 	m_renderer->Initialize();
 	m_ready = true;
+
+	int exitCode = 0;
+	if (headlessArgs.headless)
+	{
+		HeadlessRunner runner(*m_renderer, headlessArgs, headlessConfig);
+		exitCode = runner.Run();
+
+		// The engine's global teardown (static ComPtr device, ImGui, resource
+		// manager) segfaults on shutdown — harmless under the interactive loop
+		// (process is exiting anyway) but it would clobber our exit code. The
+		// captures are already flushed to disk, so fast-exit with the real code.
+		spdlog::default_logger()->flush();
+		std::_Exit(exitCode);
+	}
 
 	GameLoop();
 
@@ -28,6 +60,8 @@ void Application::Run()
 
 	ResourceManager::Get().ReleaseResources();
 	//ReportLiveObjects();
+
+	return exitCode;
 }
 
 void Application::GameLoop()

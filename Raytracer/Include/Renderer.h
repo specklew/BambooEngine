@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "Constants.h"
+#include "Headless.h" // HeadlessConfig
 #include "InputElements.h"
 #include "RasterDebugMode.h" // VxpgStage
 #include "Keyboard.h"
@@ -59,6 +60,23 @@ public:
 	
 	void ToggleRasterization();
 	void ExecuteCommandsAndReset();
+
+	// Setup verbs shared by the interactive UI callbacks and the headless runner.
+	void LoadScene(const std::wstring& path);
+	bool SetTechnique(const std::string& name);
+	void SetTechniqueByIndex(int index);
+	void SetRaytracing(bool enabled) { m_rasterize = !enabled; }
+	void SetHeadless(bool headless) { m_headless = headless; }
+	void ApplyRenderConfig(const HeadlessConfig& config);
+
+	std::vector<std::string> GetTechniqueNames() const;
+	std::vector<std::string> GetPlaceNames() const;
+	bool GoToPlace(const std::string& name);
+
+	// Arm a capture writing to dir/stem (empty => default screenshots dir / auto name).
+	void ArmScreenshot(float seconds, const std::string& model, const std::string& place,
+	                   const std::string& outDir, const std::string& stem);
+	bool ScreenshotIdle() const;
 
 	std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> Renderer::CreateSceneResources(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 	std::shared_ptr<Texture> CreateTextureFromGLTF(const tinygltf::Image& image);
@@ -131,6 +149,8 @@ private:
 
 	bool m_tearingSupport = false;
 	bool m_rasterize = true;
+	bool m_headless = false;
+	int  m_activeTechniqueIndex = 0;
 	
 	Microsoft::WRL::ComPtr<IDXGIAdapter4> GetHardwareAdapter(bool useWarp = false);
 	Microsoft::WRL::ComPtr<ID3D12Device5> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);

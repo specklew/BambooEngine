@@ -8,7 +8,7 @@ class Application
 public:
 	Application(HINSTANCE hInstance);
 
-	void Run();
+	int Run();
 	bool IsReady() const { return m_ready; }
 
 private:

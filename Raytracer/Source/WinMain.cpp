@@ -7,7 +7,5 @@ int CALLBACK WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, INT nCmdShow) {
 	spdlog::enable_backtrace(32);
 	Application app(hInstance);
 
-	app.Run();
-
-	return 0;
+	return app.Run();
 }

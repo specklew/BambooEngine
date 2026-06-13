@@ -247,6 +247,20 @@ void PlacesManager::GoToPlace(size_t sceneIndex)
     SnapshotCamera();
 }
 
+bool PlacesManager::GoToPlaceByName(const std::string& name)
+{
+    const std::vector<Place> scenePlaces = GetPlacesForCurrentScene();
+    for (size_t i = 0; i < scenePlaces.size(); ++i)
+    {
+        if (scenePlaces[i].name == name)
+        {
+            GoToPlace(i);
+            return true;
+        }
+    }
+    return false;
+}
+
 bool PlacesManager::IsNameTakenInCurrentScene(const std::string& name) const
 {
     for (const Place& place : m_places)

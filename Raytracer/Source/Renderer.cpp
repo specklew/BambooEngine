@@ -194,6 +194,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 {
 	// Apply CVar edits from ImGui only when the CVar value actually changed since last frame.
 	// Applying every frame would stomp camera state set via other paths (e.g. PlacesManager::GoTo).
+	// Headless drives the camera solely through GoToPlace, so this sync is skipped there.
+	if (!m_headless)
 	{
 	    static bool s_init = false;
 	    static DirectX::XMFLOAT3 s_prevCvarPos = {};
@@ -317,8 +319,10 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		m_scene->ClearLightDataDirty();
 	}
 
-	// Camera change detection for accumulation reset
-	if (g_accumulationEnabled.Get())
+	// Camera change detection for accumulation reset. Skipped in headless: the
+	// camera only changes between captures (GoToPlace), and ArmScreenshot owns the
+	// reset — letting this fire would cancel the pending capture in Tick.
+	if (g_accumulationEnabled.Get() && !m_headless)
 	{
 		auto pos = m_camera->GetPosition();
 		auto rot = m_camera->GetRotation();
@@ -344,8 +348,11 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 void Renderer::Render(double elapsedTime, double totalTime)
 {
-	m_editorUI->BeginFrame();
-	m_editorUI->EndFrame();
+	if (!m_headless)
+	{
+		m_editorUI->BeginFrame();
+		m_editorUI->EndFrame();
+	}
 
 	// In raster mode the active debug view decides how far the VXPG pipeline must
 	// run; in raytracing mode the active technique declares its own need.
@@ -473,7 +480,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			m_screenshotManager->RecordCopy(m_postProcessPass->GetOutputBuffer());
 	}
 
-	ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_d3d12CommandList.Get());
+	if (!m_headless)
+		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_d3d12CommandList.Get());
 	
 	{
 		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -1159,43 +1167,112 @@ void Renderer::InitializeEditorUI()
 		LoadSkybox(path);
 	});
 	m_editorUI->SetOnDifferentScenePicked([this](const std::wstring& path) {
-		char pathUtf8[MAX_PATH];
-		WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, pathUtf8, sizeof(pathUtf8), nullptr, nullptr);
-		spdlog::info("Scene has been changed. Loading: {}", pathUtf8);
-
-		g_textureIndex = 0;
-		m_scene = ModelLoading::LoadScene(*this, AssetId(pathUtf8));
-
-		CreateVertexSRV();
-		CreateIndexSRV();
-		ExecuteCommandsAndReset();
-
-		m_raytracePass->OnSceneChange(m_scene);
-		if (m_lightInjectionPass)
-			m_lightInjectionPass->OnSceneChange(m_scene);
-		m_editorUI->SetScene(m_scene);
-		if (m_placesManager)
-			m_placesManager->OnSceneChanged(ExtractModelName(path));
-		if (m_voxelizationPass)
-			m_voxelizationPass->OnSceneLoaded(*m_scene);
+		LoadScene(path);
 	});
 	m_editorUI->SetScreenshotRequestCallback([this](float seconds, std::string modelName, std::string placeName) {
-		ScreenshotMetadata meta = BuildScreenshotMetadata(modelName, placeName);
-		m_screenshotManager->Arm(*m_accumulationPass, seconds, std::move(meta));
+		ArmScreenshot(seconds, modelName, placeName, "", "");
 	});
 	m_editorUI->SetScreenshotPendingGetter([this]() {
 		return m_screenshotManager->IsPending();
 	});
 	m_editorUI->SetOnDifferentTechniquePicked([this](int index) {
-		const auto& registry = RaytracePass::GetRegistry();
-		if (index < 0 || index >= static_cast<int>(registry.size()))
-			return;
-		spdlog::info("Switching raytracing technique to: {}", registry[index].name);
-		auto newPass = registry[index].create();
-		newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
-		m_raytracePass = std::move(newPass);
-		WireGuidingResources();
+		SetTechniqueByIndex(index);
 	});
+}
+
+void Renderer::LoadScene(const std::wstring& path)
+{
+	char pathUtf8[MAX_PATH];
+	WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, pathUtf8, sizeof(pathUtf8), nullptr, nullptr);
+	spdlog::info("Scene has been changed. Loading: {}", pathUtf8);
+
+	g_textureIndex = 0;
+	m_scene = ModelLoading::LoadScene(*this, AssetId(pathUtf8));
+
+	CreateVertexSRV();
+	CreateIndexSRV();
+	ExecuteCommandsAndReset();
+
+	m_raytracePass->OnSceneChange(m_scene);
+	if (m_lightInjectionPass)
+		m_lightInjectionPass->OnSceneChange(m_scene);
+	m_editorUI->SetScene(m_scene);
+	if (m_placesManager)
+		m_placesManager->OnSceneChanged(ExtractModelName(path));
+	if (m_voxelizationPass)
+		m_voxelizationPass->OnSceneLoaded(*m_scene);
+}
+
+void Renderer::SetTechniqueByIndex(int index)
+{
+	const auto& registry = RaytracePass::GetRegistry();
+	if (index < 0 || index >= static_cast<int>(registry.size()))
+		return;
+	spdlog::info("Switching raytracing technique to: {}", registry[index].name);
+	auto newPass = registry[index].create();
+	newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+	m_raytracePass = std::move(newPass);
+	m_activeTechniqueIndex = index;
+	WireGuidingResources();
+}
+
+bool Renderer::SetTechnique(const std::string& name)
+{
+	const auto& registry = RaytracePass::GetRegistry();
+	for (int i = 0; i < static_cast<int>(registry.size()); ++i)
+	{
+		if (registry[i].name == name)
+		{
+			SetTechniqueByIndex(i);
+			return true;
+		}
+	}
+	return false;
+}
+
+std::vector<std::string> Renderer::GetTechniqueNames() const
+{
+	std::vector<std::string> names;
+	for (const auto& entry : RaytracePass::GetRegistry())
+		names.push_back(entry.name);
+	return names;
+}
+
+std::vector<std::string> Renderer::GetPlaceNames() const
+{
+	std::vector<std::string> names;
+	if (m_placesManager)
+		for (const Place& place : m_placesManager->GetPlacesForCurrentScene())
+			names.push_back(place.name);
+	return names;
+}
+
+bool Renderer::GoToPlace(const std::string& name)
+{
+	return m_placesManager && m_placesManager->GoToPlaceByName(name);
+}
+
+void Renderer::ArmScreenshot(float seconds, const std::string& model, const std::string& place,
+                             const std::string& outDir, const std::string& stem)
+{
+	m_screenshotManager->SetOutputTarget(outDir, stem);
+	ScreenshotMetadata meta = BuildScreenshotMetadata(model, place);
+	m_screenshotManager->Arm(*m_accumulationPass, seconds, std::move(meta));
+}
+
+bool Renderer::ScreenshotIdle() const
+{
+	return m_screenshotManager->IsIdle();
+}
+
+void Renderer::ApplyRenderConfig(const HeadlessConfig& config)
+{
+	g_numSamplesPerPixel.Set(static_cast<int32_t>(config.spp));
+	g_numBounces.Set(static_cast<int32_t>(config.bounces));
+	g_exposure.Set(config.exposure);
+	g_contrast.Set(config.contrast);
+	g_saturation.Set(config.saturation);
+	g_lift.Set(config.lift);
 }
 
 void Renderer::WireGuidingResources()
@@ -1548,9 +1625,8 @@ ScreenshotMetadata Renderer::BuildScreenshotMetadata(const std::string& modelNam
     }
 
     const auto& registry = RaytracePass::GetRegistry();
-    const int techIndex = m_editorUI ? m_editorUI->GetCurrentTechniqueIndex() : 0;
-    if (techIndex >= 0 && techIndex < static_cast<int>(registry.size()))
-        m.techniqueName = registry[techIndex].name;
+    if (m_activeTechniqueIndex >= 0 && m_activeTechniqueIndex < static_cast<int>(registry.size()))
+        m.techniqueName = registry[m_activeTechniqueIndex].name;
 
     m.postProcessEnabled = true;
     m.exposure   = g_exposure.Get();

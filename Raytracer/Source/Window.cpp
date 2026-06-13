@@ -18,7 +18,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 Window* Window::instance = nullptr;
 
-HRESULT Window::Create(HINSTANCE hInstance, RECT windowRect, Application* app)
+HRESULT Window::Create(HINSTANCE hInstance, RECT windowRect, Application* app, bool hidden)
 {
 	if (instance != nullptr)
 	{
@@ -30,6 +30,7 @@ HRESULT Window::Create(HINSTANCE hInstance, RECT windowRect, Application* app)
 	instance->application = app;
 	instance->m_hInstance = hInstance;
 	instance->m_windowRect = windowRect;
+	instance->m_hidden = hidden;
 
 	return instance->Initialize();
 }
@@ -109,7 +110,7 @@ HRESULT Window::Initialize()
 
 	m_windowHandle = handle;
 
-	ShowWindow(handle, SW_SHOW);
+	ShowWindow(handle, m_hidden ? SW_HIDE : SW_SHOW);
 
 	return S_OK;
 }

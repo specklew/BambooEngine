@@ -51,8 +51,13 @@ public:
     // Output folder for saved screenshots, relative to the working directory.
     static const char* GetScreenshotsDirectory();
 
+    // Override the destination of the next capture. An empty stem falls back to
+    // the auto-generated model-place-timestamp name; an empty dir to the default.
+    void SetOutputTarget(const std::string& dir, const std::string& stem);
+
     bool IsPending()    const { return m_state == State::Pending; }
     bool IsCaptureDue() const { return m_captureDue; }
+    bool IsIdle()       const { return m_state == State::Idle && !m_captureDue && !m_copyRecorded; }
     float GetTargetSeconds()    const { return m_targetSeconds; }
 
 private:
@@ -68,6 +73,9 @@ private:
     uint32_t m_resetCountAtArm = 0;
 
     ScreenshotMetadata m_pendingMeta;
+
+    std::string m_outDir;   // empty = default screenshots dir
+    std::string m_outStem;  // empty = auto-generated name
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;

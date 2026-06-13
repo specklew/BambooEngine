@@ -36,6 +36,7 @@ public:
     bool RenamePlace(size_t sceneIndex, const std::string& newName);
     void DeletePlace(size_t sceneIndex);
     void GoToPlace(size_t sceneIndex);
+    bool GoToPlaceByName(const std::string& name);
 
 private:
     static constexpr const char* kSavePath = "SavedUserData/places.json";
