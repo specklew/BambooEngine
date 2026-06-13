@@ -110,6 +110,7 @@
     <ClInclude Include="Include\HighResolutionClock.h" />
     <ClInclude Include="Include\InputElements.h" />
     <ClInclude Include="Include\pch.h" />
+    <ClInclude Include="Include\RasterDebugMode.h" />
     <ClInclude Include="Include\RaytracePass.h" />
     <ClInclude Include="Include\Techniques\TechniqueDescriptor.h" />
     <ClInclude Include="Include\Techniques\PathTracingPass.h" />

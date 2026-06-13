@@ -3,6 +3,7 @@
 
 #include "Constants.h"
 #include "InputElements.h"
+#include "RasterDebugMode.h" // VxpgStage
 #include "Keyboard.h"
 #include "SimpleMath.h"
 #include "Resources/StructuredBuffer.h"
@@ -114,6 +115,9 @@ private:
 	void LoadSkybox(const std::wstring& path);
 	void WriteVoxelUavsToGlobalHeap();
 	void WireGuidingResources();
+	// Runs the linear VXPG pipeline (voxelize -> inject -> guiding build ->
+	// supervoxel cluster) up to and including the requested stage.
+	void RunVxpgPipelineUpTo(VxpgStage stage);
 
 	std::shared_ptr<RaytracePass> m_raytracePass;
 	std::shared_ptr<LightInjectionPass> m_lightInjectionPass;

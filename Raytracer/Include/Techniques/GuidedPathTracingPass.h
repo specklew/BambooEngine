@@ -23,6 +23,10 @@ public:
 
     void Render() override;
 
+    // Guided path tracing consumes the full VXPG pipeline (voxels -> injection
+    // -> guiding distribution -> supervoxels).
+    VxpgStage RequiredVxpgStage() const override { return VxpgStage::Supervoxel; }
+
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;

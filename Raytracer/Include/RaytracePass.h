@@ -1,6 +1,7 @@
 #pragma once
 #include "Resources/StructuredBuffer.h"
 #include "Techniques/TechniqueDescriptor.h"
+#include "RasterDebugMode.h" // VxpgStage
 
 class PassConstants;
 class Renderer;
@@ -22,6 +23,11 @@ public:
         std::shared_ptr<PassConstants> passConstants);
 
     virtual void Render();
+
+    // Furthest VXPG pipeline stage this technique needs run before it dispatches.
+    // Default None: most techniques (vanilla path tracing, AO) use no VXPG data.
+    virtual VxpgStage RequiredVxpgStage() const { return VxpgStage::None; }
+
     void Update(double elapsedTime, double totalTime);
     void OnResize();
     void OnShaderReload();

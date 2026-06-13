@@ -78,7 +78,6 @@ static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES 
 static AutoCVarFloat g_lift("renderer.postprocess.lift", "Post-ACES shadow lift", 0.0f, CVarFlags::EditDrag, 0.0f, 0.5f);
 static AutoCVarInt   g_voxelGridDim("voxel.gridDim", "Voxel grid resolution (one axis)", 64, CVarFlags::EditDrag, 32, 256);
 static AutoCVarFloat g_voxelAabbPad("voxel.aabbPadCells", "Voxel grid padding in cells (unused V1)", 0.5f, CVarFlags::EditDrag, 0.0f, 4.0f);
-static AutoCVarInt   g_voxelInjectEnabled("voxel.inject.enabled", "Enable VXPG light injection pass", 1, CVarFlags::EditCheckbox);
 static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accumulation: 1 = average (add + count), 0 = max", 1, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
 static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 0, CVarFlags::EditCheckbox);
@@ -348,40 +347,12 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	m_editorUI->BeginFrame();
 	m_editorUI->EndFrame();
 
-	if (m_voxelizationPass && m_scene)
-	{
-		const auto debugMode = g_rasterizationDebugMode.Get();
-		const bool shadingPointsDebug = debugMode == RasterDebugMode::ShadingPointsNormal
-			|| debugMode == RasterDebugMode::ShadingPointsPos;
-		const bool needsVoxelize = !m_rasterize
-			|| debugMode == RasterDebugMode::Voxels
-			|| debugMode == RasterDebugMode::VoxelIrradiance
-			|| debugMode == RasterDebugMode::Supervoxels
-			|| shadingPointsDebug;
-		if (needsVoxelize)
-		{
-			m_voxelizationPass->SetRuntimeParams(
-				g_voxelInjectUseAvg.Get() != 0,
-				g_voxelHeatScale.Get());
-
-			m_voxelizationPass->RunFrame(*m_scene, static_cast<uint32_t>(g_voxelGridDim.Get()));
-
-			if (m_voxelizationPass->DidResize())
-				WriteVoxelUavsToGlobalHeap();
-
-			// ShadingPoints debug views need the G-buffer produced regardless of the inject CVar.
-			if (m_lightInjectionPass && (g_voxelInjectEnabled.Get() != 0 || shadingPointsDebug))
-			{
-				m_lightInjectionPass->Render();
-
-				if (m_voxelGuidingBuildPass)
-					m_voxelGuidingBuildPass->Run();
-
-				if (m_supervoxelClusterPass)
-					m_supervoxelClusterPass->Run();
-			}
-		}
-	}
+	// In raster mode the active debug view decides how far the VXPG pipeline must
+	// run; in raytracing mode the active technique declares its own need.
+	const VxpgStage vxpgStage = m_rasterize
+		? StageFor(g_rasterizationDebugMode.Get())
+		: (m_raytracePass ? m_raytracePass->RequiredVxpgStage() : VxpgStage::None);
+	RunVxpgPipelineUpTo(vxpgStage);
 
 	SetViewport();
 	SetScissorRect();
@@ -1231,6 +1202,32 @@ void Renderer::WireGuidingResources()
 {
 	if (auto guided = std::dynamic_pointer_cast<GuidedPathTracingPass>(m_raytracePass))
 		guided->SetGuidingResources(m_voxelizationPass, m_voxelGuidingBuildPass);
+}
+
+void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
+{
+	if (stage == VxpgStage::None || !m_voxelizationPass || !m_scene)
+		return;
+
+	// Stage 1: voxelize (always, since stage >= Voxelize here).
+	m_voxelizationPass->SetRuntimeParams(
+		g_voxelInjectUseAvg.Get() != 0,
+		g_voxelHeatScale.Get());
+	m_voxelizationPass->RunFrame(*m_scene, static_cast<uint32_t>(g_voxelGridDim.Get()));
+	if (m_voxelizationPass->DidResize())
+		WriteVoxelUavsToGlobalHeap();
+
+	// Stage 2: light injection (also emits the ShadingPoints G-buffer).
+	if (stage >= VxpgStage::Inject && m_lightInjectionPass)
+		m_lightInjectionPass->Render();
+
+	// Stage 3: build the guiding distribution from the injected voxels.
+	if (stage >= VxpgStage::GuidingBuild && m_voxelGuidingBuildPass)
+		m_voxelGuidingBuildPass->Run();
+
+	// Stage 4: cluster voxels into supervoxels.
+	if (stage >= VxpgStage::Supervoxel && m_supervoxelClusterPass)
+		m_supervoxelClusterPass->Run();
 }
 
 void Renderer::WriteVoxelUavsToGlobalHeap()
