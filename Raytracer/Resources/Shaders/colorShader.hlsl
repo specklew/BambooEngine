@@ -2,6 +2,7 @@
 #include "RasterDebugMode.h"
 #include "passConstants.hlsl"
 #include "consts.hlsl"
+#include "Octahedral.hlsl"
 
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);
@@ -42,6 +43,7 @@ ByteAddressBuffer g_indices : register(t2);
 RWTexture3D<uint> gVoxelOccupancy  : register(u1);
 RWTexture3D<uint> gVoxelIrradiance : register(u2);
 RWTexture3D<uint> gVoxelVplCount   : register(u3);
+RWTexture2D<float4> gShadingPoints : register(u4); // VXPG primary G-buffer (pos, octaN)
 
 cbuffer VoxelGridCB : register(b4)
 {
@@ -81,6 +83,9 @@ struct VertexOut
     float3 NormalW : NORMAL;
     float4 TangentW : TANGENT; // xyz = tangent, w = bitangent sign
     float2 TexCoord : TEXCOORD;
+    // Screen-space [0,1] UV (linear in screen space). Used to sample full-screen
+    // resources (ShadingPoints G-buffer) independent of render-target resolution.
+    noperspective float2 ScreenUV : TEXCOORD1;
 };
 
 VertexOut vertex(VertexIn vin)
@@ -94,6 +99,9 @@ VertexOut vertex(VertexIn vin)
     float4 posW = mul(posL, world);
     vout.PosW = posW.xyz;
     vout.PosH = mul(posW, viewProj);
+    // NDC.xy (clip.xy/clip.w) -> [0,1], flip Y for texture space. Linear in
+    // screen space, so noperspective interpolation gives per-pixel screen UV.
+    vout.ScreenUV = vout.PosH.xy / vout.PosH.w * float2(0.5, -0.5) + 0.5;
 
     // Normals require the inverse-transpose of the world matrix.
     // worldInvTranspose is uploaded as W^{-1} without CPU transpose, so HLSL
@@ -160,6 +168,26 @@ float4 pixel(VertexOut pin) : SV_Target
     debugData.uv = pin.TexCoord;
     debugData.roughness = roughness;
     debugData.metallic = metallic;
+
+    if (debugMode == 11 || debugMode == 12)
+    {
+        // ShadingPoints G-buffer (VXPG): primary worldPos + octahedral normal,
+        // emitted by light injection. Sample via screen UV * texture dims so it
+        // maps correctly even if the G-buffer res differs from the backbuffer.
+        uint spW, spH;
+        gShadingPoints.GetDimensions(spW, spH);
+        int2 spTexel = int2(pin.ScreenUV * float2(spW, spH));
+        float4 sp = gShadingPoints[spTexel];
+        if (sp.x > 1e29) return float4(0, 0, 0, 1); // invalid (primary miss)
+        if (debugMode == 11)
+        {
+            float3 n = Unorm32OctahedronToUnitVector(asuint(sp.w));
+            return float4(n * 0.5 + 0.5, 1.0);
+        }
+        // Position remapped into the voxel grid bounds for a readable color
+        float3 t = (sp.xyz - voxGridMin) / max(voxGridMax - voxGridMin, 1e-4);
+        return float4(saturate(t), 1.0);
+    }
 
     if ((debugMode == 8 || debugMode == 9 || debugMode == 10) && voxGridDim > 0)
     {

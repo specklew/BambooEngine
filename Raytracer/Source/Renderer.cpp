@@ -351,10 +351,13 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	if (m_voxelizationPass && m_scene)
 	{
 		const auto debugMode = g_rasterizationDebugMode.Get();
+		const bool shadingPointsDebug = debugMode == RasterDebugMode::ShadingPointsNormal
+			|| debugMode == RasterDebugMode::ShadingPointsPos;
 		const bool needsVoxelize = !m_rasterize
 			|| debugMode == RasterDebugMode::Voxels
 			|| debugMode == RasterDebugMode::VoxelIrradiance
-			|| debugMode == RasterDebugMode::Supervoxels;
+			|| debugMode == RasterDebugMode::Supervoxels
+			|| shadingPointsDebug;
 		if (needsVoxelize)
 		{
 			m_voxelizationPass->SetRuntimeParams(
@@ -366,7 +369,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			if (m_voxelizationPass->DidResize())
 				WriteVoxelUavsToGlobalHeap();
 
-			if (m_lightInjectionPass && g_voxelInjectEnabled.Get() != 0)
+			// ShadingPoints debug views need the G-buffer produced regardless of the inject CVar.
+			if (m_lightInjectionPass && (g_voxelInjectEnabled.Get() != 0 || shadingPointsDebug))
 			{
 				m_lightInjectionPass->Render();
 
@@ -575,6 +579,12 @@ void Renderer::OnResize()
 	m_raytracePass->OnResize();
 	m_accumulationPass->OnResize();
 	m_postProcessPass->OnResize();
+
+	// Recreate the ShadingPoints G-buffer at the new resolution. Without this it
+	// stays at its init size while injection dispatches at the live resolution,
+	// writing mismatched rows -> the G-buffer overlay floats / never aligns.
+	if (m_lightInjectionPass)
+		m_lightInjectionPass->OnResize();
 
 	ExecuteCommandsAndReset();
 }
@@ -936,7 +946,15 @@ void Renderer::CreateRasterizationRootSignature()
 	voxelOccupancyRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 	voxelOccupancyRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX;
 
-	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, vertexRange, indexRange, textureRange, voxelOccupancyRange};
+	// u4 = ShadingPoints G-buffer (debug overlay reads it by screen pixel)
+	D3D12_DESCRIPTOR_RANGE shadingPointsRange;
+	shadingPointsRange.BaseShaderRegister = 4;
+	shadingPointsRange.NumDescriptors = 1;
+	shadingPointsRange.RegisterSpace = 0;
+	shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+	shadingPointsRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::SHADINGPOINTS_DESCRIPTOR_INDEX;
+
+	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, vertexRange, indexRange, textureRange, voxelOccupancyRange, shadingPointsRange};
 
 	rootParameters[0].InitAsDescriptorTable(_countof(ranges), ranges);
 	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer

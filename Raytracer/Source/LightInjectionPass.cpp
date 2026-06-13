@@ -172,9 +172,12 @@ void LightInjectionPass::CreateShadingPointsResource()
     desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    // Created in UNORDERED_ACCESS (matches VoxelizationPass textures): written as
+    // a UAV by injection and read as a UAV by the raster debug overlay, so it
+    // stays in this layout — UAV barriers between writer/reader handle ordering.
     ThrowIfFailed(m_device->CreateCommittedResource(
         &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&m_shadingPointsTex)));
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_shadingPointsTex)));
     m_shadingPointsTex->SetName(L"VXPG ShadingPoints");
 
     // UAV at the shared heap's ShadingPoints slot — bound via the global root
