@@ -68,6 +68,8 @@ float3 HeatColor(float t)
     return c;
 }
 
+#include "DebugViews.hlsl" // after voxel resources, VoxelGridCB, HeatColor
+
 struct VertexIn
 {
     float3 PosL  : POSITION;
@@ -169,95 +171,9 @@ float4 pixel(VertexOut pin) : SV_Target
     debugData.roughness = roughness;
     debugData.metallic = metallic;
 
-    if (debugMode == 11 || debugMode == 12)
-    {
-        // ShadingPoints G-buffer (VXPG): primary worldPos + octahedral normal,
-        // emitted by light injection. Sample via screen UV * texture dims so it
-        // maps correctly even if the G-buffer res differs from the backbuffer.
-        uint spW, spH;
-        gShadingPoints.GetDimensions(spW, spH);
-        int2 spTexel = int2(pin.ScreenUV * float2(spW, spH));
-        float4 sp = gShadingPoints[spTexel];
-        if (sp.x > 1e29) return float4(0, 0, 0, 1); // invalid (primary miss)
-        if (debugMode == 11)
-        {
-            float3 n = Unorm32OctahedronToUnitVector(asuint(sp.w));
-            return float4(n * 0.5 + 0.5, 1.0);
-        }
-        // Position remapped into the voxel grid bounds for a readable color
-        float3 t = (sp.xyz - voxGridMin) / max(voxGridMax - voxGridMin, 1e-4);
-        return float4(saturate(t), 1.0);
-    }
-
-    if ((debugMode == 8 || debugMode == 9 || debugMode == 10) && voxGridDim > 0)
-    {
-        int3 vidx = int3(floor((pin.PosW - voxGridMin) / voxVoxelSize));
-        if (all(vidx >= 0) && all(vidx < int(voxGridDim)))
-        {
-            if (debugMode == 10)
-            {
-                // Supervoxels — hash-colored coarse cell (voxel / clusterFactor).
-                // SUPERVOXEL_GRID_FACTOR must match Constants::Graphics.
-                const int factor = 16;
-                // Surface points near a voxel boundary can floor into an empty
-                // neighbor (conservative-raster coverage gap, worse at high res).
-                // Search the 3x3x3 neighborhood for the nearest occupied voxel.
-                int3 found = int3(-1, -1, -1);
-                [unroll] for (int dz = -1; dz <= 1; ++dz)
-                [unroll] for (int dy = -1; dy <= 1; ++dy)
-                [unroll] for (int dx = -1; dx <= 1; ++dx)
-                {
-                    int3 n = vidx + int3(dx, dy, dz);
-                    if (all(n >= 0) && all(n < int(voxGridDim)) && gVoxelOccupancy[n] != 0u)
-                        found = n;
-                }
-                if (found.x >= 0)
-                {
-                    // Supervoxel id -> high-contrast hash color.
-                    int3 sv = found / factor;
-                    float3 cellColor = float3(
-                        float((uint(sv.x) * 131u + 17u) & 0xFFu) / 255.0,
-                        float((uint(sv.y) * 197u + 71u) & 0xFFu) / 255.0,
-                        float((uint(sv.z) * 53u + 113u) & 0xFFu) / 255.0);
-                    // Per-voxel 3D checkerboard -> low-contrast brightness wobble
-                    // so individual voxels stay readable within a supervoxel.
-                    // Parity from the true surface cell (vidx), not the
-                    // neighbor-filled cell, so adjacent voxels always alternate.
-                    float checker = ((vidx.x + vidx.y + vidx.z) & 1) ? 1.0 : 0.85;
-                    return float4(cellColor * checker, 1.0);
-                }
-            }
-            else if (debugMode == 9)
-            {
-                // VoxelIrradiance — heat map of injection pass output
-                uint packedIrr = gVoxelIrradiance[vidx];
-                uint count = gVoxelVplCount[vidx];
-                if (count > 0u)
-                {
-                    float irradiance = (float(packedIrr) / 100.0) / float(count);
-                    float t = 1.0 - exp(-irradiance * voxHeatScale);
-                    return float4(HeatColor(t), 1.0);
-                }
-            }
-            else
-            {
-                // Voxels — hash-colored occupancy
-                uint occ = gVoxelOccupancy[vidx];
-                if (occ != 0u)
-                {
-                    float3 cellColor = float3(
-                        float((vidx.x * 73u) & 0xFFu) / 255.0,
-                        float((vidx.y * 151u) & 0xFFu) / 255.0,
-                        float((vidx.z * 211u) & 0xFFu) / 255.0);
-                    return float4(cellColor, 1.0);
-                }
-            }
-        }
-        return float4(0.05, 0.05, 0.05, 1.0);
-    }
-
-    float4 debugResult = ApplyRasterDebugMode(debugMode, debugData);
-    if (debugResult.x >= 0) return debugResult;
+    float4 debugResult;
+    if (TryDebugView(debugMode, debugData, pin.PosW, pin.ScreenUV, debugResult))
+        return debugResult;
 
     // PBR shading
     float3 albedo = textureAlbedo.rgb;

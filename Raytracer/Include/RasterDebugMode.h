@@ -56,6 +56,7 @@ inline VxpgStage StageFor(RasterDebugMode mode)
 
 #else // HLSL
 
+// Surface inputs for the debug views (rendered by TryDebugView in DebugViews.hlsl).
 struct DebugData
 {
 	float4 albedo;
@@ -67,17 +68,5 @@ struct DebugData
 	float roughness;
 	float metallic;
 };
-
-float4 ApplyRasterDebugMode(int mode, DebugData d)
-{
-	if (mode == 1) return d.albedo;
-	if (mode == 2) return float4(d.worldNormal * 0.5 + 0.5, 1);
-	if (mode == 3) return float4(d.vertexNormal * 0.5 + 0.5, 1);
-	if (mode == 4) return d.normalMap;
-	if (mode == 5) return float4(d.tangent * 0.5 + 0.5, 1);
-	if (mode == 6) return float4(d.uv, 0, 1);
-	if (mode == 7) return float4(d.roughness, d.metallic, 0, 1);
-	return float4(-1, -1, -1, -1);
-}
 
 #endif
