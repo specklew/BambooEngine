@@ -30,12 +30,11 @@ void VoxelGuidingBuildPass::Initialize(
 void VoxelGuidingBuildPass::CreateBuffers()
 {
     constexpr uint32_t capacity = Constants::Graphics::VOXEL_GUIDING_CAPACITY;
-    auto* dev = m_device.Get();
 
-    m_counters   = RenderingUtils::CreateUavBuffer(dev, 2 * sizeof(uint32_t),        L"VoxelGuiding Counters");
-    m_compactIds = RenderingUtils::CreateUavBuffer(dev, capacity * sizeof(uint32_t), L"VoxelGuiding CompactIds");
-    m_weights    = RenderingUtils::CreateUavBuffer(dev, capacity * sizeof(float),    L"VoxelGuiding Weights");
-    m_cdf        = RenderingUtils::CreateUavBuffer(dev, capacity * sizeof(float),    L"VoxelGuiding Cdf");
+    m_counters   = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, 2,        L"VoxelGuiding Counters");
+    m_compactIds = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, capacity, L"VoxelGuiding CompactIds");
+    m_weights    = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Weights");
+    m_cdf        = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Cdf");
 }
 
 void VoxelGuidingBuildPass::CreateRootSignature()
@@ -113,25 +112,21 @@ void VoxelGuidingBuildPass::Run()
     m_commandList->SetComputeRootUnorderedAccessView(4, m_weights->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(5, m_cdf->GetGPUVirtualAddress());
 
-    auto uavBarrier = [&](ID3D12Resource* res)
-    {
-        auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(res);
-        m_commandList->ResourceBarrier(1, &barrier);
-    };
+    auto* cmd = m_commandList.Get();
 
     m_commandList->SetPipelineState(m_clearPso.Get());
     m_commandList->Dispatch(1, 1, 1);
-    uavBarrier(m_counters.Get());
+    m_counters->UavBarrier(cmd);
 
     m_commandList->SetPipelineState(m_compactPso.Get());
     const uint32_t groups = (gridDim + 7) / 8;
     m_commandList->Dispatch(groups, groups, groups);
-    uavBarrier(m_counters.Get());
-    uavBarrier(m_compactIds.Get());
-    uavBarrier(m_weights.Get());
+    m_counters->UavBarrier(cmd);
+    m_compactIds->UavBarrier(cmd);
+    m_weights->UavBarrier(cmd);
 
     m_commandList->SetPipelineState(m_cdfPso.Get());
     m_commandList->Dispatch(1, 1, 1);
-    uavBarrier(m_counters.Get());
-    uavBarrier(m_cdf.Get());
+    m_counters->UavBarrier(cmd);
+    m_cdf->UavBarrier(cmd);
 }

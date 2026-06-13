@@ -30,8 +30,8 @@ void SupervoxelClusterPass::Initialize(
 void SupervoxelClusterPass::CreateBuffers()
 {
     constexpr uint32_t maxSv = Constants::Graphics::MAX_SUPERVOXELS;
-    m_svIrradiance = RenderingUtils::CreateUavBuffer(m_device.Get(), maxSv * sizeof(uint32_t), L"Supervoxel Irradiance");
-    m_svCount      = RenderingUtils::CreateUavBuffer(m_device.Get(), maxSv * sizeof(uint32_t), L"Supervoxel Count");
+    m_svIrradiance = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, maxSv, L"Supervoxel Irradiance");
+    m_svCount      = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, maxSv, L"Supervoxel Count");
 }
 
 void SupervoxelClusterPass::CreateRootSignature()
@@ -106,21 +106,17 @@ void SupervoxelClusterPass::Run()
     m_commandList->SetComputeRootUnorderedAccessView(2, m_svIrradiance->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(3, m_svCount->GetGPUVirtualAddress());
 
-    auto uavBarrier = [&](ID3D12Resource* res)
-    {
-        auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(res);
-        m_commandList->ResourceBarrier(1, &barrier);
-    };
+    auto* cmd = m_commandList.Get();
 
     constexpr uint32_t clearGroups = (Constants::Graphics::MAX_SUPERVOXELS + 255) / 256;
     m_commandList->SetPipelineState(m_clearPso.Get());
     m_commandList->Dispatch(clearGroups, 1, 1);
-    uavBarrier(m_svIrradiance.Get());
-    uavBarrier(m_svCount.Get());
+    m_svIrradiance->UavBarrier(cmd);
+    m_svCount->UavBarrier(cmd);
 
     m_commandList->SetPipelineState(m_accumPso.Get());
     const uint32_t groups = (gridDim + 7) / 8;
     m_commandList->Dispatch(groups, groups, groups);
-    uavBarrier(m_svIrradiance.Get());
-    uavBarrier(m_svCount.Get());
+    m_svIrradiance->UavBarrier(cmd);
+    m_svCount->UavBarrier(cmd);
 }

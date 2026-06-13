@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Resources/RWStructuredBuffer.h"
+
 class VoxelizationPass;
 
 // VXPG guiding distribution build (compute): compacts nonzero-irradiance
@@ -16,9 +18,9 @@ public:
     void Run();
 
     // [0] = compacted voxel count, [1] = asuint(total weight)
-    Microsoft::WRL::ComPtr<ID3D12Resource> GetCountersBuffer() const { return m_counters; }
-    Microsoft::WRL::ComPtr<ID3D12Resource> GetCompactIdsBuffer() const { return m_compactIds; }
-    Microsoft::WRL::ComPtr<ID3D12Resource> GetCdfBuffer() const { return m_cdf; }
+    RWStructuredBuffer<uint32_t>* GetCountersBuffer() const { return m_counters.get(); }
+    RWStructuredBuffer<uint32_t>* GetCompactIdsBuffer() const { return m_compactIds.get(); }
+    RWStructuredBuffer<float>*    GetCdfBuffer() const { return m_cdf.get(); }
 
 private:
     void CreateBuffers();
@@ -29,10 +31,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
     std::shared_ptr<VoxelizationPass>                  m_voxelPass;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_counters;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_compactIds;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_weights;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_cdf;
+    std::unique_ptr<RWStructuredBuffer<uint32_t>> m_counters;
+    std::unique_ptr<RWStructuredBuffer<uint32_t>> m_compactIds;
+    std::unique_ptr<RWStructuredBuffer<float>>    m_weights;
+    std::unique_ptr<RWStructuredBuffer<float>>    m_cdf;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;

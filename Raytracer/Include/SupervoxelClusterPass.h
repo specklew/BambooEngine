@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Resources/RWStructuredBuffer.h"
+
 class VoxelizationPass;
 
 // VXPG V2 Stage A: supervoxel clustering (compute).
@@ -16,8 +18,8 @@ public:
 
     void Run();
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> GetSupervoxelIrradianceBuffer() const { return m_svIrradiance; }
-    Microsoft::WRL::ComPtr<ID3D12Resource> GetSupervoxelCountBuffer() const { return m_svCount; }
+    RWStructuredBuffer<uint32_t>* GetSupervoxelIrradianceBuffer() const { return m_svIrradiance.get(); }
+    RWStructuredBuffer<uint32_t>* GetSupervoxelCountBuffer() const { return m_svCount.get(); }
 
     // svDim = ceil(gridDim / SUPERVOXEL_GRID_FACTOR) for the current grid.
     uint32_t GetSupervoxelDim() const { return m_svDim; }
@@ -31,8 +33,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
     std::shared_ptr<VoxelizationPass>                  m_voxelPass;
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_svIrradiance;
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_svCount;
+    std::unique_ptr<RWStructuredBuffer<uint32_t>> m_svIrradiance;
+    std::unique_ptr<RWStructuredBuffer<uint32_t>> m_svCount;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
