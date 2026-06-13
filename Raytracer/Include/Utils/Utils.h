@@ -25,6 +25,14 @@ namespace RenderingUtils
         ID3D12GraphicsCommandList* commandList,
         const tinygltf::Image& image,
         Microsoft::WRL::ComPtr<ID3D12Resource>& uploadBuffer);
+
+    // DEFAULT-heap buffer with ALLOW_UNORDERED_ACCESS. byteSize is padded to
+    // 256 B (tiny root-UAV alignment). Created in COMMON (InitialState ignored
+    // for buffers); implicit promotion covers UAV access.
+    Microsoft::WRL::ComPtr<ID3D12Resource> CreateUavBuffer(
+        ID3D12Device* device,
+        UINT64 byteSize,
+        const wchar_t* name = nullptr);
 }
 
 namespace MathUtils

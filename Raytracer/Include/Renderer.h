@@ -30,6 +30,7 @@ class DescriptorHeapAllocator;
 class RaytracePass;
 class LightInjectionPass;
 class VoxelGuidingBuildPass;
+class SupervoxelClusterPass;
 class FrameAccumulationPass;
 class PostProcessPass;
 class AccelerationStructures;
@@ -195,6 +196,7 @@ private:
 	std::shared_ptr<PlacesManager> m_placesManager;
 	std::shared_ptr<VoxelizationPass> m_voxelizationPass;
 	std::shared_ptr<VoxelGuidingBuildPass> m_voxelGuidingBuildPass;
+	std::shared_ptr<SupervoxelClusterPass> m_supervoxelClusterPass;
 
 	ScreenshotMetadata BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const;
 };

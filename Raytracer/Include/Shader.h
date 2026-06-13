@@ -5,8 +5,8 @@
 struct ShaderMetadata
 {
     char szPathWithinResources[64]; // e.g. "Shaders/MyShader.hlsl"
-    char szEntrypoint[16]; // e.g. "VS"
-    char szTarget[16]; // e.g. "vs_6_0"
+    char szEntrypoint[32]; // e.g. "VS"
+    char szTarget[32]; // e.g. "vs_6_0"
     // Optional, may be nullptr
     char szDefines[64]; // e.g. "-D MyDefine=1 -D another=2"
 

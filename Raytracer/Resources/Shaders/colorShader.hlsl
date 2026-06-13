@@ -161,12 +161,45 @@ float4 pixel(VertexOut pin) : SV_Target
     debugData.roughness = roughness;
     debugData.metallic = metallic;
 
-    if ((debugMode == 8 || debugMode == 9) && voxGridDim > 0)
+    if ((debugMode == 8 || debugMode == 9 || debugMode == 10) && voxGridDim > 0)
     {
         int3 vidx = int3(floor((pin.PosW - voxGridMin) / voxVoxelSize));
         if (all(vidx >= 0) && all(vidx < int(voxGridDim)))
         {
-            if (debugMode == 9)
+            if (debugMode == 10)
+            {
+                // Supervoxels — hash-colored coarse cell (voxel / clusterFactor).
+                // SUPERVOXEL_GRID_FACTOR must match Constants::Graphics.
+                const int factor = 16;
+                // Surface points near a voxel boundary can floor into an empty
+                // neighbor (conservative-raster coverage gap, worse at high res).
+                // Search the 3x3x3 neighborhood for the nearest occupied voxel.
+                int3 found = int3(-1, -1, -1);
+                [unroll] for (int dz = -1; dz <= 1; ++dz)
+                [unroll] for (int dy = -1; dy <= 1; ++dy)
+                [unroll] for (int dx = -1; dx <= 1; ++dx)
+                {
+                    int3 n = vidx + int3(dx, dy, dz);
+                    if (all(n >= 0) && all(n < int(voxGridDim)) && gVoxelOccupancy[n] != 0u)
+                        found = n;
+                }
+                if (found.x >= 0)
+                {
+                    // Supervoxel id -> high-contrast hash color.
+                    int3 sv = found / factor;
+                    float3 cellColor = float3(
+                        float((uint(sv.x) * 131u + 17u) & 0xFFu) / 255.0,
+                        float((uint(sv.y) * 197u + 71u) & 0xFFu) / 255.0,
+                        float((uint(sv.z) * 53u + 113u) & 0xFFu) / 255.0);
+                    // Per-voxel 3D checkerboard -> low-contrast brightness wobble
+                    // so individual voxels stay readable within a supervoxel.
+                    // Parity from the true surface cell (vidx), not the
+                    // neighbor-filled cell, so adjacent voxels always alternate.
+                    float checker = ((vidx.x + vidx.y + vidx.z) & 1) ? 1.0 : 0.85;
+                    return float4(cellColor * checker, 1.0);
+                }
+            }
+            else if (debugMode == 9)
             {
                 // VoxelIrradiance — heat map of injection pass output
                 uint packedIrr = gVoxelIrradiance[vidx];

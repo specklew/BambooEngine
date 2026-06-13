@@ -17,5 +17,9 @@ namespace Constants
         constexpr int STATIC_SAMPLERS_COUNT = 6;
         // Max voxels in the compacted guiding distribution (matches SIByL VXGuider_MAX_CAPACITY)
         constexpr int VOXEL_GUIDING_CAPACITY = 131072;
+        // VXPG V2 supervoxels: coarse grid cell = voxelCoord / SUPERVOXEL_GRID_FACTOR.
+        // svDim = ceil(gridDim / factor); MAX_SUPERVOXELS must hold svDim^3 (8^3 = 512).
+        constexpr int SUPERVOXEL_GRID_FACTOR = 16;
+        constexpr int MAX_SUPERVOXELS = 512;
     }
 }

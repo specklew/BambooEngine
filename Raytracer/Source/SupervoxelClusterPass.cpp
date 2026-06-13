@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "VoxelGuidingBuildPass.h"
+#include "SupervoxelClusterPass.h"
 
 #include "Constants.h"
 #include "VoxelizationPass.h"
@@ -9,12 +9,12 @@
 
 using Microsoft::WRL::ComPtr;
 
-void VoxelGuidingBuildPass::Initialize(
+void SupervoxelClusterPass::Initialize(
     ComPtr<ID3D12Device5>              device,
     ComPtr<ID3D12GraphicsCommandList4> commandList,
     std::shared_ptr<VoxelizationPass>  voxelPass)
 {
-    spdlog::info("Initializing voxel guiding build pass...");
+    spdlog::info("Initializing supervoxel cluster pass...");
 
     m_device      = device;
     m_commandList = commandList;
@@ -27,32 +27,26 @@ void VoxelGuidingBuildPass::Initialize(
     m_initialized = true;
 }
 
-void VoxelGuidingBuildPass::CreateBuffers()
+void SupervoxelClusterPass::CreateBuffers()
 {
-    constexpr uint32_t capacity = Constants::Graphics::VOXEL_GUIDING_CAPACITY;
-    auto* dev = m_device.Get();
-
-    m_counters   = RenderingUtils::CreateUavBuffer(dev, 2 * sizeof(uint32_t),        L"VoxelGuiding Counters");
-    m_compactIds = RenderingUtils::CreateUavBuffer(dev, capacity * sizeof(uint32_t), L"VoxelGuiding CompactIds");
-    m_weights    = RenderingUtils::CreateUavBuffer(dev, capacity * sizeof(float),    L"VoxelGuiding Weights");
-    m_cdf        = RenderingUtils::CreateUavBuffer(dev, capacity * sizeof(float),    L"VoxelGuiding Cdf");
+    constexpr uint32_t maxSv = Constants::Graphics::MAX_SUPERVOXELS;
+    m_svIrradiance = RenderingUtils::CreateUavBuffer(m_device.Get(), maxSv * sizeof(uint32_t), L"Supervoxel Irradiance");
+    m_svCount      = RenderingUtils::CreateUavBuffer(m_device.Get(), maxSv * sizeof(uint32_t), L"Supervoxel Count");
 }
 
-void VoxelGuidingBuildPass::CreateRootSignature()
+void SupervoxelClusterPass::CreateRootSignature()
 {
     // Table: u0 = irradiance, u1 = vpl count (slots 1..2 of the voxelization
-    // pass private heap). Root UAVs: u2 counters, u3 compactIds, u4 weights,
-    // u5 cdf. Root constants b0: gridDim.
+    // pass private heap). Root UAVs: u2 supervoxel irradiance, u3 supervoxel
+    // count. Root constants b0: gridDim, clusterFactor, svDim.
     CD3DX12_DESCRIPTOR_RANGE texRange;
     texRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0);
 
-    CD3DX12_ROOT_PARAMETER params[6];
+    CD3DX12_ROOT_PARAMETER params[4];
     params[0].InitAsConstants(4, 0);
     params[1].InitAsDescriptorTable(1, &texRange);
     params[2].InitAsUnorderedAccessView(2);
     params[3].InitAsUnorderedAccessView(3);
-    params[4].InitAsUnorderedAccessView(4);
-    params[5].InitAsUnorderedAccessView(5);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
@@ -60,10 +54,10 @@ void VoxelGuidingBuildPass::CreateRootSignature()
     ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
     ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
         IID_PPV_ARGS(&m_rootSig)));
-    m_rootSig->SetName(L"VoxelGuidingBuild RootSig");
+    m_rootSig->SetName(L"SupervoxelCluster RootSig");
 }
 
-void VoxelGuidingBuildPass::CreatePSOs()
+void SupervoxelClusterPass::CreatePSOs()
 {
     auto& rm = ResourceManager::Get();
 
@@ -79,12 +73,11 @@ void VoxelGuidingBuildPass::CreatePSOs()
         out->SetName(name);
     };
 
-    createCsPso("resources/shaders/voxelGuidingBuild.clear.shader",   L"VoxelGuiding Clear PSO",   m_clearPso);
-    createCsPso("resources/shaders/voxelGuidingBuild.compact.shader", L"VoxelGuiding Compact PSO", m_compactPso);
-    createCsPso("resources/shaders/voxelGuidingBuild.cdf.shader",     L"VoxelGuiding Cdf PSO",     m_cdfPso);
+    createCsPso("resources/shaders/supervoxelCluster.clear.shader", L"Supervoxel Clear PSO", m_clearPso);
+    createCsPso("resources/shaders/supervoxelCluster.accum.shader", L"Supervoxel Accum PSO", m_accumPso);
 }
 
-void VoxelGuidingBuildPass::Run()
+void SupervoxelClusterPass::Run()
 {
     if (!m_initialized || !m_voxelPass)
         return;
@@ -93,7 +86,9 @@ void VoxelGuidingBuildPass::Run()
     if (!heap)
         return;
 
-    const uint32_t gridDim = m_voxelPass->GetGridDim();
+    const uint32_t gridDim       = m_voxelPass->GetGridDim();
+    const uint32_t clusterFactor = Constants::Graphics::SUPERVOXEL_GRID_FACTOR;
+    m_svDim = (gridDim + clusterFactor - 1) / clusterFactor;
 
     // GPU handle to slot 1 (irradiance) of the voxelization pass heap; the
     // 2-descriptor table covers irradiance + vpl count.
@@ -105,13 +100,11 @@ void VoxelGuidingBuildPass::Run()
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetComputeRootSignature(m_rootSig.Get());
 
-    uint32_t constants[4] = { gridDim, 0, 0, 0 };
+    uint32_t constants[4] = { gridDim, clusterFactor, m_svDim, 0 };
     m_commandList->SetComputeRoot32BitConstants(0, 4, constants, 0);
     m_commandList->SetComputeRootDescriptorTable(1, texTable);
-    m_commandList->SetComputeRootUnorderedAccessView(2, m_counters->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(3, m_compactIds->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(4, m_weights->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(5, m_cdf->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(2, m_svIrradiance->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(3, m_svCount->GetGPUVirtualAddress());
 
     auto uavBarrier = [&](ID3D12Resource* res)
     {
@@ -119,19 +112,15 @@ void VoxelGuidingBuildPass::Run()
         m_commandList->ResourceBarrier(1, &barrier);
     };
 
+    constexpr uint32_t clearGroups = (Constants::Graphics::MAX_SUPERVOXELS + 255) / 256;
     m_commandList->SetPipelineState(m_clearPso.Get());
-    m_commandList->Dispatch(1, 1, 1);
-    uavBarrier(m_counters.Get());
+    m_commandList->Dispatch(clearGroups, 1, 1);
+    uavBarrier(m_svIrradiance.Get());
+    uavBarrier(m_svCount.Get());
 
-    m_commandList->SetPipelineState(m_compactPso.Get());
+    m_commandList->SetPipelineState(m_accumPso.Get());
     const uint32_t groups = (gridDim + 7) / 8;
     m_commandList->Dispatch(groups, groups, groups);
-    uavBarrier(m_counters.Get());
-    uavBarrier(m_compactIds.Get());
-    uavBarrier(m_weights.Get());
-
-    m_commandList->SetPipelineState(m_cdfPso.Get());
-    m_commandList->Dispatch(1, 1, 1);
-    uavBarrier(m_counters.Get());
-    uavBarrier(m_cdf.Get());
+    uavBarrier(m_svIrradiance.Get());
+    uavBarrier(m_svCount.Get());
 }

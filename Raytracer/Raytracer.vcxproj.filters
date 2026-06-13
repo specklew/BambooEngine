@@ -234,6 +234,9 @@
     <ClInclude Include="Include\VoxelGuidingBuildPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\SupervoxelClusterPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\ResourceManager\ResourceManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -690,6 +693,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\VoxelGuidingBuildPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\SupervoxelClusterPass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\ResourceManager\ResourceManager.cpp">

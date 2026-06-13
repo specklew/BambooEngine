@@ -300,6 +300,33 @@ namespace RenderingUtils
     	
     	return defaultTexture;
     }
+
+    ComPtr<ID3D12Resource> CreateUavBuffer(
+        ID3D12Device* device,
+        UINT64 byteSize,
+        const wchar_t* name)
+    {
+        byteSize = Align(byteSize, 256);
+
+        const auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+        const auto desc = CD3DX12_RESOURCE_DESC::Buffer(byteSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+        ComPtr<ID3D12Resource> buffer;
+        HRESULT hr = device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr,
+            IID_PPV_ARGS(&buffer));
+        if (FAILED(hr))
+        {
+            spdlog::error("CreateUavBuffer failed (size={}, hr={:#010x}, deviceRemoved={:#010x})",
+                byteSize, static_cast<uint32_t>(hr),
+                static_cast<uint32_t>(device->GetDeviceRemovedReason()));
+            ThrowIfFailed(hr);
+        }
+        if (name)
+            buffer->SetName(name);
+        return buffer;
+    }
 }
 
 DirectX::XMFLOAT4X4 MathUtils::XMFloat4x4Identity()

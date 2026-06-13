@@ -14,6 +14,7 @@ enum class RasterDebugMode : int
 	Roughness = 7,
 	Voxels = 8,
 	VoxelIrradiance = 9,
+	Supervoxels = 10,
 };
 
 #else // HLSL

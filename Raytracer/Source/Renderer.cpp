@@ -25,6 +25,7 @@
 #include "VoxelizationPass.h"
 #include "LightInjectionPass.h"
 #include "VoxelGuidingBuildPass.h"
+#include "SupervoxelClusterPass.h"
 #include "Techniques/GuidedPathTracingPass.h"
 #include "RasterDebugMode.h"
 #include "GuidingDebugView.h"
@@ -175,6 +176,10 @@ void Renderer::Initialize()
 
 	m_voxelGuidingBuildPass = std::make_shared<VoxelGuidingBuildPass>();
 	m_voxelGuidingBuildPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass);
+
+	m_supervoxelClusterPass = std::make_shared<SupervoxelClusterPass>();
+	m_supervoxelClusterPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass);
+
 	WireGuidingResources();
 
 	spdlog::info("Renderer initialized successfully.");
@@ -348,7 +353,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		const auto debugMode = g_rasterizationDebugMode.Get();
 		const bool needsVoxelize = !m_rasterize
 			|| debugMode == RasterDebugMode::Voxels
-			|| debugMode == RasterDebugMode::VoxelIrradiance;
+			|| debugMode == RasterDebugMode::VoxelIrradiance
+			|| debugMode == RasterDebugMode::Supervoxels;
 		if (needsVoxelize)
 		{
 			m_voxelizationPass->SetRuntimeParams(
@@ -366,6 +372,9 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 				if (m_voxelGuidingBuildPass)
 					m_voxelGuidingBuildPass->Run();
+
+				if (m_supervoxelClusterPass)
+					m_supervoxelClusterPass->Run();
 			}
 		}
 	}
