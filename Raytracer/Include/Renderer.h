@@ -5,6 +5,7 @@
 #include "Headless.h" // HeadlessConfig
 #include "InputElements.h"
 #include "RasterDebugMode.h" // VxpgStage
+#include "SceneResources/LightData.h"
 #include "Keyboard.h"
 #include "SimpleMath.h"
 #include "Resources/StructuredBuffer.h"
@@ -68,6 +69,7 @@ public:
 	void SetRaytracing(bool enabled) { m_rasterize = !enabled; }
 	void SetHeadless(bool headless) { m_headless = headless; }
 	void ApplyRenderConfig(const HeadlessConfig& config);
+	void SetLights(const std::vector<LightData>& lights);
 
 	std::vector<std::string> GetTechniqueNames() const;
 	std::vector<std::string> GetPlaceNames() const;

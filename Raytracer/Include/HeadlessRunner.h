@@ -17,6 +17,7 @@ public:
 
 private:
     void PumpFrame();
+    void ApplyConfiguredLights();
     bool Validate() const;
 
     Renderer&      m_renderer;

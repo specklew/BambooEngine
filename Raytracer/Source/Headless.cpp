@@ -90,5 +90,31 @@ HeadlessConfig LoadHeadlessConfig(const std::string& path)
     if (doc.HasMember("outputDir") && doc["outputDir"].IsString())
         config.outputDir = doc["outputDir"].GetString();
 
+    if (doc.HasMember("lights") && doc["lights"].IsArray())
+    {
+        auto readVec3 = [](const rapidjson::Value& entry, const char* key, float out[3]) {
+            if (entry.HasMember(key) && entry[key].IsArray() && entry[key].Size() == 3)
+                for (rapidjson::SizeType i = 0; i < 3; ++i)
+                    if (entry[key][i].IsNumber())
+                        out[i] = entry[key][i].GetFloat();
+        };
+
+        for (const auto& entry : doc["lights"].GetArray())
+        {
+            if (!entry.IsObject())
+                continue;
+
+            HeadlessLight light;
+            if (entry.HasMember("type") && entry["type"].IsString())
+                light.type = entry["type"].GetString();
+            readVec3(entry, "position",  light.position);
+            readVec3(entry, "direction", light.direction);
+            readVec3(entry, "color",     light.color);
+            if (entry.HasMember("intensity") && entry["intensity"].IsNumber()) light.intensity = entry["intensity"].GetFloat();
+            if (entry.HasMember("range")     && entry["range"].IsNumber())     light.range     = entry["range"].GetFloat();
+            config.lights.push_back(light);
+        }
+    }
+
     return config;
 }

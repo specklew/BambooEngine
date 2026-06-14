@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <ctime>
 #include <filesystem>
+#include <unordered_map>
 
 namespace
 {
@@ -62,6 +63,42 @@ void HeadlessRunner::PumpFrame()
     m_renderer.Render(m_clock.GetDeltaSeconds(), m_clock.GetTotalSeconds());
 }
 
+void HeadlessRunner::ApplyConfiguredLights()
+{
+    if (m_config.lights.empty())
+        return; // keep the scene's own glTF/default lights
+
+    const std::unordered_map<std::string, LightType> typeByName = {
+        { "directional", LightType::Directional },
+        { "point",       LightType::Point },
+        { "spot",        LightType::Spot },
+    };
+
+    std::vector<LightData> lights;
+    lights.reserve(m_config.lights.size());
+    for (const HeadlessLight& source : m_config.lights)
+    {
+        const auto it = typeByName.find(source.type);
+        if (it == typeByName.end())
+        {
+            spdlog::warn("Headless light has unknown type '{}', skipping", source.type);
+            continue;
+        }
+
+        LightData light{};
+        light.type      = it->second;
+        light.position  = { source.position[0],  source.position[1],  source.position[2] };
+        light.direction = { source.direction[0], source.direction[1], source.direction[2] };
+        light.color     = { source.color[0],     source.color[1],     source.color[2] };
+        light.intensity = source.intensity;
+        light.range     = source.range;
+        lights.push_back(light);
+    }
+
+    spdlog::info("Headless config supplies {} light(s), overriding scene lights", lights.size());
+    m_renderer.SetLights(lights);
+}
+
 bool HeadlessRunner::Validate() const
 {
     if (m_args.places.empty() || m_args.techniques.empty())
@@ -102,6 +139,7 @@ int HeadlessRunner::Run()
     m_renderer.SetRaytracing(true);
 
     m_renderer.LoadScene(ResolveScenePath(m_args.scene));
+    ApplyConfiguredLights();
 
     if (!Validate())
         return 2;

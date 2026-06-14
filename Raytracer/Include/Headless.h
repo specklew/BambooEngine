@@ -4,6 +4,18 @@
 #include <string>
 #include <vector>
 
+// One light from the headless config. Plain primitives so this header stays free of
+// engine/DirectX types; HeadlessRunner converts these into the engine's LightData.
+struct HeadlessLight
+{
+    std::string type = "directional";   // directional | point | spot
+    float position[3]  = { 0.0f, 0.0f, 0.0f };
+    float direction[3] = { 0.0f, -1.0f, 0.0f };
+    float color[3]     = { 1.0f, 1.0f, 1.0f };
+    float intensity    = 3.0f;
+    float range        = 0.0f;
+};
+
 // Stable render defaults for headless mode, loaded from SavedUserData/headless.json.
 // Flags override these; these override the engine's built-in CVar defaults.
 struct HeadlessConfig
@@ -22,6 +34,10 @@ struct HeadlessConfig
 
     float       defaultSeconds = 5.0f;
     std::string outputDir      = "SavedUserData/Screenshots";
+
+    // When non-empty, these replace the scene's glTF/default lights for the run.
+    // Empty => keep whatever lights the loaded scene provides.
+    std::vector<HeadlessLight> lights;
 };
 
 // Per-run intent parsed from the command line.

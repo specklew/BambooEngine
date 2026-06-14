@@ -1275,6 +1275,15 @@ void Renderer::ApplyRenderConfig(const HeadlessConfig& config)
 	g_lift.Set(config.lift);
 }
 
+void Renderer::SetLights(const std::vector<LightData>& lights)
+{
+	if (!m_scene)
+		return;
+
+	m_scene->GetLightDataCPU() = lights;
+	m_scene->MarkLightDataDirty();
+}
+
 void Renderer::WireGuidingResources()
 {
 	if (auto guided = std::dynamic_pointer_cast<GuidedPathTracingPass>(m_raytracePass))
