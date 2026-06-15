@@ -376,6 +376,11 @@ void GuidedHit(inout GuidedPayload payload : SV_RayPayload, in Attributes attr)
 
     float3 N = SampleWorldSpaceNormal(hit);
     float3 V = -WorldRayDirection();
+
+    float3 geometricN = normalize(mul((float3x3)ObjectToWorld3x4(), hit.tri_normal));
+    if (dot(geometricN, V) < 0.0)
+        N = -N;
+
     float NdotV = max(dot(N, V), 0.1);
 
     SurfaceData surface;
