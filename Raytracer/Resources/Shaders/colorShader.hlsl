@@ -150,17 +150,30 @@ float4 pixel(VertexOut pin) : SV_Target
         metallic *= mr.b;
     }
 
-    // Build TBN — re-orthogonalize T against N to fix interpolation drift
     float3 N = normalize(pin.NormalW);
-    float3 T = normalize(pin.TangentW.xyz - dot(pin.TangentW.xyz, N) * N);
-    float3 B = cross(N, T) * pin.TangentW.w;
-    float3x3 TBN = float3x3(T, B, N);
 
-    // Decode tangent-space normal from [0,1] to [-1,1] and bring to world space
-    float3 normalTS = textureNormal.xyz * 2.0 - 1.0;
-    float3 worldNormal = normalize(mul(normalTS, TBN));
+    // Mode-13 probes. Length is meaningless (world scale baked in), so test the NaN directly.
+    float normalNaN = (N.x != N.x) ? 1.0 : 0.0;
+    float rawTangentLength = length(pin.TangentW.xyz);
+    float tangentDotN = rawTangentLength > 1e-12 ? abs(dot(pin.TangentW.xyz / rawTangentLength, N)) : 1.0;
 
-    // Debug visualization
+    // Skip normal mapping when Gram-Schmidt collapses (matches SampleWorldSpaceNormal).
+    float3 projectedTangent = pin.TangentW.xyz - dot(pin.TangentW.xyz, N) * N;
+    float3 T = N;
+    float3 worldNormal;
+    if (dot(projectedTangent, projectedTangent) < 1e-8)
+    {
+        worldNormal = N;
+    }
+    else
+    {
+        T = normalize(projectedTangent);
+        float3 B = cross(N, T) * pin.TangentW.w;
+        float3x3 TBN = float3x3(T, B, N);
+        float3 normalTS = textureNormal.xyz * 2.0 - 1.0;
+        worldNormal = normalize(mul(normalTS, TBN));
+    }
+
     DebugData debugData;
     debugData.albedo = textureAlbedo;
     debugData.worldNormal = worldNormal;
@@ -170,6 +183,9 @@ float4 pixel(VertexOut pin) : SV_Target
     debugData.uv = pin.TexCoord;
     debugData.roughness = roughness;
     debugData.metallic = metallic;
+    debugData.tangentDotN = tangentDotN;
+    debugData.normalNaN = normalNaN;
+    debugData.worldNormalNaN = (worldNormal.x != worldNormal.x) ? 1.0 : 0.0;
 
     float4 debugResult;
     if (TryDebugView(debugMode, debugData, pin.PosW, pin.ScreenUV, debugResult))

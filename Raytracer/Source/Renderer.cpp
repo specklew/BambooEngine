@@ -28,6 +28,7 @@
 #include "SupervoxelClusterPass.h"
 #include "Techniques/GuidedPathTracingPass.h"
 #include "RasterDebugMode.h"
+#include "RaytraceDebugMode.h"
 #include "GuidingDebugView.h"
 #include "SceneResources/Scene.h"
 #include "ResourceManager/ResourceManager.h"
@@ -67,6 +68,7 @@ static AutoCVarFloat g_cameraScrollFactor("renderer.camera.scrollFactor", "Multi
 static AutoCVarFloat g_uvCoordX("renderer.uv.x", "Texture uv x offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 static AutoCVarEnum g_rasterizationDebugMode("renderer.rasterDebugMode", "Rasterization shader debug visualization mode", RasterDebugMode::None);
+static AutoCVarEnum g_raytraceDebugMode("renderer.raytraceDebugMode", "Raytracing shader debug visualization mode", RaytraceDebugMode::None);
 static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world position", {0.0f, 0.0f, -10.0f});
 static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
@@ -300,7 +302,9 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
 	m_passConstants->data.uvCoordY = g_uvCoordY.Get();
-	m_passConstants->data.debugMode = static_cast<int>(g_rasterizationDebugMode.Get());
+	m_passConstants->data.debugMode = m_rasterize
+		? static_cast<int>(g_rasterizationDebugMode.Get())
+		: static_cast<int>(g_raytraceDebugMode.Get());
 	m_passConstants->data.numBounces = g_numBounces.Get();
 	m_passConstants->data.numSamplesPerPixel = g_numSamplesPerPixel.Get();
 	m_passConstants->data.frameIndex++;

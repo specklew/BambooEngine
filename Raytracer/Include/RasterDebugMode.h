@@ -2,6 +2,8 @@
 #ifdef __cplusplus
 #pragma once
 
+#include "VxpgStage.h"
+
 enum class RasterDebugMode : int
 {
 	None = 0,
@@ -17,25 +19,8 @@ enum class RasterDebugMode : int
 	Supervoxels = 10,
 	ShadingPointsNormal = 11,
 	ShadingPointsPos = 12,
+	TangentHealth = 13,
 };
-
-// How far down the linear VXPG pipeline a frame must run. Ordered: a higher
-// stage implies every lower stage also runs (voxelize -> inject -> build ->
-// cluster). Both debug views and raytracing techniques declare the furthest
-// stage they need; the renderer runs the pipeline up to the maximum.
-enum class VxpgStage : int
-{
-	None = 0,
-	Voxelize,
-	Inject,
-	GuidingBuild,
-	Supervoxel,
-};
-
-inline bool operator>=(VxpgStage a, VxpgStage b)
-{
-	return static_cast<int>(a) >= static_cast<int>(b);
-}
 
 // The furthest VXPG stage a raster debug view needs to read its data.
 inline VxpgStage StageFor(RasterDebugMode mode)
@@ -67,6 +52,9 @@ struct DebugData
 	float2 uv;
 	float roughness;
 	float metallic;
+	float tangentDotN;    // |dot(tangent, N)|; near 1 = tangent parallel to N
+	float normalNaN;      // vertex normal normalize is NaN
+	float worldNormalNaN; // normal-mapped shading normal is NaN
 };
 
 #endif

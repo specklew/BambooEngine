@@ -7,6 +7,8 @@
 #include "consts.hlsl"
 #include "raytracing.shadow.hlsl"
 #include "passConstants.hlsl"
+#include "RaytraceDebugMode.h"
+#include "RaytraceDebugViews.hlsl"
 
 // ---- Ray generation ----
 
@@ -38,7 +40,7 @@ void RayGen()
         payload.throughput = float3(1, 1, 1);
         payload.bounceCount = 0;
         payload.seed = seed;
-        TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
+        TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
         accumulated += payload.color;
     }
 
@@ -206,7 +208,26 @@ void Hit(inout Payload payload : SV_RayPayload, in Attributes attr)
     // Shading vectors
     float3 N = SampleWorldSpaceNormal(hit);
     float3 V = -WorldRayDirection();
+
+    // Two-sided shading: flip the shading normal to the side the ray hit.
+    // Test with the geometric normal (object-space tri normal -> world), since the
+    // normal-mapped N can itself point backward on grazing texels.
+    float3 geometricN = normalize(mul((float3x3)ObjectToWorld3x4(), hit.tri_normal));
+    if (dot(geometricN, V) < 0.0)
+        N = -N;
+
     float NdotV = max(dot(N, V), 0.1);
+
+    // RT debug views; paint and stop if a mode handles this hit.
+    RtDebugData rtDebug;
+    rtDebug.N = N;
+    rtDebug.position = hit.position;
+    float3 debugColor;
+    if (TryRaytraceDebugView(debugMode, rtDebug, debugColor))
+    {
+        payload.color = debugColor;
+        return;
+    }
 
     // Build surface data
     SurfaceData surface;
@@ -265,7 +286,13 @@ void Hit(inout Payload payload : SV_RayPayload, in Attributes attr)
         throughput /= (1.0 - specularProb + EPSILON);
     }
 
-    // Trace bounce ray
+    // BounceHealth: classify a NaN bounce direction at this hit.
+    if (debugMode == 2)
+    {
+        payload.color = BounceHealthColor(bounceDir, N, roughness);
+        return;
+    }
+
     RayDesc ray;
     ray.Origin = hit.position;
     ray.Direction = bounceDir;

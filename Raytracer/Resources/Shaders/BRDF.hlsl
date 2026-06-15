@@ -72,7 +72,8 @@ float3 ImportanceSampleGGX(float2 xi, float3 N, float roughness)
 
     float phi = 2.0 * PI * xi.x;
     float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (a2 - 1.0) * xi.y));
-    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    // max() guards against FP rounding pushing cosTheta^2 above 1 (glossy), which would NaN the sqrt.
+    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
 
     float3 H_tangent = float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
 

@@ -177,8 +177,8 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
 
     float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
 
-    hit_data.uv     = bary.x * hit_data.tri_uv0 + bary.y * hit_data.tri_uv1 + bary.z * hit_data.tri_uv2;
-    hit_data.normal  = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
+    hit_data.uv = bary.x * hit_data.tri_uv0 + bary.y * hit_data.tri_uv1 + bary.z * hit_data.tri_uv2;
+    hit_data.normal = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
 
     float3 interpTangent = normalize(bary.x * hit_data.tri_t0.xyz + bary.y * hit_data.tri_t1.xyz + bary.z * hit_data.tri_t2.xyz);
     hit_data.tangent = float4(normalize(mul((float3x3)ObjectToWorld3x4(), interpTangent)), hit_data.tri_t0.w);
@@ -239,12 +239,19 @@ float4 SampleTexture(int texIdx, float2 uv)
 
 float3 SampleWorldSpaceNormal(HitData data)
 {
+    float3 N = data.normal;
+
     int normalTexIdx = g_instanceInfo[NonUniformResourceIndex(InstanceID())].normalTextureIndex;
+    if (normalTexIdx == -1)
+        return N;
+
+    // Skip normal mapping if Gram-Schmidt collapses (tangent ~parallel to N on some Sponza faces).
+    float3 T = data.tangent.xyz - dot(data.tangent.xyz, N) * N;
+    if (dot(T, T) < 1e-8)
+        return N;
+    T = normalize(T);
 
     float3 normalTS = SampleTexture(normalTexIdx, data.uv).xyz * 2.0 - 1.0;
-
-    float3 N = data.normal;
-    float3 T = normalize(data.tangent.xyz - dot(data.tangent.xyz, N) * N);
     float3 B = cross(N, T) * data.tangent.w;
     float3x3 TBN = float3x3(T, B, N);
 

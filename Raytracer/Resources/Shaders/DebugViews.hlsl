@@ -12,6 +12,12 @@ float4 DebugView_Surface(int mode, DebugData d)
     if (mode == 5) return float4(d.tangent * 0.5 + 0.5, 1);
     if (mode == 6) return float4(d.uv, 0, 1);
     if (mode == 7) return float4(d.roughness, d.metallic, 0, 1);
+    if (mode == 13)
+    {
+        // Surface NaN sources. Red = shading normal, green = tangent parallel to N, blue = vertex normal.
+        float parallel = saturate((d.tangentDotN - 0.9) * 10.0);
+        return float4(d.worldNormalNaN, parallel, d.normalNaN, 1);
+    }
     return float4(-1, -1, -1, -1);
 }
 
