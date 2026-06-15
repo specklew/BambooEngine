@@ -16,6 +16,9 @@ namespace Constants
         constexpr int VOXEL_VPL_COUNT_DESCRIPTOR_INDEX = VOXEL_IRRADIANCE_DESCRIPTOR_INDEX + 1; // 521
         // VXPG V2: ShadingPoints G-buffer UAV (primary worldPos + octa normal), written by light injection.
         constexpr int SHADINGPOINTS_DESCRIPTOR_INDEX = VOXEL_VPL_COUNT_DESCRIPTOR_INDEX + 1; // 522
+        // VXPG V2 Stage B: superpixel index + representative center UAVs (debug views 15/16, raster table u7/u8).
+        constexpr int SUPERPIXEL_INDEX_DESCRIPTOR_INDEX = SHADINGPOINTS_DESCRIPTOR_INDEX + 1; // 523
+        constexpr int SUPERPIXEL_CENTER_DESCRIPTOR_INDEX = SUPERPIXEL_INDEX_DESCRIPTOR_INDEX + 1; // 524
         constexpr int STATIC_SAMPLERS_COUNT = 6;
         // Max voxels in the compacted guiding distribution (matches SIByL VXGuider_MAX_CAPACITY)
         constexpr int VOXEL_GUIDING_CAPACITY = 131072;
@@ -27,5 +30,10 @@ namespace Constants
         constexpr int SUPERVOXEL_GRID_FACTOR = 16;
         constexpr int MAX_SUPERVOXELS = 512;
         constexpr int SUPERVOXEL_DIM_CAP = 8;
+        // VXPG V2 Stage B superpixels (SLIC over the ShadingPoints G-buffer).
+        // map_size = ceil(screen / SUPERPIXEL_SIZE); gather cap = SUPERPIXEL_SIZE^2.
+        constexpr int SUPERPIXEL_SIZE = 32;
+        constexpr int SUPERPIXEL_ITERATIONS = 5;
+        constexpr int SUPERPIXEL_GATHER_CAP = SUPERPIXEL_SIZE * SUPERPIXEL_SIZE; // 1024
     }
 }

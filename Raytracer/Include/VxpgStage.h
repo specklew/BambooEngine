@@ -11,6 +11,7 @@ enum class VxpgStage : int
 	Inject,
 	GuidingBuild,
 	Supervoxel,
+	Superpixel,
 };
 
 inline bool operator>=(VxpgStage a, VxpgStage b)

@@ -33,6 +33,30 @@ float4 DebugView_ShadingPoints(int mode, float2 screenUV)
     return float4(saturate(normalizedPos), 1.0);
 }
 
+float4 DebugView_Superpixels(int mode, float2 screenUV)
+{
+    uint w, h;
+    gSuperpixelIndex.GetDimensions(w, h);
+    int2 px = int2(screenUV * float2(w, h));
+    int id = gSuperpixelIndex[px];
+    if (id < 0) return float4(0, 0, 0, 1);
+
+    if (mode == 15) // id hash
+    {
+        return float4(
+            float((uint(id) * 131u + 17u) & 0xFFu) / 255.0,
+            float((uint(id) * 197u + 71u) & 0xFFu) / 255.0,
+            float((uint(id) * 53u + 113u) & 0xFFu) / 255.0, 1.0);
+    }
+
+    // mode 16: representative normal of this pixel's superpixel.
+    const int SUPERPIXEL_SIZE = 32;
+    int mapX = (int(w) + SUPERPIXEL_SIZE - 1) / SUPERPIXEL_SIZE;
+    int2 sp2D = int2(id % mapX, id / mapX);
+    float3 n = Unorm32OctahedronToUnitVector(asuint(gSuperpixelCenter[sp2D].w));
+    return float4(n * 0.5 + 0.5, 1.0);
+}
+
 float4 DebugView_Voxels(int mode, float3 posW)
 {
     int3 voxelCoord = int3(floor((posW - voxGridMin) / voxVoxelSize));
@@ -122,6 +146,11 @@ bool TryDebugView(int mode, DebugData d, float3 posW, float2 screenUV, out float
     if (mode == 11 || mode == 12)
     {
         color = DebugView_ShadingPoints(mode, screenUV);
+        return true;
+    }
+    if (mode == 15 || mode == 16)
+    {
+        color = DebugView_Superpixels(mode, screenUV);
         return true;
     }
     if ((mode == 8 || mode == 9 || mode == 10 || mode == 14) && voxGridDim > 0)

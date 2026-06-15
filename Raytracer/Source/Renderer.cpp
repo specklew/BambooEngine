@@ -26,6 +26,7 @@
 #include "LightInjectionPass.h"
 #include "VoxelGuidingBuildPass.h"
 #include "SupervoxelClusterPass.h"
+#include "SuperpixelBuildPass.h"
 #include "Techniques/GuidedPathTracingPass.h"
 #include "RasterDebugMode.h"
 #include "RaytraceDebugMode.h"
@@ -81,6 +82,8 @@ static AutoCVarFloat g_lift("renderer.postprocess.lift", "Post-ACES shadow lift"
 static AutoCVarInt   g_voxelGridDim("voxel.gridDim", "Voxel grid resolution (one axis)", 64, CVarFlags::EditDrag, 32, 256);
 static AutoCVarFloat g_voxelAabbPad("voxel.aabbPadCells", "Voxel grid padding in cells (unused V1)", 0.5f, CVarFlags::EditDrag, 0.0f, 4.0f);
 static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accumulation: 1 = average (add + count), 0 = max", 1, CVarFlags::EditCheckbox);
+static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence weight: screen-xy vs world-position", 0.6f, CVarFlags::EditDrag, 0.0f, 4.0f);
+static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer", "SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
 static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 0, CVarFlags::EditCheckbox);
 static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization (MisWeights: R = BSDF, G = guide)", GuidingDebugView::None);
@@ -180,6 +183,12 @@ void Renderer::Initialize()
 
 	m_supervoxelClusterPass = std::make_shared<SupervoxelClusterPass>();
 	m_supervoxelClusterPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass);
+
+	m_superpixelBuildPass = std::make_shared<SuperpixelBuildPass>();
+	m_superpixelBuildPass->Initialize(g_device, m_d3d12CommandList);
+	m_superpixelBuildPass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight(),
+		m_lightInjectionPass->GetShadingPointsTexture().Get());
+	WriteSuperpixelUavsToGlobalHeap();
 
 	WireGuidingResources();
 
@@ -575,6 +584,13 @@ void Renderer::OnResize()
 	if (m_lightInjectionPass)
 		m_lightInjectionPass->OnResize();
 
+	if (m_superpixelBuildPass && m_lightInjectionPass)
+	{
+		m_superpixelBuildPass->OnResize(window.GetWidth(), window.GetHeight(),
+			m_lightInjectionPass->GetShadingPointsTexture().Get());
+		WriteSuperpixelUavsToGlobalHeap();
+	}
+
 	ExecuteCommandsAndReset();
 }
 
@@ -842,7 +858,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 5; // +1 skybox, +3 voxel occupancy/irradiance/vplcount, +1 shadingpoints
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 7; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -943,7 +959,15 @@ void Renderer::CreateRasterizationRootSignature()
 	shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 	shadingPointsRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::SHADINGPOINTS_DESCRIPTOR_INDEX;
 
-	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, vertexRange, indexRange, textureRange, voxelOccupancyRange, shadingPointsRange};
+	// u7 = superpixel index, u8 = superpixel representative center (debug views 15/16)
+	D3D12_DESCRIPTOR_RANGE superpixelRange;
+	superpixelRange.BaseShaderRegister = 7;
+	superpixelRange.NumDescriptors = 2;
+	superpixelRange.RegisterSpace = 0;
+	superpixelRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+	superpixelRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::SUPERPIXEL_INDEX_DESCRIPTOR_INDEX;
+
+	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, vertexRange, indexRange, textureRange, voxelOccupancyRange, shadingPointsRange, superpixelRange};
 
 	rootParameters[0].InitAsDescriptorTable(_countof(ranges), ranges);
 	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer
@@ -1326,6 +1350,12 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	// Stage 4: cluster voxels into supervoxels.
 	if (stage >= VxpgStage::Supervoxel && m_supervoxelClusterPass)
 		m_supervoxelClusterPass->Run();
+
+	// Stage 5: SLIC superpixel clustering over the ShadingPoints G-buffer.
+	if (stage >= VxpgStage::Superpixel && m_superpixelBuildPass)
+		m_superpixelBuildPass->Run(
+			m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
+			g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
 }
 
 void Renderer::WriteVoxelUavsToGlobalHeap()
@@ -1345,6 +1375,22 @@ void Renderer::WriteVoxelUavsToGlobalHeap()
 
 	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::VOXEL_VPL_COUNT_DESCRIPTOR_INDEX) * descSize;
 	m_voxelizationPass->WriteVplCountUavTo(slot);
+}
+
+void Renderer::WriteSuperpixelUavsToGlobalHeap()
+{
+	if (!m_superpixelBuildPass)
+		return;
+
+	auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+
+	D3D12_CPU_DESCRIPTOR_HANDLE slot = heapStart;
+	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::SUPERPIXEL_INDEX_DESCRIPTOR_INDEX) * descSize;
+	m_superpixelBuildPass->WriteIndexUavTo(slot);
+
+	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::SUPERPIXEL_CENTER_DESCRIPTOR_INDEX) * descSize;
+	m_superpixelBuildPass->WriteCenterUavTo(slot);
 }
 
 void Renderer::LoadSkybox(const std::wstring& path)

@@ -21,6 +21,8 @@ enum class RasterDebugMode : int
 	ShadingPointsPos = 12,
 	TangentHealth = 13,
 	SupervoxelData = 14, // heat-ramp per-supervoxel mean irradiance (reads the cluster pass buffers)
+	SuperpixelId = 15,   // per-pixel superpixel id, hash-colored (reads u_index)
+	SuperpixelRepresentative = 16, // each pixel painted with its superpixel's representative normal
 };
 
 // The furthest VXPG stage a raster debug view needs to read its data.
@@ -33,6 +35,9 @@ inline VxpgStage StageFor(RasterDebugMode mode)
 		return VxpgStage::Voxelize;
 	case RasterDebugMode::SupervoxelData:   // reads the accumulated supervoxel buffers
 		return VxpgStage::Supervoxel;
+	case RasterDebugMode::SuperpixelId:            // reads u_index
+	case RasterDebugMode::SuperpixelRepresentative: // reads u_index + u_center
+		return VxpgStage::Superpixel;
 	case RasterDebugMode::VoxelIrradiance:  // reads injected irradiance
 	case RasterDebugMode::ShadingPointsNormal:
 	case RasterDebugMode::ShadingPointsPos: // read the injection G-buffer

@@ -34,6 +34,7 @@ class RaytracePass;
 class LightInjectionPass;
 class VoxelGuidingBuildPass;
 class SupervoxelClusterPass;
+class SuperpixelBuildPass;
 class FrameAccumulationPass;
 class PostProcessPass;
 class AccelerationStructures;
@@ -134,6 +135,7 @@ private:
 	void OnShaderReload();
 	void LoadSkybox(const std::wstring& path);
 	void WriteVoxelUavsToGlobalHeap();
+	void WriteSuperpixelUavsToGlobalHeap();
 	void WireGuidingResources();
 	// Runs the linear VXPG pipeline (voxelize -> inject -> guiding build ->
 	// supervoxel cluster) up to and including the requested stage.
@@ -223,6 +225,7 @@ private:
 	std::shared_ptr<VoxelizationPass> m_voxelizationPass;
 	std::shared_ptr<VoxelGuidingBuildPass> m_voxelGuidingBuildPass;
 	std::shared_ptr<SupervoxelClusterPass> m_supervoxelClusterPass;
+	std::shared_ptr<SuperpixelBuildPass> m_superpixelBuildPass;
 
 	ScreenshotMetadata BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const;
 };
