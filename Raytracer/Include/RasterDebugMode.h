@@ -20,6 +20,7 @@ enum class RasterDebugMode : int
 	ShadingPointsNormal = 11,
 	ShadingPointsPos = 12,
 	TangentHealth = 13,
+	SupervoxelData = 14, // heat-ramp per-supervoxel mean irradiance (reads the cluster pass buffers)
 };
 
 // The furthest VXPG stage a raster debug view needs to read its data.
@@ -30,6 +31,8 @@ inline VxpgStage StageFor(RasterDebugMode mode)
 	case RasterDebugMode::Voxels:           // reads occupancy
 	case RasterDebugMode::Supervoxels:      // reads occupancy (supervoxel id is analytic)
 		return VxpgStage::Voxelize;
+	case RasterDebugMode::SupervoxelData:   // reads the accumulated supervoxel buffers
+		return VxpgStage::Supervoxel;
 	case RasterDebugMode::VoxelIrradiance:  // reads injected irradiance
 	case RasterDebugMode::ShadingPointsNormal:
 	case RasterDebugMode::ShadingPointsPos: // read the injection G-buffer

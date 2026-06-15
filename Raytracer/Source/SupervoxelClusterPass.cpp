@@ -86,8 +86,10 @@ void SupervoxelClusterPass::Run()
     if (!heap)
         return;
 
-    const uint32_t gridDim       = m_voxelPass->GetGridDim();
-    const uint32_t clusterFactor = Constants::Graphics::SUPERVOXEL_GRID_FACTOR;
+    const uint32_t gridDim = m_voxelPass->GetGridDim();
+    // Use the adaptive factor the voxelization pass computed into the grid CB, so
+    // the dispatch, the grid CB, and debug view 14 all share one value.
+    const uint32_t clusterFactor = m_voxelPass->GetGridConstants().supervoxelFactor;
     m_svDim = (gridDim + clusterFactor - 1) / clusterFactor;
 
     // GPU handle to slot 1 (irradiance) of the voxelization pass heap; the

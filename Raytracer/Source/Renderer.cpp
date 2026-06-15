@@ -416,6 +416,12 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		if (m_voxelizationPass)
 			m_d3d12CommandList->SetGraphicsRootConstantBufferView(4, m_voxelizationPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
 
+		if (m_supervoxelClusterPass)
+		{
+			m_d3d12CommandList->SetGraphicsRootUnorderedAccessView(5, m_supervoxelClusterPass->GetSupervoxelIrradianceBuffer()->GetGPUVirtualAddress());
+			m_d3d12CommandList->SetGraphicsRootUnorderedAccessView(6, m_supervoxelClusterPass->GetSupervoxelCountBuffer()->GetGPUVirtualAddress());
+		}
+
 		for (const auto& go : m_scene->GetGameObjects())
 		{
 			auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
@@ -875,7 +881,7 @@ void Renderer::CreateWorldProjCBV()
 
 void Renderer::CreateRasterizationRootSignature()
 {
-	constexpr int num_params = 5;
+	constexpr int num_params = 7;
 
 	CD3DX12_ROOT_PARAMETER rootParameters[num_params];
 	
@@ -944,6 +950,8 @@ void Renderer::CreateRasterizationRootSignature()
 	rootParameters[2].InitAsConstantBufferView(2); // Material buffer
 	rootParameters[3].InitAsConstantBufferView(3); // Pass constants
 	rootParameters[4].InitAsConstantBufferView(4); // Voxel grid constants
+	rootParameters[5].InitAsUnorderedAccessView(5); // u5 supervoxel irradiance (debug view 14)
+	rootParameters[6].InitAsUnorderedAccessView(6); // u6 supervoxel count (debug view 14)
 
 	auto static_samplers = GetStaticSamplers();
 	

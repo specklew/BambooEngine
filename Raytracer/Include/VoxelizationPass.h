@@ -9,7 +9,7 @@ struct VoxelGridConstants
     DirectX::XMFLOAT3 gridMax;
     uint32_t          gridDim;
     uint32_t          injectUseAvg;
-    uint32_t          _reserved0; // kept for HLSL cbuffer layout compatibility
+    uint32_t          supervoxelFactor; // SUPERVOXEL_GRID_FACTOR; supervoxel = voxelCoord / factor
     float             heatScale;
     uint32_t          _pad0;
 };

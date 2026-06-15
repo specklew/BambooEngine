@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "Constants.h"
 #include "InputElements.h"
 #include "Shader.h"
 #include "ResourceManager/ResourceManager.h"
@@ -292,6 +293,11 @@ void VoxelizationPass::OnSceneLoaded(const Scene& scene)
     m_gridConstants.gridMax   = { center.x + half, center.y + half, center.z + half };
     m_gridConstants.voxelSize = voxelSize;
     m_gridConstants.gridDim   = m_gridDim;
+    // Adaptive cluster factor: raise above the floor so svDim <= SUPERVOXEL_DIM_CAP,
+    // bounding the supervoxel count to MAX_SUPERVOXELS at any grid resolution.
+    const uint32_t dimCap = static_cast<uint32_t>(Constants::Graphics::SUPERVOXEL_DIM_CAP);
+    const uint32_t ceilToCap = (m_gridDim + dimCap - 1) / dimCap;
+    m_gridConstants.supervoxelFactor = std::max<uint32_t>(Constants::Graphics::SUPERVOXEL_GRID_FACTOR, ceilToCap);
 
     WriteGridConstantsCB();
     m_haveScene = true;
