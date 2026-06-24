@@ -9,10 +9,13 @@ RWTexture3D<uint> gVoxIrradiance : register(u0);
 RWTexture3D<uint> gVoxVplCount   : register(u1);
 
 // [0] = compacted voxel count, [1] = asuint(total weight)
-RWStructuredBuffer<uint>  gCounters   : register(u2);
-RWStructuredBuffer<uint>  gCompactIds : register(u3);
-RWStructuredBuffer<float> gWeights    : register(u4);
-RWStructuredBuffer<float> gCdf        : register(u5);
+RWStructuredBuffer<uint>  gCounters    : register(u2);
+RWStructuredBuffer<uint>  gCompactIds  : register(u3);
+RWStructuredBuffer<float> gWeights     : register(u4);
+RWStructuredBuffer<float> gCdf         : register(u5);
+// voxelID (flat) -> compactID, sentinel -1. Sized gridDim^3. Each cell written
+// only by its own CompactVoxels thread, so it doubles as its own clear.
+RWStructuredBuffer<int>   gInverseIndex : register(u6);
 
 cbuffer BuildCB : register(b0)
 {
@@ -39,6 +42,9 @@ void CompactVoxels(uint3 tid : SV_DispatchThreadID)
 {
     if (any(tid >= gGridDim)) return;
 
+    uint flatId = tid.x + tid.y * gGridDim + tid.z * gGridDim * gGridDim;
+    gInverseIndex[flatId] = -1; // clear own cell before any early-return
+
     uint count = gVoxVplCount[tid];
     if (count == 0u) return;
 
@@ -49,8 +55,9 @@ void CompactVoxels(uint3 tid : SV_DispatchThreadID)
     InterlockedAdd(gCounters[0], 1u, slot);
     if (slot >= VOXEL_GUIDING_CAPACITY) return; // overflow: drop voxel
 
-    gCompactIds[slot] = tid.x + tid.y * gGridDim + tid.z * gGridDim * gGridDim;
+    gCompactIds[slot] = flatId;
     gWeights[slot] = weight;
+    gInverseIndex[flatId] = int(slot);
 }
 
 // Single-group scan: each thread serially scans its chunk, thread 0 scans the

@@ -9,4 +9,5 @@ enum class GuidingDebugView : int
 	GuideStrategyOnly = 2,
 	MisWeights = 3,       // R = BSDF strategy weight, G = guide strategy weight
 	GuideAcceptance = 4,  // green = guided sample accepted, red = gate-rejected, blue = horizon/pdf-rejected
+	InverseIndexRoundTrip = 5, // green = voxelID->compactID->voxelID consistent, red = mismatch, black = inactive voxel
 };

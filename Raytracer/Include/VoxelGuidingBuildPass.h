@@ -21,6 +21,7 @@ public:
     RWStructuredBuffer<uint32_t>* GetCountersBuffer() const { return m_counters.get(); }
     RWStructuredBuffer<uint32_t>* GetCompactIdsBuffer() const { return m_compactIds.get(); }
     RWStructuredBuffer<float>*    GetCdfBuffer() const { return m_cdf.get(); }
+    RWStructuredBuffer<int32_t>*  GetInverseIndexBuffer() const { return m_inverseIndex.get(); }
 
 private:
     void CreateBuffers();
@@ -35,6 +36,7 @@ private:
     std::unique_ptr<RWStructuredBuffer<uint32_t>> m_compactIds;
     std::unique_ptr<RWStructuredBuffer<float>>    m_weights;
     std::unique_ptr<RWStructuredBuffer<float>>    m_cdf;
+    std::unique_ptr<RWStructuredBuffer<int32_t>>  m_inverseIndex;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;

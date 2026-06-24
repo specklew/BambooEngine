@@ -320,7 +320,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.guidingFlags =
 		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
 		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 7u) << 1);
-	static_assert(static_cast<int>(GuidingDebugView::GuideAcceptance) <= 7, "GuidingDebugView must fit in 3 bits of guidingFlags");
+	static_assert(static_cast<int>(GuidingDebugView::InverseIndexRoundTrip) <= 7, "GuidingDebugView must fit in 3 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();

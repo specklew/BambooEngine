@@ -35,23 +35,30 @@ void VoxelGuidingBuildPass::CreateBuffers()
     m_compactIds = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, capacity, L"VoxelGuiding CompactIds");
     m_weights    = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Weights");
     m_cdf        = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Cdf");
+
+    // Inverse index is grid-sized (one int per cell), not capacity-sized. Guided
+    // mode stays 64^3 (ADR 0003 Q10a); recreate in lockstep if grid resize lands.
+    const uint32_t gridDim = m_voxelPass->GetGridDim();
+    const uint32_t cellCount = gridDim * gridDim * gridDim;
+    m_inverseIndex = std::make_unique<RWStructuredBuffer<int32_t>>(m_device, cellCount, L"VoxelGuiding InverseIndex");
 }
 
 void VoxelGuidingBuildPass::CreateRootSignature()
 {
     // Table: u0 = irradiance, u1 = vpl count (slots 1..2 of the voxelization
     // pass private heap). Root UAVs: u2 counters, u3 compactIds, u4 weights,
-    // u5 cdf. Root constants b0: gridDim.
+    // u5 cdf, u6 inverse index. Root constants b0: gridDim.
     CD3DX12_DESCRIPTOR_RANGE texRange;
     texRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0);
 
-    CD3DX12_ROOT_PARAMETER params[6];
+    CD3DX12_ROOT_PARAMETER params[7];
     params[0].InitAsConstants(4, 0);
     params[1].InitAsDescriptorTable(1, &texRange);
     params[2].InitAsUnorderedAccessView(2);
     params[3].InitAsUnorderedAccessView(3);
     params[4].InitAsUnorderedAccessView(4);
     params[5].InitAsUnorderedAccessView(5);
+    params[6].InitAsUnorderedAccessView(6);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
@@ -111,6 +118,7 @@ void VoxelGuidingBuildPass::Run()
     m_commandList->SetComputeRootUnorderedAccessView(3, m_compactIds->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(4, m_weights->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(5, m_cdf->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(6, m_inverseIndex->GetGPUVirtualAddress());
 
     auto* cmd = m_commandList.Get();
 
@@ -124,6 +132,7 @@ void VoxelGuidingBuildPass::Run()
     m_counters->UavBarrier(cmd);
     m_compactIds->UavBarrier(cmd);
     m_weights->UavBarrier(cmd);
+    m_inverseIndex->UavBarrier(cmd);
 
     m_commandList->SetPipelineState(m_cdfPso.Get());
     m_commandList->Dispatch(1, 1, 1);

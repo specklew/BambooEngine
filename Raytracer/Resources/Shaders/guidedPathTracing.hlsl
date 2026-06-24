@@ -23,9 +23,11 @@ RWTexture3D<uint> gVoxIrradiance : register(u1);
 RWTexture3D<uint> gVoxVplCount   : register(u2);
 
 // [0] = compacted voxel count, [1] = asuint(total weight)
-RWStructuredBuffer<uint>  gVoxCounters   : register(u3);
-RWStructuredBuffer<uint>  gVoxCompactIds : register(u4);
-RWStructuredBuffer<float> gVoxCdf        : register(u5);
+RWStructuredBuffer<uint>  gVoxCounters     : register(u3);
+RWStructuredBuffer<uint>  gVoxCompactIds   : register(u4);
+RWStructuredBuffer<float> gVoxCdf          : register(u5);
+// voxelID (flat) -> compactID, sentinel -1 (built by VoxelGuidingBuildPass).
+RWStructuredBuffer<int>   gVoxInverseIndex : register(u6);
 
 cbuffer VoxelGridCB : register(b4)
 {
@@ -410,6 +412,26 @@ void GuidedHit(inout GuidedPayload payload : SV_RayPayload, in Attributes attr)
         // 2 = guide strategy only, 3 = MIS weight false-color,
         // 4 = guided sample acceptance: green/red/blue)
         uint debugView = (guidingFlags >> 1) & 7u;
+
+        // View 5: inverse-index round-trip. For the primary hit's voxel, look up
+        // gInverseIndex -> compactID and confirm gCompactIds maps back to the same
+        // voxel. green = consistent, red = mismatch (bug), black = inactive voxel.
+        if (debugView == 5u)
+        {
+            int3 v = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
+            float3 col = float3(0, 0, 0);
+            if (all(v >= 0) && all(v < int(voxGridDim)))
+            {
+                uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+                int ci = gVoxInverseIndex[flatId];
+                if (ci >= 0)
+                    col = (gVoxCompactIds[ci] == flatId) ? float3(0, 1, 0) : float3(1, 0, 0);
+            }
+            payload.color = col;
+            payload.hitPos = hit.position;
+            payload.hitFlag = 1;
+            return;
+        }
 
         uint n;
         float total;

@@ -109,7 +109,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     D3D12_DESCRIPTOR_RANGE ranges[9] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
                                         texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[11];
+    CD3DX12_ROOT_PARAMETER rootParameters[12];
     rootParameters[0].InitAsDescriptorTable(9, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
@@ -121,8 +121,9 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     rootParameters[8].InitAsUnorderedAccessView(3, 0);  // Guiding counters
     rootParameters[9].InitAsUnorderedAccessView(4, 0);  // Guiding compact ids
     rootParameters[10].InitAsUnorderedAccessView(5, 0); // Guiding CDF
+    rootParameters[11].InitAsUnorderedAccessView(6, 0); // Guiding inverse index
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(11, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(12, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -162,6 +163,7 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootUnorderedAccessView(8, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(9, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(10, m_buildPass->GetCdfBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(11, m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
