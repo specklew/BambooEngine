@@ -15,6 +15,12 @@ RWTexture3D<uint> gVoxelVplCount   : register(u2);
 // normal (bit-cast) in .w. Consumed by superpixel clustering (Stage B).
 RWTexture2D<float4> gShadingPoints : register(u3);
 
+// VXPG faithful port (B+): per-voxel representative VPL (second-vertex surface
+// pos + octa normal, last-writer-wins) for the fingerprint pass; per-pixel VPL
+// hit position for cvis assignment. Written at the bounce-1 closest hit.
+RWTexture3D<float4> gVoxelRepresentative : register(u4);
+RWTexture2D<float4> gVplPosition         : register(u5);
+
 // Sentinel for pixels whose primary ray missed: far position, zero-packed
 // normal. Clustering treats these as invalid (normal gate fails).
 static const float4 SHADINGPOINT_INVALID = float4(1e30, 1e30, 1e30, 0.0);
@@ -148,6 +154,16 @@ void InjectHit(inout InjectPayload payload : SV_RayPayload, in Attributes attr)
         // Second path vertex — evaluate direct light here, raygen injects it
         payload.result = CalculateDirectLightning(hit, surface);
         payload.flags = 1;
+
+        // VXPG B+: stash the representative VPL (pos + normal) for this voxel and
+        // the per-pixel VPL position. N and the launch index are both available
+        // here, so no payload round-trip is needed. Last-writer-wins per voxel.
+        const float packedN = asfloat(UnitVectorToUnorm32Octahedron(N));
+        gVplPosition[DispatchRaysIndex().xy] = float4(hit.position, packedN);
+
+        int3 vxRep = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
+        if (all(vxRep >= 0) && all(vxRep < int(voxGridDim)))
+            gVoxelRepresentative[vxRep] = float4(hit.position, packedN);
     }
 }
 
@@ -159,6 +175,10 @@ void InjectRayGen()
     uint2 launchIndex = DispatchRaysIndex().xy;
     uint2 dims = DispatchRaysDimensions().xy;
     uint pixelId = launchIndex.x + launchIndex.y * dims.x;
+
+    // Clear this pixel's VPL position; the bounce-1 closest hit overwrites it on
+    // a hit, so pixels whose bounce misses stay zero (cvis treats zero as empty).
+    gVplPosition[launchIndex] = float4(0, 0, 0, 0);
 
     uint seed = pcg_hash(pixelId ^ (frameIndex * 805459861u) ^ 0x9E3779B9u);
 

@@ -2,6 +2,7 @@
 #ifdef __cplusplus
 #pragma once
 
+#include "DebugViewDoc.h"
 #include "VxpgStage.h"
 
 enum class RasterDebugMode : int
@@ -14,15 +15,36 @@ enum class RasterDebugMode : int
 	Tangents = 5,
 	UVs = 6,
 	Roughness = 7,
-	Voxels = 8,
+	VoxelOccupancy = 8,
 	VoxelIrradiance = 9,
 	Supervoxels = 10,
 	ShadingPointsNormal = 11,
 	ShadingPointsPos = 12,
 	TangentHealth = 13,
-	SupervoxelData = 14, // heat-ramp per-supervoxel mean irradiance (reads the cluster pass buffers)
-	SuperpixelId = 15,   // per-pixel superpixel id, hash-colored (reads u_index)
-	SuperpixelRepresentative = 16, // each pixel painted with its superpixel's representative normal
+	SupervoxelData = 14,
+	SuperpixelId = 15,
+	SuperpixelRepresentative = 16,
+};
+
+// Runtime docs, one per enum entry in order (FormatDebugViewDocs static_asserts the count).
+inline constexpr DebugViewDoc kRasterDebugModeDocs[] = {
+	{"nothing", "normal shaded image", "debug path disabled"},
+	{"material textures", "flat texture colors, no lighting", "outputs sampled base color"},
+	{"normal mapping", "smooth RGB direction colors (XYZ mapped to RGB)", "outputs the normal-mapped shading normal"},
+	{"vertex data / model import", "faceted RGB direction colors, no texture detail", "outputs the interpolated vertex normal"},
+	{"normal map sampling", "purple-ish tangent-space texture detail", "outputs the raw normal map sample"},
+	{"tangent import / mikktspace", "smooth RGB direction colors following UV seams", "outputs the vertex tangent"},
+	{"UV unwrap", "red-green gradients per chart, no distortion", "outputs texcoords as RG"},
+	{"roughness texture", "grayscale: dark = smooth, bright = rough", "outputs the roughness channel"},
+	{"VoxelizationPass", "geometry-conforming voxel shell, checkerboard colors", "shades surfaces whose voxel is occupied"},
+	{"LightInjectionPass irradiance", "heat ramp bright on lit surfaces, dark in shadow", "reads injected voxel irradiance at the surface voxel"},
+	{"(legacy) grid-cell supervoxels", "coarse colored blocks over geometry", "hash-colors the analytic supervoxel id — obsolete, dies with SupervoxelClusterPass"},
+	{"LightInjectionPass ShadingPoints G-buffer", "same direction colors as WorldNormals, black where primary ray missed", "decodes the octahedral normal from the ShadingPoints texture"},
+	{"LightInjectionPass ShadingPoints G-buffer", "world-position gradient, black where primary ray missed", "visualizes ShadingPoints.xyz scaled into color"},
+	{"tangent quality (NaN regression sentinel)", "all green; red = tangent parallel to normal, magenta = NaN", "flags degenerate tangent frames that produced the blue-artifact bug"},
+	{"(legacy) SupervoxelClusterPass buffers", "heat ramp per coarse block", "per-supervoxel mean irradiance — obsolete, dies with SupervoxelClusterPass"},
+	{"SuperpixelPass (SLIC)", "~32px mosaic cells hugging geometry edges", "hash-colors the per-pixel superpixel id"},
+	{"SuperpixelPass (SLIC)", "mosaic of direction colors, one normal per cell", "paints each pixel with its superpixel's representative normal"},
 };
 
 // The furthest VXPG stage a raster debug view needs to read its data.
@@ -30,7 +52,7 @@ inline VxpgStage StageFor(RasterDebugMode mode)
 {
 	switch (mode)
 	{
-	case RasterDebugMode::Voxels:           // reads occupancy
+	case RasterDebugMode::VoxelOccupancy:   // reads occupancy
 	case RasterDebugMode::Supervoxels:      // reads occupancy (supervoxel id is analytic)
 		return VxpgStage::Voxelize;
 	case RasterDebugMode::SupervoxelData:   // reads the accumulated supervoxel buffers

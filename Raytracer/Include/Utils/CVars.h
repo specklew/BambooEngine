@@ -35,6 +35,9 @@ struct CVarEnum
 	uint32_t index;
 	std::vector<std::string> names;
 	std::vector<int> values;
+	// Optional per-value documentation (same order as names). When non-empty the
+	// editor shows it as a tooltip per combo entry + text under the selection.
+	std::vector<std::string> valueDocs;
 };
 
 // these to enable creating composite flags in-place. e.g. CVarFlags::EditDrag | CVarFlags::Advanced in function calls
@@ -164,9 +167,11 @@ struct AutoCVarFloat3 : AutoCVar<DirectX::XMFLOAT3>
 template<typename T, typename = std::enable_if_t<std::is_enum_v<T>>>
 struct AutoCVarEnum : AutoCVar<T>
 {
-	AutoCVarEnum(const char* name, const char* description, T defaultValue, CVarFlags flags = CVarFlags::None)
+	AutoCVarEnum(const char* name, const char* description, T defaultValue, CVarFlags flags = CVarFlags::None,
+	             std::vector<std::string> valueDocs = {})
 	{
 		CVarEnum e;
+		e.valueDocs = std::move(valueDocs);
 
 		for (auto value : magic_enum::enum_values<T>()) {
 			e.names.push_back(std::string(magic_enum::enum_name(value)));

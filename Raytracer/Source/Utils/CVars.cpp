@@ -887,23 +887,36 @@ void CVarSystemImpl::EditParameter(CVarParameter* p, float textWidth)
 
         		// Ensure index is within bounds
         		int selectedIndex = std::clamp(static_cast<int>(enumCVar->index), 0, static_cast<int>(enumCVar->values.size() - 1));
-        		// Render ImGui combo box
+        		const bool hasDocs = enumCVar->valueDocs.size() == enumCVar->names.size();
+        		// Manual combo (not ImGui::Combo) so each entry can carry its own tooltip
         		ImGui::PushID(p->name.c_str());
-        		if (ImGui::Combo(("##" + p->name).c_str(), &selectedIndex,
-								 [](void* data, int idx) -> const char* {
-									 auto* names = static_cast<std::vector<std::string>*>(data);
-									 return (*names)[idx].c_str();
-								 },
-								 static_cast<void*>(&enumCVar->names),
-								 static_cast<int>(enumCVar->names.size())))
+        		if (ImGui::BeginCombo(("##" + p->name).c_str(), enumCVar->names[selectedIndex].c_str()))
         		{
-        			CVarSystem::Get()->SetCVarEnum(hash, selectedIndex);
+        			for (int i = 0; i < static_cast<int>(enumCVar->names.size()); ++i)
+        			{
+        				if (ImGui::Selectable(enumCVar->names[i].c_str(), i == selectedIndex))
+        				{
+        					CVarSystem::Get()->SetCVarEnum(hash, i);
+        				}
+        				if (hasDocs && ImGui::IsItemHovered())
+        				{
+        					ImGui::SetTooltip("%s", enumCVar->valueDocs[i].c_str());
+        				}
+        			}
+        			ImGui::EndCombo();
         		}
         		ImGui::SameLine();
         		if (ImGui::Button("R"))
         		{
         			//GetCVarArray<std::string>()->SetCurrent(GetCVarArray<std::string>()->cvars[p->arrayIndex].initial, p->arrayIndex);
         			enumCVars.SetCurrent(enumCVars.cvarEnums[p->arrayIndex].initial, p->arrayIndex);
+        		}
+        		// Doc of the active selection, visible while looking at the image
+        		if (hasDocs && selectedIndex > 0)
+        		{
+        			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
+        			ImGui::TextWrapped("%s", enumCVar->valueDocs[selectedIndex].c_str());
+        			ImGui::PopStyleColor();
         		}
         		ImGui::PopID();
         		break;

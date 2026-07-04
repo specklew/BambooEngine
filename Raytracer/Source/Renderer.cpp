@@ -68,8 +68,10 @@ static AutoCVarFloat g_cameraSpeed("renderer.camera.speed", "Specifies the base 
 static AutoCVarFloat g_cameraScrollFactor("renderer.camera.scrollFactor", "Multiplier per scroll tick for camera speed", 1.2f, CVarFlags::EditDrag, 1.01f, 3.0f);
 static AutoCVarFloat g_uvCoordX("renderer.uv.x", "Texture uv x offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
-static AutoCVarEnum g_rasterizationDebugMode("renderer.rasterDebugMode", "Rasterization shader debug visualization mode", RasterDebugMode::None);
-static AutoCVarEnum g_raytraceDebugMode("renderer.raytraceDebugMode", "Raytracing shader debug visualization mode", RaytraceDebugMode::None);
+static AutoCVarEnum g_rasterizationDebugMode("renderer.rasterDebugMode", "Rasterization shader debug visualization mode", RasterDebugMode::None,
+                                             CVarFlags::None, FormatDebugViewDocs<RasterDebugMode>(kRasterDebugModeDocs));
+static AutoCVarEnum g_raytraceDebugMode("renderer.raytraceDebugMode", "Raytracing shader debug visualization mode", RaytraceDebugMode::None,
+                                        CVarFlags::None, FormatDebugViewDocs<RaytraceDebugMode>(kRaytraceDebugModeDocs));
 static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world position", {0.0f, 0.0f, -10.0f});
 static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
@@ -86,7 +88,8 @@ static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence wei
 static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer", "SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
 static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 0, CVarFlags::EditCheckbox);
-static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization (MisWeights: R = BSDF, G = guide)", GuidingDebugView::None);
+static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization", GuidingDebugView::None,
+                                        CVarFlags::None, FormatDebugViewDocs<GuidingDebugView>(kGuidingDebugViewDocs));
 
 void Renderer::Initialize()
 {
@@ -320,7 +323,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.guidingFlags =
 		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
 		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 7u) << 1);
-	static_assert(static_cast<int>(GuidingDebugView::InverseIndexRoundTrip) <= 7, "GuidingDebugView must fit in 3 bits of guidingFlags");
+	static_assert(static_cast<int>(GuidingDebugView::VplPositionView) <= 7, "GuidingDebugView must fit in 3 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
@@ -858,7 +861,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 7; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 9; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center, +2 repVPL/vplPosition
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 

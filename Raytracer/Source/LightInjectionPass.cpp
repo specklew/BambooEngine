@@ -109,12 +109,26 @@ void LightInjectionPass::CreateGlobalRootSignature()
     shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     shadingPointsRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::SHADINGPOINTS_DESCRIPTOR_INDEX;
 
-    D3D12_DESCRIPTOR_RANGE ranges[10] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
+    D3D12_DESCRIPTOR_RANGE voxelRepresentativeRange;
+    voxelRepresentativeRange.BaseShaderRegister = 4; // u4
+    voxelRepresentativeRange.NumDescriptors = 1;
+    voxelRepresentativeRange.RegisterSpace = 0;
+    voxelRepresentativeRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    voxelRepresentativeRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_REPRESENTATIVE_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE vplPositionRange;
+    vplPositionRange.BaseShaderRegister = 5; // u5
+    vplPositionRange.NumDescriptors = 1;
+    vplPositionRange.RegisterSpace = 0;
+    vplPositionRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    vplPositionRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VPL_POSITION_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE ranges[12] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
                                         texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
-                                        shadingPointsRange};
+                                        shadingPointsRange, voxelRepresentativeRange, vplPositionRange};
 
     CD3DX12_ROOT_PARAMETER rootParameters[8];
-    rootParameters[0].InitAsDescriptorTable(10, ranges);
+    rootParameters[0].InitAsDescriptorTable(12, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
     rootParameters[3].InitAsShaderResourceView(5, 0); // Random buffer
@@ -154,6 +168,7 @@ void LightInjectionPass::CreateShaderResourceHeap()
     // ShadingPoints G-buffer (re)created here so window resize (which re-runs
     // CreateShaderResourceHeap) resizes it to the new render dimensions.
     CreateShadingPointsResource();
+    CreateRepresentativeResources();
 }
 
 void LightInjectionPass::CreateShadingPointsResource()
@@ -191,6 +206,69 @@ void LightInjectionPass::CreateShadingPointsResource()
     uavDesc.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     m_device->CreateUnorderedAccessView(m_shadingPointsTex.Get(), nullptr, &uavDesc, uavHandle);
+}
+
+void LightInjectionPass::CreateRepresentativeResources()
+{
+    auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
+    const D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart();
+
+    // Per-voxel representative VPL (pos + octa normal): grid-sized Texture3D.
+    m_voxelRepresentativeTex.Reset();
+    const uint32_t gridDim = m_voxelPass ? m_voxelPass->GetGridDim() : 64u;
+    {
+        D3D12_RESOURCE_DESC desc = {};
+        desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+        desc.Format           = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        desc.Width            = gridDim;
+        desc.Height           = gridDim;
+        desc.DepthOrArraySize = static_cast<UINT16>(gridDim);
+        desc.MipLevels        = 1;
+        desc.SampleDesc.Count = 1;
+        desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_voxelRepresentativeTex)));
+        m_voxelRepresentativeTex->SetName(L"VXPG VoxelRepresentative");
+
+        D3D12_CPU_DESCRIPTOR_HANDLE uavHandle;
+        uavHandle.ptr = heapStart.ptr + Constants::Graphics::VOXEL_REPRESENTATIVE_DESCRIPTOR_INDEX * increment;
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+        uavDesc.Format               = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        uavDesc.ViewDimension        = D3D12_UAV_DIMENSION_TEXTURE3D;
+        uavDesc.Texture3D.WSize      = gridDim;
+        m_device->CreateUnorderedAccessView(m_voxelRepresentativeTex.Get(), nullptr, &uavDesc, uavHandle);
+    }
+
+    // Per-pixel VPL hit position: screen-sized Texture2D (mirrors ShadingPoints).
+    m_vplPositionTex.Reset();
+    {
+        D3D12_RESOURCE_DESC desc = {};
+        desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Format           = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        desc.Width            = Window::Get().GetWidth();
+        desc.Height           = Window::Get().GetHeight();
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels        = 1;
+        desc.SampleDesc.Count = 1;
+        desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_vplPositionTex)));
+        m_vplPositionTex->SetName(L"VXPG VplPosition");
+
+        D3D12_CPU_DESCRIPTOR_HANDLE uavHandle;
+        uavHandle.ptr = heapStart.ptr + Constants::Graphics::VPL_POSITION_DESCRIPTOR_INDEX * increment;
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+        uavDesc.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        m_device->CreateUnorderedAccessView(m_vplPositionTex.Get(), nullptr, &uavDesc, uavHandle);
+    }
 }
 
 void LightInjectionPass::Render()
@@ -233,9 +311,11 @@ void LightInjectionPass::Render()
     m_commandList->SetPipelineState1(m_rtStateObject.Get());
     m_commandList->DispatchRays(&desc);
 
-    D3D12_RESOURCE_BARRIER barriers[3];
+    D3D12_RESOURCE_BARRIER barriers[5];
     barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_voxelPass->GetIrradianceTexture().Get());
     barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_voxelPass->GetVplCountTexture().Get());
     barriers[2] = CD3DX12_RESOURCE_BARRIER::UAV(m_shadingPointsTex.Get());
+    barriers[3] = CD3DX12_RESOURCE_BARRIER::UAV(m_voxelRepresentativeTex.Get());
+    barriers[4] = CD3DX12_RESOURCE_BARRIER::UAV(m_vplPositionTex.Get());
     m_commandList->ResourceBarrier(_countof(barriers), barriers);
 }

@@ -14,6 +14,7 @@
 //
 // Reuses scene bindings and BRDF helpers from raytracing.hlsl.
 #include "raytracing.hlsl"
+#include "Octahedral.hlsl"
 
 #define VOXEL_GUIDING_CAPACITY 131072
 
@@ -28,6 +29,11 @@ RWStructuredBuffer<uint>  gVoxCompactIds   : register(u4);
 RWStructuredBuffer<float> gVoxCdf          : register(u5);
 // voxelID (flat) -> compactID, sentinel -1 (built by VoxelGuidingBuildPass).
 RWStructuredBuffer<int>   gVoxInverseIndex : register(u6);
+
+// Written by light injection (debug views 6/7 read them here): per-voxel
+// representative VPL and per-pixel VPL hit position, both pos + octa normal.
+RWTexture3D<float4> gVoxelRepresentative : register(u7);
+RWTexture2D<float4> gVplPosition         : register(u8);
 
 cbuffer VoxelGridCB : register(b4)
 {
@@ -304,6 +310,18 @@ void GuidedRayGen()
     uint2 dims = DispatchRaysDimensions().xy;
     uint pixelId = launchIndex.x + launchIndex.y * dims.x;
 
+    // View 7: per-pixel VPL buffer — decode its octahedral normal directly,
+    // no rays needed. Black where the injection bounce missed (buffer zero).
+    if (((guidingFlags >> 1) & 7u) == 7u)
+    {
+        float4 vpl = gVplPosition[launchIndex];
+        float3 col = all(vpl == 0.0f)
+            ? float3(0, 0, 0)
+            : Unorm32OctahedronToUnitVector(asuint(vpl.w)) * 0.5f + 0.5f;
+        gOutput[launchIndex] = float4(col, 1.0);
+        return;
+    }
+
     float3 accumulated = float3(0, 0, 0);
     for (uint i = 0; i < (uint)samplesPerPixel; i++)
     {
@@ -426,6 +444,42 @@ void GuidedHit(inout GuidedPayload payload : SV_RayPayload, in Attributes attr)
                 int ci = gVoxInverseIndex[flatId];
                 if (ci >= 0)
                     col = (gVoxCompactIds[ci] == flatId) ? float3(0, 1, 0) : float3(1, 0, 0);
+            }
+            payload.color = col;
+            payload.hitPos = hit.position;
+            payload.hitFlag = 1;
+            return;
+        }
+
+        // View 6: representative VPL check. For the primary hit's ACTIVE voxel,
+        // gVoxelRepresentative must hold a surface point inside that voxel.
+        // Status colors only — normal display would collide with failure colors
+        // once accumulation and tone mapping blend/skew them.
+        // green = OK, red = active voxel with no data, magenta = stored position
+        // outside the voxel (beyond FP-boundary tolerance), black = inactive.
+        if (debugView == 6u)
+        {
+            int3 v = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
+            float3 col = float3(0, 0, 0);
+            if (all(v >= 0) && all(v < int(voxGridDim)))
+            {
+                uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+                if (gVoxInverseIndex[flatId] >= 0)
+                {
+                    float4 representative = gVoxelRepresentative[v];
+                    // Writer classifies with floor((p-min)/size); this test
+                    // reconstructs the AABB by multiplication. The two round
+                    // differently, so allow a tiny boundary tolerance.
+                    const float boundaryTolerance = voxVoxelSize * 1e-4f;
+                    float3 voxelMin = voxGridMin + float3(v) * voxVoxelSize - boundaryTolerance;
+                    float3 voxelMax = voxelMin + voxVoxelSize + 2.0f * boundaryTolerance;
+                    if (all(representative == 0.0f))
+                        col = float3(1, 0, 0);
+                    else if (any(representative.xyz < voxelMin) || any(representative.xyz > voxelMax))
+                        col = float3(1, 0, 1);
+                    else
+                        col = float3(0, 1, 0);
+                }
             }
             payload.color = col;
             payload.hitPos = hit.position;

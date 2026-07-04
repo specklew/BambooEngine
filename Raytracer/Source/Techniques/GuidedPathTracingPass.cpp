@@ -106,11 +106,28 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     voxelVplCountRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     voxelVplCountRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_VPL_COUNT_DESCRIPTOR_INDEX;
 
-    D3D12_DESCRIPTOR_RANGE ranges[9] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
-                                        texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange};
+    // Debug views 6/7 read the injection-pass outputs (texture UAVs can't be
+    // root descriptors, so they ride the shared-heap table at their slots).
+    D3D12_DESCRIPTOR_RANGE voxelRepresentativeRange;
+    voxelRepresentativeRange.BaseShaderRegister = 7;
+    voxelRepresentativeRange.NumDescriptors = 1;
+    voxelRepresentativeRange.RegisterSpace = 0;
+    voxelRepresentativeRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    voxelRepresentativeRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_REPRESENTATIVE_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE vplPositionRange;
+    vplPositionRange.BaseShaderRegister = 8;
+    vplPositionRange.NumDescriptors = 1;
+    vplPositionRange.RegisterSpace = 0;
+    vplPositionRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    vplPositionRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VPL_POSITION_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE ranges[11] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
+                                         texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
+                                         voxelRepresentativeRange, vplPositionRange};
 
     CD3DX12_ROOT_PARAMETER rootParameters[12];
-    rootParameters[0].InitAsDescriptorTable(9, ranges);
+    rootParameters[0].InitAsDescriptorTable(11, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
     rootParameters[3].InitAsShaderResourceView(5, 0);  // Random buffer

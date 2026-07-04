@@ -19,6 +19,10 @@ namespace Constants
         // VXPG V2 Stage B: superpixel index + representative center UAVs (debug views 15/16, raster table u7/u8).
         constexpr int SUPERPIXEL_INDEX_DESCRIPTOR_INDEX = SHADINGPOINTS_DESCRIPTOR_INDEX + 1; // 523
         constexpr int SUPERPIXEL_CENTER_DESCRIPTOR_INDEX = SUPERPIXEL_INDEX_DESCRIPTOR_INDEX + 1; // 524
+        // VXPG faithful port (B+): per-voxel representative VPL (pos + octa normal, Texture3D)
+        // and per-pixel VPL hit position (screen, Texture2D), both written by light injection.
+        constexpr int VOXEL_REPRESENTATIVE_DESCRIPTOR_INDEX = SUPERPIXEL_CENTER_DESCRIPTOR_INDEX + 1; // 525
+        constexpr int VPL_POSITION_DESCRIPTOR_INDEX = VOXEL_REPRESENTATIVE_DESCRIPTOR_INDEX + 1; // 526
         constexpr int STATIC_SAMPLERS_COUNT = 6;
         // Max voxels in the compacted guiding distribution (matches SIByL VXGuider_MAX_CAPACITY)
         constexpr int VOXEL_GUIDING_CAPACITY = 131072;
