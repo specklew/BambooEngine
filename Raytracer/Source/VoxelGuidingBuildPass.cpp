@@ -21,6 +21,7 @@ void VoxelGuidingBuildPass::Initialize(
     m_voxelPass   = std::move(voxelPass);
 
     CreateBuffers();
+    CreateDescriptorHeap();
     CreateRootSignature();
     CreatePSOs();
 
@@ -31,47 +32,93 @@ void VoxelGuidingBuildPass::CreateBuffers()
 {
     constexpr uint32_t capacity = Constants::Graphics::VOXEL_GUIDING_CAPACITY;
 
-    m_counters   = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, 2,        L"VoxelGuiding Counters");
-    m_compactIds = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, capacity, L"VoxelGuiding CompactIds");
-    m_weights    = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Weights");
-    m_cdf        = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Cdf");
+    m_counters     = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, 2,        L"VoxelGuiding Counters");
+    m_compactIds   = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, capacity, L"VoxelGuiding CompactIds");
+    m_weights      = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Weights");
+    m_cdf          = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Cdf");
+    m_representVpl = std::make_unique<RWStructuredBuffer<DirectX::XMFLOAT4>>(m_device, capacity, L"VoxelGuiding RepresentVPL");
+    m_premulIrradiance = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity, L"VoxelGuiding PremulIrradiance");
 
-    CreateInverseIndexBuffer();
+    CreateGridSizedBuffers();
 }
 
-void VoxelGuidingBuildPass::CreateInverseIndexBuffer()
+void VoxelGuidingBuildPass::CreateGridSizedBuffers()
 {
-    // Grid-sized (one int per cell), not capacity-sized. Bound as a ROOT UAV
-    // (no bounds checking), so it MUST track the grid dim exactly — undersized
-    // means CompactVoxels writes past the end and corrupts GPU memory.
+    // Grid-sized (one element per cell), not capacity-sized. Bound as ROOT
+    // UAVs (no bounds checking), so they MUST track the grid dim exactly —
+    // undersized means the shaders write past the end and corrupt GPU memory.
     const uint32_t gridDim = m_voxelPass->GetGridDim();
     const uint32_t cellCount = gridDim * gridDim * gridDim;
     m_inverseIndex = std::make_unique<RWStructuredBuffer<int32_t>>(m_device, cellCount, L"VoxelGuiding InverseIndex");
+    m_liveBoundMin = std::make_unique<RWStructuredBuffer<DirectX::XMUINT4>>(m_device, cellCount, L"VoxelGuiding LiveBoundMin");
+    m_liveBoundMax = std::make_unique<RWStructuredBuffer<DirectX::XMUINT4>>(m_device, cellCount, L"VoxelGuiding LiveBoundMax");
 }
 
 void VoxelGuidingBuildPass::OnVoxelGridResize()
 {
     if (!m_initialized)
         return;
-    CreateInverseIndexBuffer();
+    CreateGridSizedBuffers();
+    // Force a descriptor rebind: the voxel textures were recreated too.
+    m_boundIrradiance = nullptr;
+    m_boundVplCount = nullptr;
+    m_boundRepresentative = nullptr;
+}
+
+void VoxelGuidingBuildPass::CreateDescriptorHeap()
+{
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+    heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    heapDesc.NumDescriptors = 3; // irradiance + vpl count + representative VPL
+    heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    ThrowIfFailed(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_descHeap)));
+    m_descHeap->SetName(L"VoxelGuidingBuild Heap");
+}
+
+void VoxelGuidingBuildPass::RebindDescriptorsIfChanged(ID3D12Resource* representativeTex)
+{
+    ID3D12Resource* irradiance = m_voxelPass->GetIrradianceTexture().Get();
+    ID3D12Resource* vplCount   = m_voxelPass->GetVplCountTexture().Get();
+    if (irradiance == m_boundIrradiance && vplCount == m_boundVplCount &&
+        representativeTex == m_boundRepresentative)
+        return;
+
+    UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    CD3DX12_CPU_DESCRIPTOR_HANDLE handle(m_descHeap->GetCPUDescriptorHandleForHeapStart());
+
+    m_voxelPass->WriteIrradianceUavTo(handle);
+    handle.Offset(1, inc);
+    m_voxelPass->WriteVplCountUavTo(handle);
+    handle.Offset(1, inc);
+
+    if (representativeTex)
+    {
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+        uavDesc.Format          = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        uavDesc.ViewDimension   = D3D12_UAV_DIMENSION_TEXTURE3D;
+        uavDesc.Texture3D.WSize = m_voxelPass->GetGridDim();
+        m_device->CreateUnorderedAccessView(representativeTex, nullptr, &uavDesc, handle);
+    }
+
+    m_boundIrradiance     = irradiance;
+    m_boundVplCount       = vplCount;
+    m_boundRepresentative = representativeTex;
 }
 
 void VoxelGuidingBuildPass::CreateRootSignature()
 {
-    // Table: u0 = irradiance, u1 = vpl count (slots 1..2 of the voxelization
-    // pass private heap). Root UAVs: u2 counters, u3 compactIds, u4 weights,
-    // u5 cdf, u6 inverse index. Root constants b0: gridDim.
+    // Table: u0 irradiance, u1 vpl count, u2 representative VPL (private heap).
+    // Root UAVs: u3 counters, u4 compactIds, u5 weights, u6 cdf, u7 inverse
+    // index, u8/u9 live bounds, u10 representVPL, u11 premul irradiance,
+    // u12/u13 baked bounds. Root constants b0: gridDim.
     CD3DX12_DESCRIPTOR_RANGE texRange;
-    texRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0);
+    texRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 3, 0);
 
-    CD3DX12_ROOT_PARAMETER params[7];
+    CD3DX12_ROOT_PARAMETER params[13];
     params[0].InitAsConstants(4, 0);
     params[1].InitAsDescriptorTable(1, &texRange);
-    params[2].InitAsUnorderedAccessView(2);
-    params[3].InitAsUnorderedAccessView(3);
-    params[4].InitAsUnorderedAccessView(4);
-    params[5].InitAsUnorderedAccessView(5);
-    params[6].InitAsUnorderedAccessView(6);
+    for (uint32_t i = 0; i < 11; ++i)
+        params[2 + i].InitAsUnorderedAccessView(3 + i);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
@@ -99,53 +146,60 @@ void VoxelGuidingBuildPass::CreatePSOs()
     };
 
     createCsPso("resources/shaders/voxelGuidingBuild.clear.shader",   L"VoxelGuiding Clear PSO",   m_clearPso);
+    createCsPso("resources/shaders/voxelGuidingBuild.reload.shader",  L"VoxelGuiding Reload PSO",  m_reloadPso);
     createCsPso("resources/shaders/voxelGuidingBuild.compact.shader", L"VoxelGuiding Compact PSO", m_compactPso);
     createCsPso("resources/shaders/voxelGuidingBuild.cdf.shader",     L"VoxelGuiding Cdf PSO",     m_cdfPso);
 }
 
-void VoxelGuidingBuildPass::Run()
+void VoxelGuidingBuildPass::Run(ID3D12Resource* representativeTex)
 {
     if (!m_initialized || !m_voxelPass)
         return;
 
-    auto heap = m_voxelPass->GetDescriptorHeap();
-    if (!heap)
-        return;
+    RebindDescriptorsIfChanged(representativeTex);
 
     const uint32_t gridDim = m_voxelPass->GetGridDim();
 
-    // GPU handle to slot 1 (irradiance) of the voxelization pass heap; the
-    // 2-descriptor table covers irradiance + vpl count.
-    UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    D3D12_GPU_DESCRIPTOR_HANDLE texTable = heap->GetGPUDescriptorHandleForHeapStart();
-    texTable.ptr += inc;
-
-    ID3D12DescriptorHeap* heaps[] = { heap.Get() };
+    ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetComputeRootSignature(m_rootSig.Get());
 
     uint32_t constants[4] = { gridDim, 0, 0, 0 };
     m_commandList->SetComputeRoot32BitConstants(0, 4, constants, 0);
-    m_commandList->SetComputeRootDescriptorTable(1, texTable);
-    m_commandList->SetComputeRootUnorderedAccessView(2, m_counters->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(3, m_compactIds->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(4, m_weights->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(5, m_cdf->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(6, m_inverseIndex->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootDescriptorTable(1, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_commandList->SetComputeRootUnorderedAccessView(2,  m_counters->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(3,  m_compactIds->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(4,  m_weights->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(5,  m_cdf->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(6,  m_inverseIndex->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(7,  m_liveBoundMin->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(8,  m_liveBoundMax->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(9,  m_representVpl->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(10, m_premulIrradiance->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(11, m_voxelPass->GetBakedBoundMinBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(12, m_voxelPass->GetBakedBoundMaxBuffer()->GetGPUVirtualAddress());
 
     auto* cmd = m_commandList.Get();
+    const uint32_t groups = (gridDim + 7) / 8;
 
     m_commandList->SetPipelineState(m_clearPso.Get());
     m_commandList->Dispatch(1, 1, 1);
     m_counters->UavBarrier(cmd);
 
+    // Reload baked bounds for lit voxels before compaction reads them.
+    m_commandList->SetPipelineState(m_reloadPso.Get());
+    m_commandList->Dispatch(groups, groups, groups);
+    m_liveBoundMin->UavBarrier(cmd);
+    m_liveBoundMax->UavBarrier(cmd);
+
     m_commandList->SetPipelineState(m_compactPso.Get());
-    const uint32_t groups = (gridDim + 7) / 8;
     m_commandList->Dispatch(groups, groups, groups);
     m_counters->UavBarrier(cmd);
     m_compactIds->UavBarrier(cmd);
     m_weights->UavBarrier(cmd);
     m_inverseIndex->UavBarrier(cmd);
+    m_representVpl->UavBarrier(cmd);
+    m_premulIrradiance->UavBarrier(cmd);
 
     m_commandList->SetPipelineState(m_cdfPso.Get());
     m_commandList->Dispatch(1, 1, 1);

@@ -84,6 +84,8 @@ static AutoCVarFloat g_lift("renderer.postprocess.lift", "Post-ACES shadow lift"
 static AutoCVarInt   g_voxelGridDim("voxel.gridDim", "Voxel grid resolution (one axis)", 64, CVarFlags::EditDrag, 32, 256);
 static AutoCVarFloat g_voxelAabbPad("voxel.aabbPadCells", "Voxel grid padding in cells (unused V1)", 0.5f, CVarFlags::EditDrag, 0.0f, 4.0f);
 static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accumulation: 1 = average (add + count), 0 = max", 1, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_voxelBakeUseCompact("voxel.bake.useCompact", "Bake tight per-voxel triangle AABBs instead of full cubes (SIByL default: off)", 0, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_voxelBakeClipping("voxel.bake.clipping", "Clip triangles against the voxel cube before the tight AABB (SIByL default: off)", 0, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence weight: screen-xy vs world-position", 0.6f, CVarFlags::EditDrag, 0.0f, 4.0f);
 static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer", "SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
@@ -1334,7 +1336,8 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	if (stage == VxpgStage::None || !m_voxelizationPass || !m_scene)
 		return;
 
-	// Stage 1: voxelize (always, since stage >= Voxelize here).
+	// Stage 1: geometry bake (rebakes only when invalidated) + per-frame
+	// injection-accumulator clear.
 	m_voxelizationPass->SetRuntimeParams(
 		g_voxelInjectUseAvg.Get() != 0,
 		g_voxelHeatScale.Get());
@@ -1348,13 +1351,15 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	if (requestedGridDim != m_voxelizationPass->GetGridDim())
 		FlushCommandQueue();
 
-	m_voxelizationPass->RunFrame(*m_scene, requestedGridDim);
+	m_voxelizationPass->RunFrame(*m_scene, requestedGridDim,
+		g_voxelBakeUseCompact.Get() != 0, g_voxelBakeClipping.Get() != 0);
 	if (m_voxelizationPass->DidResize())
 	{
 		WriteVoxelUavsToGlobalHeap();
-		// Grid-sized dependents must track the new dim: the inverse index is a
-		// ROOT UAV (unbounded — undersized would mean GPU memory corruption),
-		// the representative texture would silently drop writes.
+		// Grid-sized dependents must track the new dim: the inverse index and
+		// live bounds are ROOT UAVs (unbounded — undersized would mean GPU
+		// memory corruption), the representative texture would silently drop
+		// writes.
 		if (m_voxelGuidingBuildPass)
 			m_voxelGuidingBuildPass->OnVoxelGridResize();
 		if (m_lightInjectionPass)
@@ -1365,9 +1370,11 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	if (stage >= VxpgStage::Inject && m_lightInjectionPass)
 		m_lightInjectionPass->Render();
 
-	// Stage 3: build the guiding distribution from the injected voxels.
+	// Stage 3: build the guiding distribution from the injected voxels
+	// (reload baked bounds -> compact -> CDF).
 	if (stage >= VxpgStage::GuidingBuild && m_voxelGuidingBuildPass)
-		m_voxelGuidingBuildPass->Run();
+		m_voxelGuidingBuildPass->Run(
+			m_lightInjectionPass ? m_lightInjectionPass->GetVoxelRepresentativeTexture().Get() : nullptr);
 
 	// Stage 4: cluster voxels into supervoxels.
 	if (stage >= VxpgStage::Supervoxel && m_supervoxelClusterPass)

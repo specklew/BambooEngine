@@ -87,7 +87,17 @@ void VoxelizationPass::CreateResources()
         m_vplCountTex->SetName(L"VoxelVplCount");
     }
 
+    // Baked per-voxel bounds: 4 uints per cell, quantized to the voxel cube.
+    {
+        const uint32_t cellCount = m_gridDim * m_gridDim * m_gridDim;
+        m_bakedBoundMin = std::make_unique<RWStructuredBuffer<uint32_t>>(
+            m_device, static_cast<size_t>(cellCount) * 4, L"VoxelBakedBoundMin");
+        m_bakedBoundMax = std::make_unique<RWStructuredBuffer<uint32_t>>(
+            m_device, static_cast<size_t>(cellCount) * 4, L"VoxelBakedBoundMax");
+    }
+
     // Grid constants CB (upload heap, persistently mapped)
+    if (!m_gridConstantsCB)
     {
         auto uploadProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
         auto cbDesc      = CD3DX12_RESOURCE_DESC::Buffer(kCbAlignedSize);
@@ -121,10 +131,11 @@ void VoxelizationPass::CreateDescriptorHeap()
 
 void VoxelizationPass::CreateRootSignatures()
 {
-    // Clear root sig: root constants b0 (gGridDim), descriptor table of 3 UAVs (u0..u2)
+    // Frame-clear root sig: root constants b0 (gGridDim), table of 2 UAVs
+    // (u0 = irradiance, u1 = vpl count — heap slots 1..2).
     {
         CD3DX12_DESCRIPTOR_RANGE uavRange;
-        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 3, 0);
+        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0);
 
         CD3DX12_ROOT_PARAMETER params[2];
         params[0].InitAsConstants(4, 0); // 4 uints at b0
@@ -137,19 +148,44 @@ void VoxelizationPass::CreateRootSignatures()
         ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
         ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
             IID_PPV_ARGS(&m_clearRootSig)));
-        m_clearRootSig->SetName(L"VoxelClear RootSig");
+        m_clearRootSig->SetName(L"VoxelFrameClear RootSig");
     }
 
-    // Voxelize root sig: CBV b0 (grid), CBV b1 (model), root constant b2 (axis), descriptor table u0
+    // Bake-clear root sig: constants b0, table u0 (occupancy, heap slot 0),
+    // root UAVs u1/u2 (baked bounds).
     {
         CD3DX12_DESCRIPTOR_RANGE uavRange;
         uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
 
         CD3DX12_ROOT_PARAMETER params[4];
+        params[0].InitAsConstants(4, 0);
+        params[1].InitAsDescriptorTable(1, &uavRange);
+        params[2].InitAsUnorderedAccessView(1);
+        params[3].InitAsUnorderedAccessView(2);
+
+        CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
+            D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+        ComPtr<ID3DBlob> sig, err;
+        ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
+        ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
+            IID_PPV_ARGS(&m_bakeClearRootSig)));
+        m_bakeClearRootSig->SetName(L"VoxelBakeClear RootSig");
+    }
+
+    // Bake root sig: CBV b0 (grid), CBV b1 (model), root constants b2
+    // (axis + bound flags), table u0 (occupancy), root UAVs u1/u2 (baked bounds).
+    {
+        CD3DX12_DESCRIPTOR_RANGE uavRange;
+        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+
+        CD3DX12_ROOT_PARAMETER params[6];
         params[0].InitAsConstantBufferView(0);            // b0 grid
         params[1].InitAsConstantBufferView(1);            // b1 model
-        params[2].InitAsConstants(4, 2);                  // b2 axis (4 uints)
+        params[2].InitAsConstants(4, 2);                  // b2 axis + flags
         params[3].InitAsDescriptorTable(1, &uavRange);    // u0 occupancy
+        params[4].InitAsUnorderedAccessView(1);           // u1 baked bound min
+        params[5].InitAsUnorderedAccessView(2);           // u2 baked bound max
 
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
@@ -159,8 +195,8 @@ void VoxelizationPass::CreateRootSignatures()
         if (err) OutputDebugStringA(static_cast<char*>(err->GetBufferPointer()));
         ThrowIfFailed(hr);
         ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
-            IID_PPV_ARGS(&m_voxelizeRootSig)));
-        m_voxelizeRootSig->SetName(L"Voxelize RootSig");
+            IID_PPV_ARGS(&m_bakeRootSig)));
+        m_bakeRootSig->SetName(L"VoxelBake RootSig");
     }
 }
 
@@ -168,19 +204,25 @@ void VoxelizationPass::CreatePSOs()
 {
     auto& rm = ResourceManager::Get();
 
-    // Clear PSO
+    auto createCsPso = [&](const char* assetPath, ID3D12RootSignature* rootSig,
+                           const wchar_t* name, ComPtr<ID3D12PipelineState>& out)
     {
-        auto csh = rm.GetOrLoadShader(AssetId("resources/shaders/clearVoxels.cs.shader"));
+        auto csh = rm.GetOrLoadShader(AssetId(assetPath));
         auto csBlob = rm.shaders.GetResource(csh).bytecode;
 
         D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = m_clearRootSig.Get();
+        desc.pRootSignature = rootSig;
         desc.CS = CD3DX12_SHADER_BYTECODE(csBlob->GetBufferPointer(), csBlob->GetBufferSize());
-        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&m_clearPso)));
-        m_clearPso->SetName(L"VoxelClear PSO");
-    }
+        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&out)));
+        out->SetName(name);
+    };
 
-    // Voxelize PSO (graphics, UAV-only)
+    createCsPso("resources/shaders/clearVoxels.cs.shader", m_clearRootSig.Get(),
+        L"VoxelFrameClear PSO", m_clearPso);
+    createCsPso("resources/shaders/bakeClear.cs.shader", m_bakeClearRootSig.Get(),
+        L"VoxelBakeClear PSO", m_bakeClearPso);
+
+    // Bake PSO (graphics, UAV-only)
     {
         auto vsh = rm.GetOrLoadShader(AssetId("resources/shaders/voxelize.vs.shader"));
         auto psh = rm.GetOrLoadShader(AssetId("resources/shaders/voxelize.ps.shader"));
@@ -188,7 +230,7 @@ void VoxelizationPass::CreatePSOs()
         auto psBlob = rm.shaders.GetResource(psh).bytecode;
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = m_voxelizeRootSig.Get();
+        desc.pRootSignature = m_bakeRootSig.Get();
         desc.VS = { static_cast<BYTE*>(vsBlob->GetBufferPointer()), vsBlob->GetBufferSize() };
         desc.PS = { static_cast<BYTE*>(psBlob->GetBufferPointer()), psBlob->GetBufferSize() };
         desc.InputLayout = { inputLayout, _countof(inputLayout) };
@@ -211,8 +253,8 @@ void VoxelizationPass::CreatePSOs()
         desc.NumRenderTargets        = 0;
         desc.SampleDesc.Count        = 1;
 
-        ThrowIfFailed(m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_voxelizePso)));
-        m_voxelizePso->SetName(L"Voxelize PSO");
+        ThrowIfFailed(m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_bakePso)));
+        m_bakePso->SetName(L"VoxelBake PSO");
     }
 }
 
@@ -260,10 +302,13 @@ void VoxelizationPass::RecreateForNewDim(uint32_t newDim)
     m_irradianceTex.Reset();
     m_vplCountTex.Reset();
     m_descHeap.Reset();
+    m_bakedBoundMin.reset();
+    m_bakedBoundMax.reset();
 
     CreateResources();
     CreateDescriptorHeap();
     m_didResize = true;
+    m_bakeValid = false;
 }
 
 void VoxelizationPass::OnSceneLoaded(const Scene& scene)
@@ -301,6 +346,7 @@ void VoxelizationPass::OnSceneLoaded(const Scene& scene)
 
     WriteGridConstantsCB();
     m_haveScene = true;
+    m_bakeValid = false;
 
     spdlog::debug("VoxelizationPass: gridMin=({:.3f},{:.3f},{:.3f}) gridMax=({:.3f},{:.3f},{:.3f}) voxelSize={:.4f}",
         m_gridConstants.gridMin.x, m_gridConstants.gridMin.y, m_gridConstants.gridMin.z,
@@ -314,7 +360,7 @@ void VoxelizationPass::WriteGridConstantsCB()
     std::memcpy(m_gridConstantsCBMapped, &m_gridConstants, sizeof(VoxelGridConstants));
 }
 
-void VoxelizationPass::DispatchClear()
+void VoxelizationPass::DispatchFrameClear()
 {
     ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
@@ -323,24 +369,51 @@ void VoxelizationPass::DispatchClear()
 
     uint32_t clearParams[4] = { m_gridDim, 0, 0, 0 };
     m_commandList->SetComputeRoot32BitConstants(0, 4, clearParams, 0);
+
+    // Table starts at heap slot 1 (irradiance); covers irradiance + vpl count.
+    UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_GPU_DESCRIPTOR_HANDLE table = m_descHeap->GetGPUDescriptorHandleForHeapStart();
+    table.ptr += inc;
+    m_commandList->SetComputeRootDescriptorTable(1, table);
+
+    const uint32_t groups = (m_gridDim + 7) / 8;
+    m_commandList->Dispatch(groups, groups, groups);
+
+    D3D12_RESOURCE_BARRIER barriers[2];
+    barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_irradianceTex.Get());
+    barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_vplCountTex.Get());
+    m_commandList->ResourceBarrier(_countof(barriers), barriers);
+}
+
+void VoxelizationPass::DispatchBakeClear()
+{
+    ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
+    m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
+    m_commandList->SetComputeRootSignature(m_bakeClearRootSig.Get());
+    m_commandList->SetPipelineState(m_bakeClearPso.Get());
+
+    uint32_t clearParams[4] = { m_gridDim, 0, 0, 0 };
+    m_commandList->SetComputeRoot32BitConstants(0, 4, clearParams, 0);
     m_commandList->SetComputeRootDescriptorTable(1, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_commandList->SetComputeRootUnorderedAccessView(2, m_bakedBoundMin->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(3, m_bakedBoundMax->GetGPUVirtualAddress());
 
     const uint32_t groups = (m_gridDim + 7) / 8;
     m_commandList->Dispatch(groups, groups, groups);
 
     D3D12_RESOURCE_BARRIER barriers[3];
     barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_occupancyTex.Get());
-    barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_irradianceTex.Get());
-    barriers[2] = CD3DX12_RESOURCE_BARRIER::UAV(m_vplCountTex.Get());
+    barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_bakedBoundMin->GetUnderlyingResource().Get());
+    barriers[2] = CD3DX12_RESOURCE_BARRIER::UAV(m_bakedBoundMax->GetUnderlyingResource().Get());
     m_commandList->ResourceBarrier(_countof(barriers), barriers);
 }
 
-void VoxelizationPass::DispatchVoxelize(const Scene& scene)
+void VoxelizationPass::DispatchBake(const Scene& scene)
 {
     ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
-    m_commandList->SetGraphicsRootSignature(m_voxelizeRootSig.Get());
-    m_commandList->SetPipelineState(m_voxelizePso.Get());
+    m_commandList->SetGraphicsRootSignature(m_bakeRootSig.Get());
+    m_commandList->SetPipelineState(m_bakePso.Get());
 
     D3D12_VIEWPORT viewport = { 0.0f, 0.0f, static_cast<float>(m_gridDim), static_cast<float>(m_gridDim), 0.0f, 1.0f };
     D3D12_RECT     scissor  = { 0, 0, static_cast<LONG>(m_gridDim), static_cast<LONG>(m_gridDim) };
@@ -350,11 +423,18 @@ void VoxelizationPass::DispatchVoxelize(const Scene& scene)
 
     m_commandList->SetGraphicsRootConstantBufferView(0, m_gridConstantsCB->GetGPUVirtualAddress());
     m_commandList->SetGraphicsRootDescriptorTable(3, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_commandList->SetGraphicsRootUnorderedAccessView(4, m_bakedBoundMin->GetGPUVirtualAddress());
+    m_commandList->SetGraphicsRootUnorderedAccessView(5, m_bakedBoundMax->GetGPUVirtualAddress());
 
     for (uint32_t axis = 0; axis < 3; ++axis)
     {
-        uint32_t axisParams[4] = { axis, 0, 0, 0 };
-        m_commandList->SetGraphicsRoot32BitConstants(2, 4, axisParams, 0);
+        uint32_t bakeParams[4] = {
+            axis,
+            m_bakedUseCompact ? 1u : 0u,
+            m_bakedClipping ? 1u : 0u,
+            0,
+        };
+        m_commandList->SetGraphicsRoot32BitConstants(2, 4, bakeParams, 0);
 
         for (const auto& go : scene.GetGameObjects())
         {
@@ -382,11 +462,14 @@ void VoxelizationPass::DispatchVoxelize(const Scene& scene)
         }
     }
 
-    D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::UAV(m_occupancyTex.Get());
-    m_commandList->ResourceBarrier(1, &barrier);
+    D3D12_RESOURCE_BARRIER barriers[3];
+    barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_occupancyTex.Get());
+    barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_bakedBoundMin->GetUnderlyingResource().Get());
+    barriers[2] = CD3DX12_RESOURCE_BARRIER::UAV(m_bakedBoundMax->GetUnderlyingResource().Get());
+    m_commandList->ResourceBarrier(_countof(barriers), barriers);
 }
 
-void VoxelizationPass::RunFrame(const Scene& scene, uint32_t requestedGridDim)
+void VoxelizationPass::RunFrame(const Scene& scene, uint32_t requestedGridDim, bool bakeUseCompact, bool bakeClipping)
 {
     if (!m_initialized || !m_haveScene) return;
 
@@ -397,6 +480,21 @@ void VoxelizationPass::RunFrame(const Scene& scene, uint32_t requestedGridDim)
         OnSceneLoaded(scene);
     }
 
-    DispatchClear();
-    DispatchVoxelize(scene);
+    if (bakeUseCompact != m_bakedUseCompact || bakeClipping != m_bakedClipping)
+    {
+        m_bakedUseCompact = bakeUseCompact;
+        m_bakedClipping   = bakeClipping;
+        m_bakeValid       = false;
+    }
+
+    if (!m_bakeValid)
+    {
+        spdlog::info("VoxelizationPass: baking geometry (gridDim={}, useCompact={}, clipping={})",
+            m_gridDim, m_bakedUseCompact, m_bakedClipping);
+        DispatchBakeClear();
+        DispatchBake(scene);
+        m_bakeValid = true;
+    }
+
+    DispatchFrameClear();
 }

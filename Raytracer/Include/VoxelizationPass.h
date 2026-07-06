@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Resources/RWStructuredBuffer.h"
+
 class Scene;
 
 struct VoxelGridConstants
@@ -14,6 +16,10 @@ struct VoxelGridConstants
     uint32_t          _pad0;
 };
 
+// Geometry bake + per-frame injection-accumulator clear (ADR 0004). The scene
+// is conservative-rasterized into occupancy + quantized per-voxel bounds ONCE
+// per bake; a bake is invalidated by scene load, grid resize, or a bound-flag
+// change. Per frame only the irradiance/VPL-count clear runs.
 class VoxelizationPass
 {
 public:
@@ -23,7 +29,10 @@ public:
         Microsoft::WRL::ComPtr<ID3D12RootSignature>        rasterRootSignature);
 
     void OnSceneLoaded(const Scene& scene);
-    void RunFrame(const Scene& scene, uint32_t requestedGridDim);
+
+    // Rebakes if invalidated (grid resize / bound flags / scene load), then
+    // clears the per-frame injection accumulators.
+    void RunFrame(const Scene& scene, uint32_t requestedGridDim, bool bakeUseCompact, bool bakeClipping);
 
     bool DidResize() const { return m_didResize; }
 
@@ -38,6 +47,10 @@ public:
     uint32_t GetGridDim() const { return m_gridDim; }
     const VoxelGridConstants&              GetGridConstants() const { return m_gridConstants; }
 
+    // Baked per-voxel bounds, 4 uints per cell, quantized to the voxel cube.
+    RWStructuredBuffer<uint32_t>* GetBakedBoundMinBuffer() const { return m_bakedBoundMin.get(); }
+    RWStructuredBuffer<uint32_t>* GetBakedBoundMaxBuffer() const { return m_bakedBoundMax.get(); }
+
     void WriteOccupancyUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
     void WriteIrradianceUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
     void WriteVplCountUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
@@ -49,8 +62,9 @@ private:
     void CreateDescriptorHeap();
     void WriteGridConstantsCB();
     void WriteUintTex3DUav(ID3D12Resource* resource, D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
-    void DispatchClear();
-    void DispatchVoxelize(const Scene& scene);
+    void DispatchFrameClear();
+    void DispatchBakeClear();
+    void DispatchBake(const Scene& scene);
     void RecreateForNewDim(uint32_t newDim);
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
@@ -64,10 +78,15 @@ private:
     VoxelGridConstants                     m_gridConstants{};
     void*                                  m_gridConstantsCBMapped = nullptr;
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_clearRootSig;
+    std::unique_ptr<RWStructuredBuffer<uint32_t>> m_bakedBoundMin;
+    std::unique_ptr<RWStructuredBuffer<uint32_t>> m_bakedBoundMax;
+
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_clearRootSig;     // per-frame accumulator clear
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_voxelizeRootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_voxelizePso;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bakeClearRootSig;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_bakeClearPso;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bakeRootSig;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_bakePso;
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descHeap; // [0]=occupancy UAV [1]=irradiance UAV [2]=vpl count UAV
 
@@ -75,6 +94,9 @@ private:
     bool     m_initialized = false;
     bool     m_haveScene   = false;
     bool     m_didResize   = false;
+    bool     m_bakeValid   = false;
+    bool     m_bakedUseCompact = false;
+    bool     m_bakedClipping   = false;
 
     DirectX::XMFLOAT3 m_cachedAabbMin{};
     DirectX::XMFLOAT3 m_cachedAabbMax{};

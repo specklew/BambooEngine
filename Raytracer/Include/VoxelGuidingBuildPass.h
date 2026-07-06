@@ -4,9 +4,11 @@
 
 class VoxelizationPass;
 
-// VXPG guiding distribution build (compute): compacts nonzero-irradiance
-// voxels into a flat list and builds a prefix-sum CDF over their weights.
-// Runs each frame after light injection; consumed by GuidedPathTracingPass.
+// VXPG guiding distribution build (compute): reloads baked per-voxel bounds
+// for lit voxels, compacts nonzero-irradiance voxels into a flat list (with
+// compact-indexed representative VPLs and area-premultiplied irradiance), and
+// builds a prefix-sum CDF over their weights. Runs each frame after light
+// injection; consumed by GuidedPathTracingPass and the passes downstream.
 class VoxelGuidingBuildPass
 {
 public:
@@ -15,10 +17,12 @@ public:
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
         std::shared_ptr<VoxelizationPass>                  voxelPass);
 
-    void Run();
+    // representativeTex = injection's per-voxel representative VPL Texture3D;
+    // re-bound into the private heap when it changes (recreated on resize).
+    void Run(ID3D12Resource* representativeTex);
 
-    // Recreates the grid-sized inverse index after a voxel-grid resize. Caller
-    // must have flushed the GPU first (the old buffer may be in flight).
+    // Recreates the grid-sized buffers after a voxel-grid resize. Caller must
+    // have flushed the GPU first (the old buffers may be in flight).
     void OnVoxelGridResize();
 
     // [0] = compacted voxel count, [1] = asuint(total weight)
@@ -26,10 +30,16 @@ public:
     RWStructuredBuffer<uint32_t>* GetCompactIdsBuffer() const { return m_compactIds.get(); }
     RWStructuredBuffer<float>*    GetCdfBuffer() const { return m_cdf.get(); }
     RWStructuredBuffer<int32_t>*  GetInverseIndexBuffer() const { return m_inverseIndex.get(); }
+    RWStructuredBuffer<DirectX::XMFLOAT4>* GetRepresentVplBuffer() const { return m_representVpl.get(); }
+    RWStructuredBuffer<float>*    GetPremulIrradianceBuffer() const { return m_premulIrradiance.get(); }
+    RWStructuredBuffer<DirectX::XMUINT4>* GetLiveBoundMinBuffer() const { return m_liveBoundMin.get(); }
+    RWStructuredBuffer<DirectX::XMUINT4>* GetLiveBoundMaxBuffer() const { return m_liveBoundMax.get(); }
 
 private:
     void CreateBuffers();
-    void CreateInverseIndexBuffer();
+    void CreateGridSizedBuffers();
+    void CreateDescriptorHeap();
+    void RebindDescriptorsIfChanged(ID3D12Resource* representativeTex);
     void CreateRootSignature();
     void CreatePSOs();
 
@@ -41,10 +51,21 @@ private:
     std::unique_ptr<RWStructuredBuffer<uint32_t>> m_compactIds;
     std::unique_ptr<RWStructuredBuffer<float>>    m_weights;
     std::unique_ptr<RWStructuredBuffer<float>>    m_cdf;
-    std::unique_ptr<RWStructuredBuffer<int32_t>>  m_inverseIndex;
+    std::unique_ptr<RWStructuredBuffer<int32_t>>  m_inverseIndex;      // grid-sized
+    std::unique_ptr<RWStructuredBuffer<DirectX::XMUINT4>> m_liveBoundMin; // grid-sized
+    std::unique_ptr<RWStructuredBuffer<DirectX::XMUINT4>> m_liveBoundMax; // grid-sized
+    std::unique_ptr<RWStructuredBuffer<DirectX::XMFLOAT4>> m_representVpl;
+    std::unique_ptr<RWStructuredBuffer<float>>    m_premulIrradiance;
+
+    // Private heap: [0]=irradiance [1]=vpl count [2]=representative VPL tex.
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descHeap;
+    ID3D12Resource* m_boundIrradiance     = nullptr; // raw: change detection only
+    ID3D12Resource* m_boundVplCount       = nullptr;
+    ID3D12Resource* m_boundRepresentative = nullptr;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_reloadPso;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_compactPso;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_cdfPso;
 

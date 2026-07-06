@@ -340,6 +340,8 @@
     <None Include="Resources\Shaders\utils.hlsl" />
     <None Include="Resources\Shaders\voxelGrid.hlsli" />
     <None Include="Resources\Shaders\voxelize.hlsl" />
+    <None Include="Resources\Shaders\bakeClear.hlsl" />
+    <None Include="Resources\Shaders\TriangleClip.hlsl" />
     <None Include="Resources\Shaders\clearVoxels.hlsl" />
     <None Include="Resources\Shaders\lightInjection.hlsl" />
     <None Include="Resources\Shaders\guidedPathTracing.hlsl" />
@@ -470,7 +472,9 @@
     <Content Include="Resources\Shaders\guidedPathTracing.rg.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.ms.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.ah.shader" />
+    <Content Include="Resources\Shaders\bakeClear.cs.shader" />
     <Content Include="Resources\Shaders\voxelGuidingBuild.clear.shader" />
+    <Content Include="Resources\Shaders\voxelGuidingBuild.reload.shader" />
     <Content Include="Resources\Shaders\voxelGuidingBuild.compact.shader" />
     <Content Include="Resources\Shaders\voxelGuidingBuild.cdf.shader" />
     <Content Include="Resources\Shaders\supervoxelCluster.clear.shader" />
