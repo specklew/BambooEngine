@@ -24,6 +24,7 @@
 #include "ScreenshotManager.h"
 #include "VoxelizationPass.h"
 #include "LightInjectionPass.h"
+#include "VBufferPass.h"
 #include "VoxelGuidingBuildPass.h"
 #include "SupervoxelClusterPass.h"
 #include "SuperpixelBuildPass.h"
@@ -86,6 +87,7 @@ static AutoCVarFloat g_voxelAabbPad("voxel.aabbPadCells", "Voxel grid padding in
 static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accumulation: 1 = average (add + count), 0 = max", 1, CVarFlags::EditCheckbox);
 static AutoCVarInt   g_voxelBakeUseCompact("voxel.bake.useCompact", "Bake tight per-voxel triangle AABBs instead of full cubes (SIByL default: off)", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt   g_voxelBakeClipping("voxel.bake.clipping", "Clip triangles against the voxel cube before the tight AABB (SIByL default: off)", 0, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_vbufferJitter("vxpg.vbufferJitter", "Sub-pixel jitter for the shared VBuffer primaries (off = SIByL-literal pixel-center, no edge AA)", 1, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence weight: screen-xy vs world-position", 0.6f, CVarFlags::EditDrag, 0.0f, 4.0f);
 static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer", "SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
@@ -178,6 +180,9 @@ void Renderer::Initialize()
 	WriteVoxelUavsToGlobalHeap();
 
 	m_voxelizationPass->OnSceneLoaded(*m_scene);
+
+	m_vbufferPass = std::make_shared<VBufferPass>();
+	m_vbufferPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
 	m_lightInjectionPass = std::make_shared<LightInjectionPass>();
 	m_lightInjectionPass->SetVoxelizationPass(m_voxelizationPass);
@@ -329,6 +334,9 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
+	// Per-pixel jitter is derived in-shader from (pixel, frameIndex); the CB
+	// just carries the on/off switch.
+	m_passConstants->data.vbufferJitterEnabled = (g_vbufferJitter.Get() != 0) ? 1u : 0u;
 	m_passConstants->Map();
 
 	if (m_scene->IsLightDataDirty())
@@ -586,6 +594,8 @@ void Renderer::OnResize()
 	// Recreate the ShadingPoints G-buffer at the new resolution. Without this it
 	// stays at its init size while injection dispatches at the live resolution,
 	// writing mismatched rows -> the G-buffer overlay floats / never aligns.
+	if (m_vbufferPass)
+		m_vbufferPass->OnResize();
 	if (m_lightInjectionPass)
 		m_lightInjectionPass->OnResize();
 
@@ -863,7 +873,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 9; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center, +2 repVPL/vplPosition
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 10; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center, +2 repVPL/vplPosition, +1 vbuffer
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -1235,6 +1245,8 @@ void Renderer::LoadScene(const std::wstring& path)
 	ExecuteCommandsAndReset();
 
 	m_raytracePass->OnSceneChange(m_scene);
+	if (m_vbufferPass)
+		m_vbufferPass->OnSceneChange(m_scene);
 	if (m_lightInjectionPass)
 		m_lightInjectionPass->OnSceneChange(m_scene);
 	m_editorUI->SetScene(m_scene);
@@ -1366,7 +1378,11 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 			m_lightInjectionPass->OnVoxelGridResize();
 	}
 
-	// Stage 2: light injection (also emits the ShadingPoints G-buffer).
+	// Stage 2: shared VBuffer (one jittered primary per pixel, ADR 0004), then
+	// light injection reconstructing its first vertex from it (also emits the
+	// ShadingPoints G-buffer).
+	if (stage >= VxpgStage::Inject && m_vbufferPass)
+		m_vbufferPass->Render();
 	if (stage >= VxpgStage::Inject && m_lightInjectionPass)
 		m_lightInjectionPass->Render();
 
@@ -1501,6 +1517,8 @@ void Renderer::OnShaderReload()
 	spdlog::info("Creating pipeline state for new shaders...");
 	CreatePipelineState();
 	m_raytracePass->OnShaderReload();
+	if (m_vbufferPass)
+		m_vbufferPass->OnShaderReload();
 	if (m_lightInjectionPass)
 		m_lightInjectionPass->OnShaderReload();
 

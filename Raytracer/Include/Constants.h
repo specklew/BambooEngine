@@ -23,6 +23,9 @@ namespace Constants
         // and per-pixel VPL hit position (screen, Texture2D), both written by light injection.
         constexpr int VOXEL_REPRESENTATIVE_DESCRIPTOR_INDEX = SUPERPIXEL_CENTER_DESCRIPTOR_INDEX + 1; // 525
         constexpr int VPL_POSITION_DESCRIPTOR_INDEX = VOXEL_REPRESENTATIVE_DESCRIPTOR_INDEX + 1; // 526
+        // Shared primary-visibility buffer (ADR 0004), written by VBufferPass,
+        // consumed by light injection + the guided integrator.
+        constexpr int VBUFFER_DESCRIPTOR_INDEX = VPL_POSITION_DESCRIPTOR_INDEX + 1; // 527
         constexpr int STATIC_SAMPLERS_COUNT = 6;
         // Max voxels in the compacted guiding distribution (matches SIByL VXGuider_MAX_CAPACITY)
         constexpr int VOXEL_GUIDING_CAPACITY = 131072;

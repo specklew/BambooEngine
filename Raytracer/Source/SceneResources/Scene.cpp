@@ -126,6 +126,11 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
             info.metallicFactor = metallic_factor;
             info.roughnessFactor = roughness_factor;
             info.baseColorFactor = base_color_factor;
+            // Explicit transpose into the DXR ObjectToWorld3x4 layout.
+            const DirectX::XMFLOAT4X4 world = go->GetWorldFloat4X4();
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 4; ++c)
+                    info.objectToWorld.m[r][c] = world.m[c][r];
             instances_info.push_back(info);
         }
     }

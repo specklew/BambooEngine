@@ -29,6 +29,9 @@ struct InstanceInfo
     float metallicFactor;
     float roughnessFactor;
     DirectX::XMFLOAT4 baseColorFactor;
+    // Object-to-world in DXR ObjectToWorld3x4() layout (transpose of the
+    // row-vector world matrix). Lets raygen shaders reconstruct VBuffer hits.
+    DirectX::XMFLOAT3X4 objectToWorld;
 };
 
 class Scene

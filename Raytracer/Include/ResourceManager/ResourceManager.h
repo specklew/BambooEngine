@@ -140,7 +140,7 @@ public:
     static constexpr int NUM_ANIMATIONS = 256;
     static constexpr int NUM_PRIMITIVES = 256;
     static constexpr int NUM_SKELETAL_PRIMITIVES = 256;
-    static constexpr int NUM_SHADERS = 32;
+    static constexpr int NUM_SHADERS = 64;
     static constexpr int NUM_FONTS = 4;
 
 

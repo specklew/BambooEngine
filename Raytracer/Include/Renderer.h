@@ -31,6 +31,7 @@ class Camera;
 struct Primitive;
 class DescriptorHeapAllocator;
 class RaytracePass;
+class VBufferPass;
 class LightInjectionPass;
 class VoxelGuidingBuildPass;
 class SupervoxelClusterPass;
@@ -142,6 +143,7 @@ private:
 	void RunVxpgPipelineUpTo(VxpgStage stage);
 
 	std::shared_ptr<RaytracePass> m_raytracePass;
+	std::shared_ptr<VBufferPass> m_vbufferPass;
 	std::shared_ptr<LightInjectionPass> m_lightInjectionPass;
 	std::shared_ptr<FrameAccumulationPass> m_accumulationPass;
 	std::shared_ptr<PostProcessPass> m_postProcessPass;

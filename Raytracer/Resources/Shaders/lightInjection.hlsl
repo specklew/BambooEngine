@@ -5,6 +5,7 @@
 // from the main path tracing shader.
 #include "raytracing.hlsl"
 #include "Octahedral.hlsl"
+#include "VBuffer.hlsl"
 
 // ---- VXPG light injection resources ----
 
@@ -20,6 +21,10 @@ RWTexture2D<float4> gShadingPoints : register(u3);
 // hit position for cvis assignment. Written at the bounce-1 closest hit.
 RWTexture3D<float4> gVoxelRepresentative : register(u4);
 RWTexture2D<float4> gVplPosition         : register(u5);
+
+// Shared primary-visibility buffer (ADR 0004): the primary hit comes from
+// here; injection no longer traces its own camera rays.
+RWTexture2D<uint4> gVBuffer : register(u6);
 
 // Sentinel for pixels whose primary ray missed: far position, zero-packed
 // normal. Clustering treats these as invalid (normal gate fails).
@@ -59,9 +64,6 @@ struct InjectPayload
 [shader("miss")]
 void InjectMiss(inout InjectPayload payload : SV_RayPayload)
 {
-    // Only the primary ray (bounce 0) drives the ShadingPoints G-buffer.
-    if (payload.bounce == 0)
-        gShadingPoints[DispatchRaysIndex().xy] = SHADINGPOINT_INVALID;
     payload.flags = 0;
 }
 
@@ -120,59 +122,21 @@ void InjectHit(inout InjectPayload payload : SV_RayPayload, in Attributes attr)
 
     payload.hitPosition = hit.position;
 
-    if (payload.bounce == 0)
-    {
-        // Persist the primary shading point for superpixel clustering. Written
-        // here (closest hit) where world position + normal are both available;
-        // valid regardless of whether the VPL bounce below succeeds.
-        gShadingPoints[DispatchRaysIndex().xy] =
-            float4(hit.position, asfloat(UnitVectorToUnorm32Octahedron(N)));
+    // Only the VPL bounce is traced now — the primary hit comes from the
+    // VBuffer and is shaded in raygen. This is the second path vertex:
+    // evaluate direct light here, raygen injects it.
+    payload.result = CalculateDirectLightning(hit, surface);
+    payload.flags = 1;
 
-        // Sample one BSDF direction for the VPL ray (same stochastic
-        // specular/diffuse selection as the path tracer)
-        float3 F = FresnelSchlick(NdotV, surface.F0);
-        float specularProb = (F.r + F.g + F.b) / 3.0;
+    // VXPG B+: stash the representative VPL (pos + normal) for this voxel and
+    // the per-pixel VPL position. N and the launch index are both available
+    // here, so no payload round-trip is needed. Last-writer-wins per voxel.
+    const float packedN = asfloat(UnitVectorToUnorm32Octahedron(N));
+    gVplPosition[DispatchRaysIndex().xy] = float4(hit.position, packedN);
 
-        float2 xi = Random2D(payload.seed);
-        payload.seed = pcg_hash(payload.seed);
-        float pathSelector = frac(xi.x * 7.13 + xi.y * 3.97);
-
-        float3 bounceDir;
-        if (pathSelector < specularProb)
-        {
-            float3 H = ImportanceSampleGGX(xi, N, roughness);
-            bounceDir = reflect(-V, H);
-        }
-        else
-        {
-            bounceDir = CosineSampleHemisphere(xi, N);
-        }
-
-        if (dot(bounceDir, N) <= 0.0)
-        {
-            payload.flags = 0;
-            return;
-        }
-
-        payload.result = bounceDir;
-        payload.flags = 1;
-    }
-    else
-    {
-        // Second path vertex — evaluate direct light here, raygen injects it
-        payload.result = CalculateDirectLightning(hit, surface);
-        payload.flags = 1;
-
-        // VXPG B+: stash the representative VPL (pos + normal) for this voxel and
-        // the per-pixel VPL position. N and the launch index are both available
-        // here, so no payload round-trip is needed. Last-writer-wins per voxel.
-        const float packedN = asfloat(UnitVectorToUnorm32Octahedron(N));
-        gVplPosition[DispatchRaysIndex().xy] = float4(hit.position, packedN);
-
-        int3 vxRep = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
-        if (all(vxRep >= 0) && all(vxRep < int(voxGridDim)))
-            gVoxelRepresentative[vxRep] = float4(hit.position, packedN);
-    }
+    int3 vxRep = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
+    if (all(vxRep >= 0) && all(vxRep < int(voxGridDim)))
+        gVoxelRepresentative[vxRep] = float4(hit.position, packedN);
 }
 
 // ---- Ray generation ----
@@ -188,37 +152,75 @@ void InjectRayGen()
     // a hit, so pixels whose bounce misses stay zero (cvis treats zero as empty).
     gVplPosition[launchIndex] = float4(0, 0, 0, 0);
 
+    // Primary hit from the shared VBuffer (ADR 0004) — reconstruct instead of
+    // tracing. All VBuffer consumers see the exact same hit.
+    VBufferData vb = UnpackVBufferData(gVBuffer[launchIndex]);
+    if (IsVBufferInvalid(vb))
+    {
+        gShadingPoints[launchIndex] = SHADINGPOINT_INVALID;
+        return;
+    }
+
+    InstanceInfo instance = g_instanceInfo[vb.instanceId];
+    GeometryInfo geometry = g_geometryInfo[instance.geometryIndex];
+    HitData hit = GetHitData(vb.primitiveId, geometry.vertexOffset, geometry.indexOffset,
+                             vb.barycentrics, instance.objectToWorld);
+
+    float3 N = SampleWorldSpaceNormal(instance, hit);
+    float3 V = normalize(cameraWorldPos - hit.position);
+
+    // Two-sided shading: flip to the camera's side (same as the closest hit).
+    float3 geometricNormal = normalize(mul((float3x3)instance.objectToWorld, hit.tri_normal));
+    if (dot(geometricNormal, V) < 0.0)
+        N = -N;
+
+    // Persist the primary shading point for superpixel clustering; valid
+    // regardless of whether the VPL bounce below succeeds.
+    gShadingPoints[launchIndex] = float4(hit.position, asfloat(UnitVectorToUnorm32Octahedron(N)));
+
+    // Sample one BSDF direction for the VPL ray (same stochastic
+    // specular/diffuse selection as the path tracer)
+    float3 albedo = SampleTextureColor(instance, hit).rgb * instance.baseColorFactor.rgb;
+    float2 rm = SampleRoughnessMetallic(instance, hit);
+    float roughness = max(rm.x, MIN_ROUGHNESS);
+    float metallic = rm.y;
+
+    float NdotV = max(dot(N, V), 0.1);
+    float3 F0 = lerp(DIELECTRIC_F0, albedo, metallic);
+    float3 F = FresnelSchlick(NdotV, F0);
+    float specularProb = (F.r + F.g + F.b) / 3.0;
+
     uint seed = pcg_hash(pixelId ^ (frameIndex * 805459861u) ^ 0x9E3779B9u);
-
-    float3 origin, direction;
-    GenerateCameraRay(launchIndex, seed, origin, direction);
+    float2 xi = Random2D(seed);
     seed = pcg_hash(seed);
+    float pathSelector = frac(xi.x * 7.13 + xi.y * 3.97);
 
-    RayDesc ray;
-    ray.Origin = origin;
-    ray.Direction = direction;
-    ray.TMin = RAY_TMIN;
-    ray.TMax = RAY_TMAX;
+    float3 bounceDir;
+    if (pathSelector < specularProb)
+    {
+        float3 H = ImportanceSampleGGX(xi, N, roughness);
+        bounceDir = reflect(-V, H);
+    }
+    else
+    {
+        bounceDir = CosineSampleHemisphere(xi, N);
+    }
 
-    // Primary hit
+    if (dot(bounceDir, N) <= 0.0)
+        return;
+
+    // VPL ray — one BSDF bounce from the primary hit
+    RayDesc bounceRay;
+    bounceRay.Origin = hit.position;
+    bounceRay.Direction = bounceDir;
+    bounceRay.TMin = RAY_TMIN;
+    bounceRay.TMax = RAY_TMAX;
+
     InjectPayload payload;
     payload.hitPosition = float3(0, 0, 0);
     payload.result = float3(0, 0, 0);
     payload.flags = 0;
     payload.seed = seed;
-    payload.bounce = 0;
-    TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
-    if (payload.flags == 0)
-        return;
-
-    // VPL ray — one BSDF bounce from the primary hit
-    RayDesc bounceRay;
-    bounceRay.Origin = payload.hitPosition;
-    bounceRay.Direction = payload.result;
-    bounceRay.TMin = RAY_TMIN;
-    bounceRay.TMax = RAY_TMAX;
-
-    payload.flags = 0;
     payload.bounce = 1;
     TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, bounceRay, payload);
     if (payload.flags == 0)

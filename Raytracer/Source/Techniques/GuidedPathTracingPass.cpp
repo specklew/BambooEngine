@@ -122,12 +122,19 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     vplPositionRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     vplPositionRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VPL_POSITION_DESCRIPTOR_INDEX;
 
-    D3D12_DESCRIPTOR_RANGE ranges[11] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
+    D3D12_DESCRIPTOR_RANGE vbufferRange;
+    vbufferRange.BaseShaderRegister = 9; // u9
+    vbufferRange.NumDescriptors = 1;
+    vbufferRange.RegisterSpace = 0;
+    vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    vbufferRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VBUFFER_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE ranges[12] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
                                          texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
-                                         voxelRepresentativeRange, vplPositionRange};
+                                         voxelRepresentativeRange, vplPositionRange, vbufferRange};
 
     CD3DX12_ROOT_PARAMETER rootParameters[12];
-    rootParameters[0].InitAsDescriptorTable(11, ranges);
+    rootParameters[0].InitAsDescriptorTable(12, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
     rootParameters[3].InitAsShaderResourceView(5, 0);  // Random buffer

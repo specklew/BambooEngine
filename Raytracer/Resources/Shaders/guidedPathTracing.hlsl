@@ -15,6 +15,7 @@
 // Reuses scene bindings and BRDF helpers from raytracing.hlsl.
 #include "raytracing.hlsl"
 #include "Octahedral.hlsl"
+#include "VBuffer.hlsl"
 
 #define VOXEL_GUIDING_CAPACITY 131072
 
@@ -34,6 +35,10 @@ RWStructuredBuffer<int>   gVoxInverseIndex : register(u6);
 // representative VPL and per-pixel VPL hit position, both pos + octa normal.
 RWTexture3D<float4> gVoxelRepresentative : register(u7);
 RWTexture2D<float4> gVplPosition         : register(u8);
+
+// Shared primary-visibility buffer (ADR 0004): the first path vertex comes
+// from here; all spp samples of a frame share it and diverge at the bounce.
+RWTexture2D<uint4> gVBuffer : register(u9);
 
 cbuffer VoxelGridCB : register(b4)
 {
@@ -301,6 +306,133 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, out float3 hitP
     return p.color;
 }
 
+// ---- First path vertex: two-sample MIS between BSDF and voxel guide ----
+// Runs in raygen on the VBuffer-reconstructed hit (ADR 0004); deeper bounces
+// continue through the closest hit. debugView = guidingFlags bits 1-3
+// (1 = BSDF strategy only, 2 = guide strategy only, 3 = MIS weight
+// false-color, 4 = guided sample acceptance green/red/blue).
+
+float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, uint debugView, inout uint seed)
+{
+    if (numBounces == 0)
+        return CalculateDirectLightning(hit, surface);
+
+    uint n;
+    float total;
+    const bool guidingActive = GuidingDataValid(n, total);
+
+    float3 radiance = (debugView >= 3u) ? float3(0, 0, 0)
+                                        : CalculateDirectLightning(hit, surface);
+
+    float misWeightB = 0.0;
+    float misWeightG = 0.0;
+    // Acceptance classification (view 4): 0 = pre-trace reject (blue),
+    // 1 = traced but gate-rejected (red), 2 = accepted (green)
+    uint guideOutcome = 0u;
+
+    // BSDF strategy
+    if (debugView != 2u && debugView != 4u)
+    {
+        float2 xi = Random2D(seed);
+        seed = pcg_hash(seed);
+
+        float pdfB;
+        float3 dir = SampleBsdfDir(surface, specularProb, xi, pdfB);
+        if (pdfB > EPSILON && dot(dir, surface.N) > 0.0)
+        {
+            float3 f = EvalBsdfBounce(surface, dir);
+            if (any(f > 0))
+            {
+                float3 hitPos;
+                bool didHit;
+                float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit);
+
+                // Guide pdf at the BSDF sample: evaluated at the ray's hit
+                // voxel (0 for misses — the guide only targets voxels)
+                float pdfGAtDir;
+                if (guidingActive)
+                    pdfGAtDir = didHit ? EvalGuidePdf(hit.position, hitPos, total) : 0.0;
+                else
+                    pdfGAtDir = 1.0 / (4.0 * PI); // stage-A uniform fallback
+
+                float weight = MisWeight(pdfB, pdfGAtDir);
+                misWeightB = weight;
+                if (debugView != 3u)
+                {
+                    float NdotL = dot(surface.N, dir);
+                    radiance += f * NdotL * incoming * weight / pdfB;
+                }
+            }
+        }
+    }
+
+    // Guide strategy
+    if (debugView != 1u)
+    {
+        float2 selectXi = Random2D(seed);
+        seed = pcg_hash(seed);
+        float2 coneXi = Random2D(seed);
+        seed = pcg_hash(seed);
+
+        float pdfG;
+        float3 dir;
+        float3 aabbMin = float3(-1e30f, -1e30f, -1e30f);
+        float3 aabbMax = float3( 1e30f,  1e30f,  1e30f);
+        if (guidingActive)
+            dir = SampleVoxelGuideDir(hit.position, n, total, selectXi.x, coneXi, pdfG, aabbMin, aabbMax);
+        else
+            dir = SampleUniformSphereDir(coneXi, pdfG);
+
+        if (pdfG > EPSILON && dot(dir, surface.N) > 0.0)
+        {
+            float3 f = EvalBsdfBounce(surface, dir);
+            if (any(f > 0))
+            {
+                float3 hitPos;
+                bool didHit;
+                float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit);
+
+                // Semi-NEE gate: the claimed pdf belongs to the chosen
+                // voxel, so only count hits inside its AABB (reference
+                // does the same). Uniform fallback gates on nothing.
+                bool accepted = guidingActive
+                    ? (didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax))
+                    : true;
+
+                guideOutcome = accepted ? 2u : 1u;
+
+                if (accepted)
+                {
+                    float weight = MisWeight(pdfG, PdfBsdf(surface, specularProb, dir));
+                    misWeightG = weight;
+                    if (debugView < 3u)
+                    {
+                        float NdotL = dot(surface.N, dir);
+                        radiance += f * NdotL * incoming * weight / pdfG;
+                    }
+                }
+            }
+        }
+    }
+
+    // MIS weight false-color: R = BSDF strategy weight, G = guide strategy
+    // weight (at their respective sampled directions).
+    if (debugView == 3u)
+        radiance = float3(misWeightB, misWeightG, 0);
+
+    // Guided sample acceptance: green = accepted (hit inside chosen voxel),
+    // red = traced but gate-rejected, blue = rejected before tracing
+    // (below horizon / zero pdf / zero BRDF).
+    if (debugView == 4u)
+    {
+        if (guideOutcome == 2u)      radiance = float3(0, 1, 0);
+        else if (guideOutcome == 1u) radiance = float3(1, 0, 0);
+        else                         radiance = float3(0, 0, 1);
+    }
+
+    return radiance;
+}
+
 // ---- Ray generation ----
 
 [shader("raygeneration")]
@@ -322,29 +454,114 @@ void GuidedRayGen()
         return;
     }
 
+    // First path vertex from the shared VBuffer (ADR 0004): reconstruct the
+    // hit once; every spp sample shares it and diverges at the bounce.
+    VBufferData vb = UnpackVBufferData(gVBuffer[launchIndex]);
+    if (IsVBufferInvalid(vb))
+    {
+        // Sky pixel — sample the skybox along the same jittered primary
+        // direction the VBuffer pass traced.
+        float3 origin, direction;
+        float2 jitter = VBufferPixelJitter(launchIndex, frameIndex, vbufferJitterEnabled);
+        GenerateCameraRayJittered(launchIndex, jitter, origin, direction);
+        float u = atan2(direction.z, direction.x) / (2.0 * PI) + 0.5;
+        float v = -asin(clamp(direction.y, -1.0, 1.0)) / PI + 0.5;
+        float3 sky = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
+        gOutput[launchIndex] = float4(sky, 1.0);
+        return;
+    }
+
+    InstanceInfo instance = g_instanceInfo[vb.instanceId];
+    GeometryInfo geometry = g_geometryInfo[instance.geometryIndex];
+    HitData hit = GetHitData(vb.primitiveId, geometry.vertexOffset, geometry.indexOffset,
+                             vb.barycentrics, instance.objectToWorld);
+
+    float3 albedo = SampleTextureColor(instance, hit).rgb * instance.baseColorFactor.rgb;
+    float2 rm = SampleRoughnessMetallic(instance, hit);
+    float roughness = max(rm.x, MIN_ROUGHNESS);
+    float metallic = rm.y;
+
+    float3 N = SampleWorldSpaceNormal(instance, hit);
+    float3 V = normalize(cameraWorldPos - hit.position);
+
+    float3 geometricN = normalize(mul((float3x3)instance.objectToWorld, hit.tri_normal));
+    if (dot(geometricN, V) < 0.0)
+        N = -N;
+
+    float NdotV = max(dot(N, V), 0.1);
+
+    SurfaceData surface;
+    surface.N         = N;
+    surface.V         = V;
+    surface.NdotV     = NdotV;
+    surface.F0        = lerp(DIELECTRIC_F0, albedo, metallic);
+    surface.albedo    = albedo;
+    surface.roughness = roughness;
+    surface.metallic  = metallic;
+
+    uint debugView = (guidingFlags >> 1) & 7u;
+
+    // View 5: inverse-index round-trip. For the primary hit's voxel, look up
+    // gInverseIndex -> compactID and confirm gCompactIds maps back to the same
+    // voxel. green = consistent, red = mismatch (bug), black = inactive voxel.
+    if (debugView == 5u)
+    {
+        int3 v = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
+        float3 col = float3(0, 0, 0);
+        if (all(v >= 0) && all(v < int(voxGridDim)))
+        {
+            uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+            int ci = gVoxInverseIndex[flatId];
+            if (ci >= 0)
+                col = (gVoxCompactIds[ci] == flatId) ? float3(0, 1, 0) : float3(1, 0, 0);
+        }
+        gOutput[launchIndex] = float4(col, 1.0);
+        return;
+    }
+
+    // View 6: representative VPL check. For the primary hit's ACTIVE voxel,
+    // gVoxelRepresentative must hold a surface point inside that voxel.
+    // Status colors only — normal display would collide with failure colors
+    // once accumulation and tone mapping blend/skew them.
+    // green = OK, red = active voxel with no data, magenta = stored position
+    // outside the voxel (beyond FP-boundary tolerance), black = inactive.
+    if (debugView == 6u)
+    {
+        int3 v = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
+        float3 col = float3(0, 0, 0);
+        if (all(v >= 0) && all(v < int(voxGridDim)))
+        {
+            uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+            if (gVoxInverseIndex[flatId] >= 0)
+            {
+                float4 representative = gVoxelRepresentative[v];
+                // Writer classifies with floor((p-min)/size); this test
+                // reconstructs the AABB by multiplication. The two round
+                // differently, so allow a tiny boundary tolerance.
+                const float boundaryTolerance = voxVoxelSize * 1e-4f;
+                float3 voxelMin = voxGridMin + float3(v) * voxVoxelSize - boundaryTolerance;
+                float3 voxelMax = voxelMin + voxVoxelSize + 2.0f * boundaryTolerance;
+                if (all(representative == 0.0f))
+                    col = float3(1, 0, 0);
+                else if (any(representative.xyz < voxelMin) || any(representative.xyz > voxelMax))
+                    col = float3(1, 0, 1);
+                else
+                    col = float3(0, 1, 0);
+            }
+        }
+        gOutput[launchIndex] = float4(col, 1.0);
+        return;
+    }
+
+    float3 F = FresnelSchlick(NdotV, surface.F0);
+    float specularProb = (F.r + F.g + F.b) / 3.0;
+
     float3 accumulated = float3(0, 0, 0);
     for (uint i = 0; i < (uint)samplesPerPixel; i++)
     {
         uint seed = pcg_hash(pixelId ^ (i * 2654435761u) ^ (frameIndex * 805459861u));
-
-        float3 origin, direction;
-        GenerateCameraRay(launchIndex, seed, origin, direction);
         seed = pcg_hash(seed);
-
-        RayDesc ray;
-        ray.Origin = origin;
-        ray.Direction = direction;
-        ray.TMin = RAY_TMIN;
-        ray.TMax = RAY_TMAX;
-
-        GuidedPayload payload;
-        payload.color = float3(0, 0, 0);
-        payload.hitPos = float3(0, 0, 0);
-        payload.hitFlag = 0;
-        payload.bounceCount = 0;
-        payload.seed = seed;
-        TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
-        accumulated += payload.color;
+        accumulated += ShadeFirstVertex(hit, surface, specularProb, debugView, seed);
     }
 
     gOutput[launchIndex] = min(float4(accumulated / samplesPerPixel, 1.0), 100.0f);
@@ -423,190 +640,9 @@ void GuidedHit(inout GuidedPayload payload : SV_RayPayload, in Attributes attr)
     float3 F = FresnelSchlick(NdotV, surface.F0);
     float specularProb = (F.r + F.g + F.b) / 3.0;
 
-    if (payload.bounceCount == 0)
-    {
-        // ---- First bounce: two-sample MIS between BSDF and voxel guide ----
-        // guidingFlags bits 1-3: debug view (0 = off, 1 = BSDF strategy only,
-        // 2 = guide strategy only, 3 = MIS weight false-color,
-        // 4 = guided sample acceptance: green/red/blue)
-        uint debugView = (guidingFlags >> 1) & 7u;
-
-        // View 5: inverse-index round-trip. For the primary hit's voxel, look up
-        // gInverseIndex -> compactID and confirm gCompactIds maps back to the same
-        // voxel. green = consistent, red = mismatch (bug), black = inactive voxel.
-        if (debugView == 5u)
-        {
-            int3 v = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
-            float3 col = float3(0, 0, 0);
-            if (all(v >= 0) && all(v < int(voxGridDim)))
-            {
-                uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
-                int ci = gVoxInverseIndex[flatId];
-                if (ci >= 0)
-                    col = (gVoxCompactIds[ci] == flatId) ? float3(0, 1, 0) : float3(1, 0, 0);
-            }
-            payload.color = col;
-            payload.hitPos = hit.position;
-            payload.hitFlag = 1;
-            return;
-        }
-
-        // View 6: representative VPL check. For the primary hit's ACTIVE voxel,
-        // gVoxelRepresentative must hold a surface point inside that voxel.
-        // Status colors only — normal display would collide with failure colors
-        // once accumulation and tone mapping blend/skew them.
-        // green = OK, red = active voxel with no data, magenta = stored position
-        // outside the voxel (beyond FP-boundary tolerance), black = inactive.
-        if (debugView == 6u)
-        {
-            int3 v = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
-            float3 col = float3(0, 0, 0);
-            if (all(v >= 0) && all(v < int(voxGridDim)))
-            {
-                uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
-                if (gVoxInverseIndex[flatId] >= 0)
-                {
-                    float4 representative = gVoxelRepresentative[v];
-                    // Writer classifies with floor((p-min)/size); this test
-                    // reconstructs the AABB by multiplication. The two round
-                    // differently, so allow a tiny boundary tolerance.
-                    const float boundaryTolerance = voxVoxelSize * 1e-4f;
-                    float3 voxelMin = voxGridMin + float3(v) * voxVoxelSize - boundaryTolerance;
-                    float3 voxelMax = voxelMin + voxVoxelSize + 2.0f * boundaryTolerance;
-                    if (all(representative == 0.0f))
-                        col = float3(1, 0, 0);
-                    else if (any(representative.xyz < voxelMin) || any(representative.xyz > voxelMax))
-                        col = float3(1, 0, 1);
-                    else
-                        col = float3(0, 1, 0);
-                }
-            }
-            payload.color = col;
-            payload.hitPos = hit.position;
-            payload.hitFlag = 1;
-            return;
-        }
-
-        uint n;
-        float total;
-        const bool guidingActive = GuidingDataValid(n, total);
-
-        float3 radiance = (debugView >= 3u) ? float3(0, 0, 0)
-                                            : CalculateDirectLightning(hit, surface);
-
-        float misWeightB = 0.0;
-        float misWeightG = 0.0;
-        // Acceptance classification (view 4): 0 = pre-trace reject (blue),
-        // 1 = traced but gate-rejected (red), 2 = accepted (green)
-        uint guideOutcome = 0u;
-
-        // BSDF strategy
-        if (debugView != 2u && debugView != 4u)
-        {
-            float2 xi = Random2D(payload.seed);
-            payload.seed = pcg_hash(payload.seed);
-
-            float pdfB;
-            float3 dir = SampleBsdfDir(surface, specularProb, xi, pdfB);
-            if (pdfB > EPSILON && dot(dir, surface.N) > 0.0)
-            {
-                float3 f = EvalBsdfBounce(surface, dir);
-                if (any(f > 0))
-                {
-                    float3 hitPos;
-                    bool didHit;
-                    float3 incoming = TraceIndirect(hit.position, dir, payload.seed, hitPos, didHit);
-
-                    // Guide pdf at the BSDF sample: evaluated at the ray's hit
-                    // voxel (0 for misses — the guide only targets voxels)
-                    float pdfGAtDir;
-                    if (guidingActive)
-                        pdfGAtDir = didHit ? EvalGuidePdf(hit.position, hitPos, total) : 0.0;
-                    else
-                        pdfGAtDir = 1.0 / (4.0 * PI); // stage-A uniform fallback
-
-                    float weight = MisWeight(pdfB, pdfGAtDir);
-                    misWeightB = weight;
-                    if (debugView != 3u)
-                    {
-                        float NdotL = dot(surface.N, dir);
-                        radiance += f * NdotL * incoming * weight / pdfB;
-                    }
-                }
-            }
-        }
-
-        // Guide strategy
-        if (debugView != 1u)
-        {
-            float2 selectXi = Random2D(payload.seed);
-            payload.seed = pcg_hash(payload.seed);
-            float2 coneXi = Random2D(payload.seed);
-            payload.seed = pcg_hash(payload.seed);
-
-            float pdfG;
-            float3 dir;
-            float3 aabbMin = float3(-1e30f, -1e30f, -1e30f);
-            float3 aabbMax = float3( 1e30f,  1e30f,  1e30f);
-            if (guidingActive)
-                dir = SampleVoxelGuideDir(hit.position, n, total, selectXi.x, coneXi, pdfG, aabbMin, aabbMax);
-            else
-                dir = SampleUniformSphereDir(coneXi, pdfG);
-
-            if (pdfG > EPSILON && dot(dir, surface.N) > 0.0)
-            {
-                float3 f = EvalBsdfBounce(surface, dir);
-                if (any(f > 0))
-                {
-                    float3 hitPos;
-                    bool didHit;
-                    float3 incoming = TraceIndirect(hit.position, dir, payload.seed, hitPos, didHit);
-
-                    // Semi-NEE gate: the claimed pdf belongs to the chosen
-                    // voxel, so only count hits inside its AABB (reference
-                    // does the same). Uniform fallback gates on nothing.
-                    bool accepted = guidingActive
-                        ? (didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax))
-                        : true;
-
-                    guideOutcome = accepted ? 2u : 1u;
-
-                    if (accepted)
-                    {
-                        float weight = MisWeight(pdfG, PdfBsdf(surface, specularProb, dir));
-                        misWeightG = weight;
-                        if (debugView < 3u)
-                        {
-                            float NdotL = dot(surface.N, dir);
-                            radiance += f * NdotL * incoming * weight / pdfG;
-                        }
-                    }
-                }
-            }
-        }
-
-        // MIS weight false-color: R = BSDF strategy weight, G = guide strategy
-        // weight (at their respective sampled directions).
-        if (debugView == 3u)
-            radiance = float3(misWeightB, misWeightG, 0);
-
-        // Guided sample acceptance: green = accepted (hit inside chosen voxel),
-        // red = traced but gate-rejected, blue = rejected before tracing
-        // (below horizon / zero pdf / zero BRDF).
-        if (debugView == 4u)
-        {
-            if (guideOutcome == 2u)      radiance = float3(0, 1, 0);
-            else if (guideOutcome == 1u) radiance = float3(1, 0, 0);
-            else                         radiance = float3(0, 0, 1);
-        }
-
-        payload.color = radiance;
-        payload.hitPos = hit.position;
-        payload.hitFlag = 1;
-        return;
-    }
-
     // ---- Deeper bounces: vanilla pdf-cancelled path tracing ----
+    // (The first path vertex is shaded in raygen from the VBuffer; every ray
+    // reaching this closest hit is a continuation with bounceCount >= 1.)
 
     float2 xi = Random2D(payload.seed);
     payload.seed = pcg_hash(payload.seed);

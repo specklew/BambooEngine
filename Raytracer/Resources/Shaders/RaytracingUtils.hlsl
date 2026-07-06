@@ -40,6 +40,10 @@ struct InstanceInfo
     float metallicFactor;
     float roughnessFactor;
     float4 baseColorFactor;
+    // Object-to-world in DXR ObjectToWorld3x4() layout (transpose of the
+    // row-vector world matrix). Lets raygen shaders reconstruct hits from the
+    // VBuffer without hit-shader intrinsics.
+    row_major float3x4 objectToWorld;
 };
 
 struct LightData
@@ -150,7 +154,9 @@ float4 GetVertexFloat4Attribute(uint byteOffset)
     return asfloat(g_vertices.Load4(byteOffset));
 }
 
-HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, float2 barycentrics)
+// Loads triangle attributes + interpolates UVs; caller applies the
+// object-to-world transform (hit-shader intrinsic or explicit matrix).
+HitData LoadHitTriangle(uint triangleIndex, uint vertexOffset, uint indexOffset, float2 barycentrics)
 {
     HitData hit_data;
 
@@ -176,8 +182,18 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
     hit_data.tri_normal = normalize(cross(hit_data.tri_v2 - hit_data.tri_v0, hit_data.tri_v1 - hit_data.tri_v0));
 
     float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
-
     hit_data.uv = bary.x * hit_data.tri_uv0 + bary.y * hit_data.tri_uv1 + bary.z * hit_data.tri_uv2;
+
+    return hit_data;
+}
+
+// Hit-shader variant: transforms via ObjectToWorld3x4(), position via ray eval.
+HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, float2 barycentrics)
+{
+    HitData hit_data = LoadHitTriangle(triangleIndex, vertexOffset, indexOffset, barycentrics);
+
+    float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
+
     hit_data.normal = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
 
     float3 interpTangent = normalize(bary.x * hit_data.tri_t0.xyz + bary.y * hit_data.tri_t1.xyz + bary.z * hit_data.tri_t2.xyz);
@@ -188,7 +204,50 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
     return hit_data;
 }
 
+// Raygen variant (VBuffer reconstruction): explicit object-to-world, position
+// from interpolated object-space vertices — no hit-shader intrinsics.
+HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, float2 barycentrics, float3x4 objectToWorld)
+{
+    HitData hit_data = LoadHitTriangle(triangleIndex, vertexOffset, indexOffset, barycentrics);
+
+    float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
+
+    hit_data.normal = normalize(mul((float3x3)objectToWorld, normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
+
+    float3 interpTangent = normalize(bary.x * hit_data.tri_t0.xyz + bary.y * hit_data.tri_t1.xyz + bary.z * hit_data.tri_t2.xyz);
+    hit_data.tangent = float4(normalize(mul((float3x3)objectToWorld, interpTangent)), hit_data.tri_t0.w);
+
+    float3 positionOS = bary.x * hit_data.tri_v0 + bary.y * hit_data.tri_v1 + bary.z * hit_data.tri_v2;
+    hit_data.position = mul(objectToWorld, float4(positionOS, 1.0));
+
+    return hit_data;
+}
+
 // ---- Ray utilities ----
+
+// Per-pixel sub-pixel jitter in [-0.5, 0.5), derived deterministically from
+// (pixel, frame) so the VBuffer pass and every consumer that recomputes the
+// primary direction agree exactly. Decorrelated across pixels (unlike a single
+// per-frame offset, which shifts the whole image rigidly and reads as swimming).
+inline float2 VBufferPixelJitter(uint2 pixel, uint frameIndex, uint enabled)
+{
+    if (enabled == 0u)
+        return float2(0.0, 0.0);
+    uint seed = pcg_hash((pixel.x * 1973u + pixel.y * 9277u + frameIndex * 26699u) | 1u);
+    return Random2D(seed) - 0.5;
+}
+
+// Deterministic sub-pixel offset (VBuffer pass and its consumers must agree
+// on the exact primary direction, so no RNG here).
+inline void GenerateCameraRayJittered(uint2 index, float2 jitter, out float3 origin, out float3 direction)
+{
+    float2 dims = float2(DispatchRaysDimensions().xy);
+    float2 d = (((index + 0.5f + jitter) / dims) * 2.f - 1.f);
+
+    origin = mul(viewI, float4(0, 0, 0, 1)).xyz;
+    float4 target = mul(projectionI, float4(d.x, -d.y, 1, 1));
+    direction = normalize(mul(viewI, float4(target.xyz, 0)).xyz);
+}
 
 inline void GenerateCameraRay(uint2 index, uint seed, out float3 origin, out float3 direction)
 {
@@ -237,11 +296,15 @@ float4 SampleTexture(int texIdx, float2 uv)
     return g_textures[NonUniformResourceIndex(texIdx)].SampleLevel(gsamAnisotropicWrap, uv, 0);
 }
 
-float3 SampleWorldSpaceNormal(HitData data)
+// Instance-parameterized cores (callable from raygen, e.g. after VBuffer
+// reconstruction); the no-instance overloads below wrap them with InstanceID()
+// for hit shaders.
+
+float3 SampleWorldSpaceNormal(InstanceInfo instance, HitData data)
 {
     float3 N = data.normal;
 
-    int normalTexIdx = g_instanceInfo[NonUniformResourceIndex(InstanceID())].normalTextureIndex;
+    int normalTexIdx = instance.normalTextureIndex;
     if (normalTexIdx == -1)
         return N;
 
@@ -258,11 +321,25 @@ float3 SampleWorldSpaceNormal(HitData data)
     return normalize(mul(normalTS, TBN));
 }
 
+float4 SampleTextureColor(InstanceInfo instance, HitData data)
+{
+    return SampleTexture(instance.textureIndex, data.uv);
+}
+
+float2 SampleRoughnessMetallic(InstanceInfo instance, HitData data)
+{
+    float4 mr = SampleTexture(instance.roughnessTextureIndex, data.uv);
+    return float2(instance.roughnessFactor * mr.g, instance.metallicFactor * mr.b);
+}
+
+float3 SampleWorldSpaceNormal(HitData data)
+{
+    return SampleWorldSpaceNormal(g_instanceInfo[NonUniformResourceIndex(InstanceID())], data);
+}
+
 float4 SampleTextureColor(HitData data)
 {
-    int texIdx = g_instanceInfo[NonUniformResourceIndex(InstanceID())].textureIndex;
-    float4 col = SampleTexture(texIdx, data.uv);
-    return col;
+    return SampleTextureColor(g_instanceInfo[NonUniformResourceIndex(InstanceID())], data);
 }
 
 float2 SampleRoughnessMetallic(HitData data, float roughnessFactor, float metallicFactor)

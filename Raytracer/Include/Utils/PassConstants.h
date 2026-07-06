@@ -23,6 +23,10 @@ public:
         uint32_t frameIndex = 0;
         uint32_t guidingFlags = 0; // bit 0 = power MIS; doubles as the pad HLSL inserts before float3
         DirectX::XMFLOAT3 cameraWorldPos = {0.0f, 0.0f, 0.0f};
+        // 1 = per-pixel sub-pixel jitter on the shared VBuffer primaries (the
+        // jitter is derived per pixel in-shader from pixel + frameIndex).
+        uint32_t vbufferJitterEnabled = 0;
+        uint32_t _passPad0 = 0;
     } data;
 
 private:
