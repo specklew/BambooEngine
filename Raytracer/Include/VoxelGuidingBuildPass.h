@@ -17,6 +17,10 @@ public:
 
     void Run();
 
+    // Recreates the grid-sized inverse index after a voxel-grid resize. Caller
+    // must have flushed the GPU first (the old buffer may be in flight).
+    void OnVoxelGridResize();
+
     // [0] = compacted voxel count, [1] = asuint(total weight)
     RWStructuredBuffer<uint32_t>* GetCountersBuffer() const { return m_counters.get(); }
     RWStructuredBuffer<uint32_t>* GetCompactIdsBuffer() const { return m_compactIds.get(); }
@@ -25,6 +29,7 @@ public:
 
 private:
     void CreateBuffers();
+    void CreateInverseIndexBuffer();
     void CreateRootSignature();
     void CreatePSOs();
 

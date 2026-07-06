@@ -23,6 +23,10 @@ public:
     Microsoft::WRL::ComPtr<ID3D12Resource> GetVoxelRepresentativeTexture() const { return m_voxelRepresentativeTex; }
     Microsoft::WRL::ComPtr<ID3D12Resource> GetVplPositionTexture() const { return m_vplPositionTex; }
 
+    // Recreates the grid-sized representative texture after a voxel-grid resize.
+    // Caller must have flushed the GPU first (the old texture may be in flight).
+    void OnVoxelGridResize() { CreateRepresentativeResources(); }
+
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;

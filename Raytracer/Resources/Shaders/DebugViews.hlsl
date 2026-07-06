@@ -64,7 +64,8 @@ float4 DebugView_Voxels(int mode, float3 posW)
     {
         if (mode == 10)
         {
-            const int voxelsPerSupervoxel = 16;
+            // Same adaptive factor as mode 14 so both views agree at any grid dim.
+            const int voxelsPerSupervoxel = int(max(voxSupervoxelFactor, 1u));
             // Search 3x3x3 for nearest occupied voxel: surface points near a
             // boundary can floor into an empty neighbor (raster coverage gap).
             int3 occupiedCoord = int3(-1, -1, -1);

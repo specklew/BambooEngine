@@ -1338,9 +1338,28 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	m_voxelizationPass->SetRuntimeParams(
 		g_voxelInjectUseAvg.Get() != 0,
 		g_voxelHeatScale.Get());
-	m_voxelizationPass->RunFrame(*m_scene, static_cast<uint32_t>(g_voxelGridDim.Get()));
+
+	// A grid resize destroys grid-sized resources that in-flight frames may
+	// still reference — wait for the GPU before recreating anything. Clamp the
+	// request the same way the pass does so a persistently out-of-range CVar
+	// doesn't flush every frame.
+	const uint32_t requestedGridDim =
+		std::clamp(static_cast<uint32_t>(g_voxelGridDim.Get()), 4u, 512u);
+	if (requestedGridDim != m_voxelizationPass->GetGridDim())
+		FlushCommandQueue();
+
+	m_voxelizationPass->RunFrame(*m_scene, requestedGridDim);
 	if (m_voxelizationPass->DidResize())
+	{
 		WriteVoxelUavsToGlobalHeap();
+		// Grid-sized dependents must track the new dim: the inverse index is a
+		// ROOT UAV (unbounded — undersized would mean GPU memory corruption),
+		// the representative texture would silently drop writes.
+		if (m_voxelGuidingBuildPass)
+			m_voxelGuidingBuildPass->OnVoxelGridResize();
+		if (m_lightInjectionPass)
+			m_lightInjectionPass->OnVoxelGridResize();
+	}
 
 	// Stage 2: light injection (also emits the ShadingPoints G-buffer).
 	if (stage >= VxpgStage::Inject && m_lightInjectionPass)

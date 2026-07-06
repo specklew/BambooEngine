@@ -24,85 +24,16 @@ cbuffer SuperpixelCB : register(b0)
 }
 
 // ShadingPoints read as UAV to avoid a per-frame UAV<->SRV transition.
+// (Fuzzy 4-nearest superpixel outputs removed — cut by ADR 0003, no consumer.)
 RWTexture2D<float4> u_input         : register(u0); // primary worldPos.xyz + octaN.w
 RWTexture2D<float4> u_center        : register(u1); // representative pos + octaN (map_size)
 RWTexture2D<int>    u_index         : register(u2); // per-pixel superpixel id
-RWTexture2D<int4>   u_fuzzyIdx       : register(u3); // 4-nearest superpixel ids
-RWTexture2D<float4> u_fuzzyWeight    : register(u4); // 4-nearest weights
-RWTexture2D<uint>   u_spixel_counter : register(u5); // pixels per superpixel (map_size)
-RWTexture2D<int2>   u_spixel_gathered: register(u6); // gathered pixel coords (map*spixel_size)
+RWTexture2D<uint>   u_spixel_counter : register(u3); // pixels per superpixel (map_size)
+RWTexture2D<int2>   u_spixel_gathered: register(u4); // gathered pixel coords (map*spixel_size)
 
 static const float SP_INVALID_POS = 1e29; // ShadingPoints sentinel is 1e30
 
 bool IsValidPixel(float4 sp) { return sp.x < SP_INVALID_POS; }
-
-// ---- FuzzyVec: 4 nearest superpixels (free functions; HLSL has no mutating methods) ----
-
-struct FuzzyVec
-{
-    int4   center; // 4 nearest superpixel ids (dynamic-indexed)
-    float4 dist2;
-    int    size;
-};
-
-FuzzyVec FuzzyInit()
-{
-    FuzzyVec v;
-    v.center = int4(-1, -1, -1, -1);
-    v.dist2  = float4(0, 0, 0, 0);
-    v.size   = 0;
-    return v;
-}
-
-int FuzzyMaxSlot(FuzzyVec v)
-{
-    int maxIdx = 0;
-    float maxDist = v.dist2[0];
-    [unroll] for (int i = 1; i < 4; ++i)
-        if (v.dist2[i] > maxDist) { maxDist = v.dist2[i]; maxIdx = i; }
-    return maxIdx;
-}
-
-void FuzzyInsert(inout FuzzyVec v, int c, float d2)
-{
-    if (v.size < 4)
-    {
-        v.center[v.size] = c;
-        v.dist2[v.size]  = d2;
-        v.size++;
-    }
-    else
-    {
-        int maxIdx = FuzzyMaxSlot(v);
-        if (d2 < v.dist2[maxIdx]) { v.center[maxIdx] = c; v.dist2[maxIdx] = d2; }
-    }
-}
-
-void FuzzyPack(FuzzyVec v, int2 idxImg)
-{
-    float4 w = float4(0, 0, 0, 0);
-    int4   c = int4(-1, -1, -1, -1);
-    if (v.size == 0)
-    {
-        u_fuzzyIdx[idxImg]    = c;
-        u_fuzzyWeight[idxImg] = w;
-        return;
-    }
-    int zeroIdx = -1;
-    [unroll] for (int i = 0; i < 4; ++i)
-    {
-        if (i < v.size)
-        {
-            if (v.dist2[i] == 0) zeroIdx = i;
-            w[i] = 1.0 / v.dist2[i];
-            c[i] = v.center[i];
-        }
-    }
-    if (zeroIdx != -1) { w = float4(0, 0, 0, 0); w[zeroIdx] = 1; }
-    w /= dot(w, float4(1, 1, 1, 1));
-    u_fuzzyIdx[idxImg]    = c;
-    u_fuzzyWeight[idxImg] = w;
-}
 
 // SLIC distance: .x = normal-gated (1e6 if facing away), .y = ungated fallback.
 float2 ComputeSlicDistance(
@@ -139,7 +70,7 @@ void InitSeedCenters(uint3 tid : SV_DispatchThreadID)
     u_center[sp] = u_input[SpixelImageCenter(sp)];
 }
 
-// ---- Pass 2: per-pixel association + fuzzy 4-nearest + (final) gather ----
+// ---- Pass 2: per-pixel association + (final) gather ----
 
 groupshared float3 gs_pos[9];
 groupshared float3 gs_nrm[9];
@@ -189,8 +120,6 @@ void FindCenterAssociation(uint3 dtid : SV_DispatchThreadID, uint gid : SV_Group
 
     int   minidx = -1;     float dist = 999999.0;
     int   minidxF = -1;    float distF = 999999.0;
-    FuzzyVec fv  = FuzzyInit();
-    FuzzyVec fvF = FuzzyInit();
 
     [unroll] for (int n = 0; n < 9; ++n)
     {
@@ -208,18 +137,14 @@ void FindCenterAssociation(uint3 dtid : SV_DispatchThreadID, uint gid : SV_Group
                 weight, max_xy_dist, max_color_dist);
             if (cd.x < dist)  { dist = cd.x;  minidx  = spId; }
             if (cd.y < distF) { distF = cd.y; minidxF = spId; }
-            FuzzyInsert(fv,  spId, cd.x);
-            FuzzyInsert(fvF, spId, cd.y);
         }
     }
 
+    // Normal-gated winner, falling back to the ungated distance when every
+    // candidate failed the facing gate.
     bool gateValid = (minidx >= 0);
     int spixelID = gateValid ? minidx : minidxF;
     u_index[idxImg] = valid ? spixelID : -1;
-    if (minidxF == -1) fvF.size = 0;
-    FuzzyVec chosen = fv;
-    if (!gateValid) chosen = fvF;
-    FuzzyPack(chosen, idxImg);
 
     if (writeGather == 0) return;
 
@@ -297,10 +222,12 @@ void SumCenter(uint3 dtid : SV_DispatchThreadID, uint gi : SV_GroupIndex)
         GroupMemoryBarrierWithGroupSync();
     }
 
-    if (gi == 0 && red_cnt[0] > 0u)
+    // Skip the update when normals cancel exactly (normalize(0) = NaN would
+    // poison the center); the seed/previous center stays in place.
+    if (gi == 0 && red_cnt[0] > 0u && dot(red_nrm[0], red_nrm[0]) > 1e-12)
     {
         float3 avgPos = red_pos[0] / float(red_cnt[0]);
-        float3 avgNrm = normalize(red_nrm[0] / float(red_cnt[0]));
+        float3 avgNrm = normalize(red_nrm[0]);
         u_center[sp] = float4(avgPos, asfloat(UnitVectorToUnorm32Octahedron(avgNrm)));
     }
 }

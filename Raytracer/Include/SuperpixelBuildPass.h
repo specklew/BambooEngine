@@ -3,9 +3,9 @@
 // VXPG V2 Stage B: superpixel clustering (SLIC over the ShadingPoints G-buffer).
 // Per frame: InitSeedCenters -> N x [FindCenterAssociation -> SumCenter] ->
 // ClearCounter -> final FindCenterAssociation (gather). See docs/adr/0002.
-// Outputs (private heap): per-pixel index, fuzzy 4-nearest, representative centers,
-// per-superpixel pixel-lists. Index + center are also exposed to the raster debug
-// views (modes 15/16) via the main heap.
+// Outputs (private heap): per-pixel index, representative centers, per-superpixel
+// pixel-lists. Index + center are also exposed to the raster debug views
+// (modes 15/16) via the main heap.
 class SuperpixelBuildPass
 {
 public:
@@ -44,8 +44,6 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_center;       // map_size  RGBA32F
     Microsoft::WRL::ComPtr<ID3D12Resource> m_index;        // screen    R32_SINT
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_fuzzyIdx;     // screen    RGBA32_SINT
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_fuzzyWeight;  // screen    RGBA32F
     Microsoft::WRL::ComPtr<ID3D12Resource> m_counter;      // map_size  R32_UINT
     Microsoft::WRL::ComPtr<ID3D12Resource> m_gathered;     // map*size  RG32_SINT
 

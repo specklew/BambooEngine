@@ -23,9 +23,10 @@ public:
 
     void Render() override;
 
-    // Guided path tracing consumes the full VXPG pipeline (voxels -> injection
-    // -> guiding distribution -> supervoxels).
-    VxpgStage RequiredVxpgStage() const override { return VxpgStage::Supervoxel; }
+    // Consumes voxelize -> inject -> guiding distribution. The legacy grid-cell
+    // supervoxel stage is NOT read by this technique — requiring it would burn
+    // GPU time every frame and skew equal-time benchmarks.
+    VxpgStage RequiredVxpgStage() const override { return VxpgStage::GuidingBuild; }
 
 protected:
     TechniqueDesc GetTechniqueDesc() const override;

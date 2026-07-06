@@ -177,7 +177,7 @@ float3 CalculateDirectLightning(HitData hit, SurfaceData surface)
 }
 
 [shader("anyhit")]
-void AnyHit(inout Payload : SV_RayPayload, in Attributes attr)
+void AnyHit(inout Payload payload : SV_RayPayload, in Attributes attr)
 {
     InstanceInfo instance = g_instanceInfo[InstanceID()];
     uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
@@ -200,7 +200,7 @@ void Hit(inout Payload payload : SV_RayPayload, in Attributes attr)
     HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
 
     // Material
-    float3 albedo = SampleTextureColor(hit) * instance.baseColorFactor.rgb;
+    float3 albedo = SampleTextureColor(hit).rgb * instance.baseColorFactor.rgb;
     float2 rm = SampleRoughnessMetallic(hit, instance.roughnessFactor, instance.metallicFactor);
     float roughness = max(rm.x, MIN_ROUGHNESS);
     float metallic = rm.y;

@@ -99,6 +99,14 @@ void InjectHit(inout InjectPayload payload : SV_RayPayload, in Attributes attr)
 
     float3 N = SampleWorldSpaceNormal(hit);
     float3 V = -WorldRayDirection();
+
+    // Two-sided shading: flip to the ray's side (same as PT / guided PT) so
+    // ShadingPoints, the representative VPL and direct light get a usable
+    // normal on back-face hits.
+    float3 geometricNormal = normalize(mul((float3x3)ObjectToWorld3x4(), hit.tri_normal));
+    if (dot(geometricNormal, V) < 0.0)
+        N = -N;
+
     float NdotV = max(dot(N, V), 0.1);
 
     SurfaceData surface;

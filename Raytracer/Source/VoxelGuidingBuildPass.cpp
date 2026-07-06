@@ -36,11 +36,24 @@ void VoxelGuidingBuildPass::CreateBuffers()
     m_weights    = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Weights");
     m_cdf        = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Cdf");
 
-    // Inverse index is grid-sized (one int per cell), not capacity-sized. Guided
-    // mode stays 64^3 (ADR 0003 Q10a); recreate in lockstep if grid resize lands.
+    CreateInverseIndexBuffer();
+}
+
+void VoxelGuidingBuildPass::CreateInverseIndexBuffer()
+{
+    // Grid-sized (one int per cell), not capacity-sized. Bound as a ROOT UAV
+    // (no bounds checking), so it MUST track the grid dim exactly — undersized
+    // means CompactVoxels writes past the end and corrupts GPU memory.
     const uint32_t gridDim = m_voxelPass->GetGridDim();
     const uint32_t cellCount = gridDim * gridDim * gridDim;
     m_inverseIndex = std::make_unique<RWStructuredBuffer<int32_t>>(m_device, cellCount, L"VoxelGuiding InverseIndex");
+}
+
+void VoxelGuidingBuildPass::OnVoxelGridResize()
+{
+    if (!m_initialized)
+        return;
+    CreateInverseIndexBuffer();
 }
 
 void VoxelGuidingBuildPass::CreateRootSignature()
