@@ -48,6 +48,10 @@ RWStructuredBuffer<uint> gVoxelFingerprints : register(u10);
 RWStructuredBuffer<int> gVoxelClusterAssignments : register(u11);
 RWStructuredBuffer<int> gClusterSeedCompactIds   : register(u12);
 
+// Cluster-visibility mask (debug view 10). SIByL u_spixel_visibility: bit k =
+// this superpixel tile can see light cluster k. Global-heap slot 530.
+RWTexture2D<uint> gClusterVisibilityMask : register(u13);
+
 cbuffer VoxelGridCB : register(b4)
 {
     float3 voxGridMin;
@@ -642,13 +646,32 @@ void GuidedRayGen()
                 }
                 else
                 {
-                    uint h = pcg_hash(uint(cluster) * 2654435761u);
-                    col = 0.25 + 0.75 * float3(float(h & 255u), float((h >> 8) & 255u),
-                                               float((h >> 16) & 255u)) / 255.0;
+                    // Saturated hue wheel; golden-ratio step spreads neighboring
+                    // cluster ids far apart. Full-sat colors survive tone mapping
+                    // (a hashed 0.25-floored palette washed out to white pastel).
+                    float hue = frac(float(cluster) * 0.618034);
+                    float h6 = hue * 6.0;
+                    col = saturate(float3(abs(h6 - 3.0) - 1.0,
+                                          2.0 - abs(h6 - 2.0),
+                                          2.0 - abs(h6 - 4.0)));
                 }
             }
         }
         gOutput[launchIndex] = float4(col, 1.0);
+        return;
+    }
+
+    // View 10: cluster visibility. Grayscale = popcount(mask)/32 at this pixel's
+    // superpixel tile — "how many of the 32 light clusters can this screen region
+    // see". Bright in open areas, darker in occluded pockets. Blocky at 32px
+    // tile granularity (expected). all-black = check kernel dead, all-white = OR
+    // saturation bug.
+    if (debugView == 10u)
+    {
+        uint2 maskCoord = launchIndex / 32u; // SUPERPIXEL_SIZE
+        uint mask = gClusterVisibilityMask[maskCoord];
+        float g = float(countbits(mask)) / 32.0;
+        gOutput[launchIndex] = float4(g, g, g, 1.0);
         return;
     }
 

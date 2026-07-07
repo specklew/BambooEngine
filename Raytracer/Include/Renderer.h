@@ -36,7 +36,7 @@ class LightInjectionPass;
 class VoxelGuidingBuildPass;
 class VxpgFingerprintPass;
 class VxpgClusterPass;
-class SupervoxelClusterPass;
+class VxpgClusterVisibilityPass;
 class SuperpixelBuildPass;
 class FrameAccumulationPass;
 class PostProcessPass;
@@ -139,6 +139,7 @@ private:
 	void LoadSkybox(const std::wstring& path);
 	void WriteVoxelUavsToGlobalHeap();
 	void WriteSuperpixelUavsToGlobalHeap();
+	void WriteClusterVisibilityUavsToGlobalHeap();
 	void WireGuidingResources();
 	// Runs the linear VXPG pipeline (voxelize -> inject -> guiding build ->
 	// fingerprint -> cluster) up to and including the requested stage.
@@ -164,6 +165,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Device5> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);
 
 	Microsoft::WRL::ComPtr<ID3D12InfoQueue> m_infoQueue;
+	DWORD m_debugMessageCallbackCookie = 0;
 	
 	Microsoft::WRL::ComPtr<IDXGIFactory6> m_dxgiFactory;
 	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue;
@@ -230,7 +232,7 @@ private:
 	std::shared_ptr<VoxelGuidingBuildPass> m_voxelGuidingBuildPass;
 	std::shared_ptr<VxpgFingerprintPass> m_fingerprintPass;
 	std::shared_ptr<VxpgClusterPass> m_clusterPass;
-	std::shared_ptr<SupervoxelClusterPass> m_supervoxelClusterPass;
+	std::shared_ptr<VxpgClusterVisibilityPass> m_clusterVisibilityPass;
 	std::shared_ptr<SuperpixelBuildPass> m_superpixelBuildPass;
 
 	ScreenshotMetadata BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const;

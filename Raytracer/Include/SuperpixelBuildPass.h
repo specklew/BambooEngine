@@ -25,6 +25,14 @@ public:
     void WriteIndexUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
     void WriteCenterUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
 
+    // Raw resources for the cluster-visibility pass (per-superpixel pixel lists +
+    // the per-pixel superpixel id map), which creates its own descriptors.
+    ID3D12Resource* GetGatheredResource() const { return m_gathered.Get(); }
+    ID3D12Resource* GetCounterResource() const { return m_counter.Get(); }
+    ID3D12Resource* GetIndexResource() const { return m_index.Get(); }
+    uint32_t GetMapX() const { return m_mapX; }
+    uint32_t GetMapY() const { return m_mapY; }
+
 private:
     void CreateRootSignature();
     void CreatePSOs();

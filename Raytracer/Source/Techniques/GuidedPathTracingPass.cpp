@@ -131,12 +131,20 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     vbufferRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VBUFFER_DESCRIPTOR_INDEX;
 
-    D3D12_DESCRIPTOR_RANGE ranges[12] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
+    // Cluster-visibility mask (debug view 10), texture UAV in the shared heap.
+    D3D12_DESCRIPTOR_RANGE clusterMaskRange;
+    clusterMaskRange.BaseShaderRegister = 13; // u13
+    clusterMaskRange.NumDescriptors = 1;
+    clusterMaskRange.RegisterSpace = 0;
+    clusterMaskRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    clusterMaskRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::CLUSTER_VISIBILITY_MASK_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE ranges[13] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
                                          texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
-                                         voxelRepresentativeRange, vplPositionRange, vbufferRange};
+                                         voxelRepresentativeRange, vplPositionRange, vbufferRange, clusterMaskRange};
 
     CD3DX12_ROOT_PARAMETER rootParameters[15];
-    rootParameters[0].InitAsDescriptorTable(12, ranges);
+    rootParameters[0].InitAsDescriptorTable(13, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
     rootParameters[3].InitAsShaderResourceView(5, 0);  // Random buffer

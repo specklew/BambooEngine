@@ -3,6 +3,7 @@
 #include "Renderer.h"
 
 #include <algorithm>
+#include <crtdbg.h>
 
 #include "Camera.h"
 #include "DDSTextureLoader/DDSTextureLoader12.h"
@@ -28,7 +29,7 @@
 #include "VoxelGuidingBuildPass.h"
 #include "VxpgFingerprintPass.h"
 #include "VxpgClusterPass.h"
-#include "SupervoxelClusterPass.h"
+#include "VxpgClusterVisibilityPass.h"
 #include "SuperpixelBuildPass.h"
 #include "Techniques/GuidedPathTracingPass.h"
 #include "RasterDebugMode.h"
@@ -53,6 +54,30 @@
 
 #ifdef _DEBUG
 #define ENABLE_GPU_BASED_VALIDATION 1
+
+#ifdef _DEBUG
+// Routes every D3D12 debug-layer message to spdlog so validation errors/warnings
+// appear in the engine console (and the headless log), not just the attached
+// debugger's output window.
+static void CALLBACK D3D12DebugMessageCallback(
+	D3D12_MESSAGE_CATEGORY /*category*/, D3D12_MESSAGE_SEVERITY severity,
+	D3D12_MESSAGE_ID /*id*/, LPCSTR description, void* /*context*/)
+{
+	switch (severity)
+	{
+	case D3D12_MESSAGE_SEVERITY_CORRUPTION:
+	case D3D12_MESSAGE_SEVERITY_ERROR:
+		spdlog::error("[D3D12] {}", description);
+		break;
+	case D3D12_MESSAGE_SEVERITY_WARNING:
+		spdlog::warn("[D3D12] {}", description);
+		break;
+	default:
+		spdlog::debug("[D3D12] {}", description);
+		break;
+	}
+}
+#endif
 #endif
 
 using namespace Microsoft::WRL;
@@ -110,6 +135,15 @@ void Renderer::Initialize()
 	m_placesManager->Load();
 	m_placesManager->SetCamera(*m_camera);
 	
+#ifdef _DEBUG
+	// Route CRT assertion failures to stderr instead of a modal dialog, so
+	// asserts appear in the console / headless log rather than hanging the run.
+	_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+	_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+#endif
+
 	SetupDeviceAndDebug();
 	CheckTearingSupport();
 	
@@ -203,14 +237,18 @@ void Renderer::Initialize()
 	m_clusterPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass,
 		m_voxelGuidingBuildPass, m_fingerprintPass);
 
-	m_supervoxelClusterPass = std::make_shared<SupervoxelClusterPass>();
-	m_supervoxelClusterPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass);
-
 	m_superpixelBuildPass = std::make_shared<SuperpixelBuildPass>();
 	m_superpixelBuildPass->Initialize(g_device, m_d3d12CommandList);
 	m_superpixelBuildPass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight(),
 		m_lightInjectionPass->GetShadingPointsTexture().Get());
 	WriteSuperpixelUavsToGlobalHeap();
+
+	m_clusterVisibilityPass = std::make_shared<VxpgClusterVisibilityPass>();
+	m_clusterVisibilityPass->Initialize(g_device, m_d3d12CommandList, m_srvCbvUavDescriptorHeap,
+		m_voxelizationPass, m_voxelGuidingBuildPass, m_clusterPass, m_superpixelBuildPass);
+	m_clusterVisibilityPass->SetScene(m_scene);
+	m_clusterVisibilityPass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight());
+	WriteClusterVisibilityUavsToGlobalHeap();
 
 	WireGuidingResources();
 
@@ -342,7 +380,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.guidingFlags =
 		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
 		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 15u) << 1);
-	static_assert(static_cast<int>(GuidingDebugView::ClusterView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
+	static_assert(static_cast<int>(GuidingDebugView::ClusterVisibilityView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
@@ -449,12 +487,6 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 		if (m_voxelizationPass)
 			m_d3d12CommandList->SetGraphicsRootConstantBufferView(4, m_voxelizationPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
-
-		if (m_supervoxelClusterPass)
-		{
-			m_d3d12CommandList->SetGraphicsRootUnorderedAccessView(5, m_supervoxelClusterPass->GetSupervoxelIrradianceBuffer()->GetGPUVirtualAddress());
-			m_d3d12CommandList->SetGraphicsRootUnorderedAccessView(6, m_supervoxelClusterPass->GetSupervoxelCountBuffer()->GetGPUVirtualAddress());
-		}
 
 		for (const auto& go : m_scene->GetGameObjects())
 		{
@@ -618,6 +650,12 @@ void Renderer::OnResize()
 		m_superpixelBuildPass->OnResize(window.GetWidth(), window.GetHeight(),
 			m_lightInjectionPass->GetShadingPointsTexture().Get());
 		WriteSuperpixelUavsToGlobalHeap();
+	}
+
+	if (m_clusterVisibilityPass)
+	{
+		m_clusterVisibilityPass->OnResize(window.GetWidth(), window.GetHeight());
+		WriteClusterVisibilityUavsToGlobalHeap();
 	}
 
 	ExecuteCommandsAndReset();
@@ -887,7 +925,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 10; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center, +2 repVPL/vplPosition, +1 vbuffer
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 13; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center, +2 repVPL/vplPosition, +1 vbuffer, +3 cvis gathered/counter/mask
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -926,7 +964,7 @@ void Renderer::CreateWorldProjCBV()
 
 void Renderer::CreateRasterizationRootSignature()
 {
-	constexpr int num_params = 7;
+	constexpr int num_params = 5;
 
 	CD3DX12_ROOT_PARAMETER rootParameters[num_params];
 	
@@ -1003,8 +1041,6 @@ void Renderer::CreateRasterizationRootSignature()
 	rootParameters[2].InitAsConstantBufferView(2); // Material buffer
 	rootParameters[3].InitAsConstantBufferView(3); // Pass constants
 	rootParameters[4].InitAsConstantBufferView(4); // Voxel grid constants
-	rootParameters[5].InitAsUnorderedAccessView(5); // u5 supervoxel irradiance (debug view 14)
-	rootParameters[6].InitAsUnorderedAccessView(6); // u6 supervoxel count (debug view 14)
 
 	auto static_samplers = GetStaticSamplers();
 	
@@ -1273,6 +1309,8 @@ void Renderer::LoadScene(const std::wstring& path)
 		m_vbufferPass->OnSceneChange(m_scene);
 	if (m_lightInjectionPass)
 		m_lightInjectionPass->OnSceneChange(m_scene);
+	if (m_clusterVisibilityPass)
+		m_clusterVisibilityPass->SetScene(m_scene);
 	m_editorUI->SetScene(m_scene);
 	if (m_placesManager)
 		m_placesManager->OnSceneChanged(ExtractModelName(path));
@@ -1430,15 +1468,15 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	if (stage >= VxpgStage::Cluster && m_clusterPass)
 		m_clusterPass->Run(m_passConstants->data.frameIndex);
 
-	// Stage 6: legacy grid-cell supervoxels (raster debug views only).
-	if (stage >= VxpgStage::Supervoxel && m_supervoxelClusterPass)
-		m_supervoxelClusterPass->Run();
-
-	// Stage 7: SLIC superpixel clustering over the ShadingPoints G-buffer.
+	// Stage 6: SLIC superpixel clustering over the ShadingPoints G-buffer.
 	if (stage >= VxpgStage::Superpixel && m_superpixelBuildPass)
 		m_superpixelBuildPass->Run(
 			m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
 			g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
+
+	// Stage 7: per-superpixel x per-cluster soft visibility (cvis).
+	if (stage >= VxpgStage::ClusterVisibility && m_clusterVisibilityPass)
+		m_clusterVisibilityPass->Run(m_passConstants->data.frameIndex);
 }
 
 void Renderer::WriteVoxelUavsToGlobalHeap()
@@ -1474,6 +1512,33 @@ void Renderer::WriteSuperpixelUavsToGlobalHeap()
 
 	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::SUPERPIXEL_CENTER_DESCRIPTOR_INDEX) * descSize;
 	m_superpixelBuildPass->WriteCenterUavTo(slot);
+}
+
+void Renderer::WriteClusterVisibilityUavsToGlobalHeap()
+{
+	if (!m_clusterVisibilityPass || !m_superpixelBuildPass)
+		return;
+
+	auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+
+	auto writeUav = [&](int index, ID3D12Resource* res, DXGI_FORMAT fmt)
+	{
+		if (!res) return;
+		D3D12_CPU_DESCRIPTOR_HANDLE slot = heapStart;
+		slot.ptr = heapStart.ptr + static_cast<SIZE_T>(index) * descSize;
+		D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+		uav.Format        = fmt;
+		uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+		g_device->CreateUnorderedAccessView(res, nullptr, &uav, slot);
+	};
+
+	writeUav(Constants::Graphics::SPIXEL_GATHERED_DESCRIPTOR_INDEX,
+		m_superpixelBuildPass->GetGatheredResource(), DXGI_FORMAT_R32G32_SINT);
+	writeUav(Constants::Graphics::SPIXEL_COUNTER_DESCRIPTOR_INDEX,
+		m_superpixelBuildPass->GetCounterResource(), DXGI_FORMAT_R32_UINT);
+	writeUav(Constants::Graphics::CLUSTER_VISIBILITY_MASK_DESCRIPTOR_INDEX,
+		m_clusterVisibilityPass->GetMaskResource(), DXGI_FORMAT_R32_UINT);
 }
 
 void Renderer::LoadSkybox(const std::wstring& path)
@@ -1706,9 +1771,24 @@ ComPtr<ID3D12Device5> Renderer::GetDeviceForAdapter(ComPtr<IDXGIAdapter1> adapte
 
 #ifdef _DEBUG
 	ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&m_infoQueue)));
-	ThrowIfFailed(m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true));
+	// Only break into the debugger on genuine memory corruption; errors and
+	// warnings are logged (below) so headless runs surface them instead of
+	// aborting on a breakpoint with no debugger attached.
 	ThrowIfFailed(m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true));
-	ThrowIfFailed(m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true));
+	m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, false);
+	m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, false);
+
+	// Mirror every debug-layer message into spdlog (console + headless log).
+	ComPtr<ID3D12InfoQueue1> infoQueue1;
+	if (SUCCEEDED(m_infoQueue.As(&infoQueue1)))
+	{
+		infoQueue1->RegisterMessageCallback(&D3D12DebugMessageCallback,
+			D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &m_debugMessageCallbackCookie);
+	}
+	else
+	{
+		spdlog::warn("ID3D12InfoQueue1 unavailable; D3D12 messages will only reach the debugger output.");
+	}
 #endif
 
 

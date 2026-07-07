@@ -21,7 +21,6 @@ enum class RasterDebugMode : int
 	ShadingPointsNormal = 11,
 	ShadingPointsPos = 12,
 	TangentHealth = 13,
-	SupervoxelData = 14,
 	SuperpixelId = 15,
 	SuperpixelRepresentative = 16,
 };
@@ -38,11 +37,10 @@ inline constexpr DebugViewDoc kRasterDebugModeDocs[] = {
 	{"roughness texture", "grayscale: dark = smooth, bright = rough", "outputs the roughness channel"},
 	{"VoxelizationPass", "geometry-conforming voxel shell, checkerboard colors", "shades surfaces whose voxel is occupied"},
 	{"LightInjectionPass irradiance", "heat ramp bright on lit surfaces, dark in shadow", "reads injected voxel irradiance at the surface voxel"},
-	{"(legacy) grid-cell supervoxels", "coarse colored blocks over geometry", "hash-colors the analytic supervoxel id — obsolete, dies with SupervoxelClusterPass"},
+	{"grid-cell supervoxels (analytic)", "coarse colored blocks over geometry", "hash-colors voxelCoord / supervoxelFactor at the surface voxel"},
 	{"LightInjectionPass ShadingPoints G-buffer", "same direction colors as WorldNormals, black where primary ray missed", "decodes the octahedral normal from the ShadingPoints texture"},
 	{"LightInjectionPass ShadingPoints G-buffer", "world-position gradient, black where primary ray missed", "visualizes ShadingPoints.xyz scaled into color"},
 	{"tangent quality (NaN regression sentinel)", "all green; red = tangent parallel to normal, magenta = NaN", "flags degenerate tangent frames that produced the blue-artifact bug"},
-	{"(legacy) SupervoxelClusterPass buffers", "heat ramp per coarse block", "per-supervoxel mean irradiance — obsolete, dies with SupervoxelClusterPass"},
 	{"SuperpixelPass (SLIC)", "~32px mosaic cells hugging geometry edges", "hash-colors the per-pixel superpixel id"},
 	{"SuperpixelPass (SLIC)", "mosaic of direction colors, one normal per cell", "paints each pixel with its superpixel's representative normal"},
 };
@@ -55,8 +53,6 @@ inline VxpgStage StageFor(RasterDebugMode mode)
 	case RasterDebugMode::VoxelOccupancy:   // reads occupancy
 	case RasterDebugMode::Supervoxels:      // reads occupancy (supervoxel id is analytic)
 		return VxpgStage::Voxelize;
-	case RasterDebugMode::SupervoxelData:   // reads the accumulated supervoxel buffers
-		return VxpgStage::Supervoxel;
 	case RasterDebugMode::SuperpixelId:            // reads u_index
 	case RasterDebugMode::SuperpixelRepresentative: // reads u_index + u_center
 		return VxpgStage::Superpixel;

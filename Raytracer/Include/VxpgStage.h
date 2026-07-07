@@ -12,8 +12,8 @@ enum class VxpgStage : int
 	GuidingBuild,
 	Fingerprint,
 	Cluster,
-	Supervoxel,
 	Superpixel,
+	ClusterVisibility,
 };
 
 inline bool operator>=(VxpgStage a, VxpgStage b)

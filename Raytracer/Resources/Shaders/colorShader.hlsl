@@ -46,9 +46,6 @@ RWTexture3D<uint> gVoxelVplCount   : register(u3);
 RWTexture2D<float4> gShadingPoints : register(u4); // VXPG primary G-buffer (pos, octaN)
 
 // Stage A supervoxel cluster output (debug view 14 reads these). Bound as root UAVs.
-#define MAX_SUPERVOXELS 512
-RWStructuredBuffer<uint> gSvIrradiance : register(u5); // packed fixed-point (x100) summed irradiance
-RWStructuredBuffer<uint> gSvCount      : register(u6); // active voxel count (0 => inactive)
 
 // Stage B superpixel outputs (debug views 15/16).
 RWTexture2D<int>    gSuperpixelIndex  : register(u7); // per-pixel superpixel id (screen res)

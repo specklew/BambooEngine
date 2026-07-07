@@ -30,11 +30,10 @@ public:
     void Render() override;
 
     // Consumes voxelize -> inject -> guiding distribution -> fingerprint ->
-    // cluster. The legacy grid-cell supervoxel stage is NOT read by this
-    // technique. Fingerprint + cluster are required always (not just for debug
-    // views 8/9): the tree passes consume them and their cost belongs in
-    // equal-time benchmarks.
-    VxpgStage RequiredVxpgStage() const override { return VxpgStage::Cluster; }
+    // cluster -> cluster-visibility. Fingerprint/cluster/cvis are required always
+    // (not just for debug views 8/9/10): the tree passes consume them and their
+    // cost belongs in equal-time benchmarks.
+    VxpgStage RequiredVxpgStage() const override { return VxpgStage::ClusterVisibility; }
 
 protected:
     TechniqueDesc GetTechniqueDesc() const override;

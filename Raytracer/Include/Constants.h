@@ -26,6 +26,12 @@ namespace Constants
         // Shared primary-visibility buffer (ADR 0004), written by VBufferPass,
         // consumed by light injection + the guided integrator.
         constexpr int VBUFFER_DESCRIPTOR_INDEX = VPL_POSITION_DESCRIPTOR_INDEX + 1; // 527
+        // VXPG cluster-visibility (cvis): per-superpixel pixel-list + counter (from
+        // the superpixel pass) and the cluster-visibility mask (written by cvis),
+        // read by the cvis check kernel + guided PT debug view 10.
+        constexpr int SPIXEL_GATHERED_DESCRIPTOR_INDEX = VBUFFER_DESCRIPTOR_INDEX + 1; // 528
+        constexpr int SPIXEL_COUNTER_DESCRIPTOR_INDEX = SPIXEL_GATHERED_DESCRIPTOR_INDEX + 1; // 529
+        constexpr int CLUSTER_VISIBILITY_MASK_DESCRIPTOR_INDEX = SPIXEL_COUNTER_DESCRIPTOR_INDEX + 1; // 530
         constexpr int STATIC_SAMPLERS_COUNT = 6;
         // Max voxels in the compacted guiding distribution (matches SIByL VXGuider_MAX_CAPACITY)
         constexpr int VOXEL_GUIDING_CAPACITY = 131072;

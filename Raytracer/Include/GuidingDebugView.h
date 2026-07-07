@@ -17,6 +17,7 @@ enum class GuidingDebugView : int
 	VplPositionView = 7,
 	FingerprintView = 8,
 	ClusterView = 9,
+	ClusterVisibilityView = 10,
 };
 
 // Runtime docs, one per enum entry in order (FormatDebugViewDocs static_asserts the count).
@@ -30,5 +31,6 @@ inline constexpr DebugViewDoc kGuidingDebugViewDocs[] = {
 	{"LightInjectionPass representative VPL (Pass 2)", "green on surfaces in active voxels, black elsewhere, ZERO red/magenta (disable accumulation for a crisp read)", "reads gVoxelRepresentative at the primary hit's voxel: red = active voxel missing data, magenta = stored position outside the voxel, green = OK"},
 	{"LightInjectionPass per-pixel VPL buffer (Pass 2)", "noisy direction colors (second-bounce world), black where the VPL bounce missed", "decodes gVplPosition's octahedral normal per pixel straight from raygen, no trace"},
 	{"VxpgFingerprintPass voxel fingerprints (Pass 3)", "mid-gray spatially-coherent interior surfaces, dark blue on unlit/sky, ZERO magenta; 128 green dots scattering per frame; all-black or all-white = shadow-ray or facing bug", "grayscale = popcount(fingerprint)/128 at the primary hit's voxel; magenta = bad inverse-index; green = the sampled representative pixels"},
-	{"VxpgClusterPass cluster assignments (Pass 4)", "~32 spatially coherent color patches (colors RESHUFFLE per frame - compaction order churn, expected); white dots spread across the scene = the 32 seeds; ZERO magenta; salt-and-pepper noise = assignment bug, single color = distance/center bug, no white = seeding bug", "categorical color = gVoxelClusterAssignments at the primary hit's voxel; white = seed voxel; magenta = bad inverse-index or unassigned; dark blue = unlit/sky"},
+	{"VxpgClusterPass cluster assignments (Pass 4)", "DISABLE ACCUMULATION (colors reshuffle per frame). Per frame: saturated hue-wheel regions, coherent-ISH with voxel-level interleaving at boundaries (clusters live in fingerprint+intensity space, not position - speckle inherits the fingerprint checkerboard); 32 single-voxel white dots on lit geometry = the seeds; ZERO magenta; pure structureless noise = assignment bug, single color = distance/center bug, no white dots = seeding bug", "categorical color = gVoxelClusterAssignments at the primary hit's voxel; white = seed voxel; magenta = bad inverse-index or unassigned; dark blue = unlit/sky"},
+	{"VxpgClusterVisibilityPass mask (Pass 5)", "blocky 32px-tile grayscale: bright in open areas, darker in occluded pockets (behind curtains); all-black = check kernel dead / no VPLs, all-white = mask OR-saturation bug", "grayscale = popcount(gClusterVisibilityMask)/32 at the pixel's superpixel tile = how many of the 32 light clusters the screen region can see"},
 };

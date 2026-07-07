@@ -89,37 +89,6 @@ float4 DebugView_Voxels(int mode, float3 posW)
                 return float4(supervoxelColor * checker, 1.0);
             }
         }
-        else if (mode == 14)
-        {
-            // Data-driven supervoxel view: heat-ramp the mean irradiance stored by
-            // the cluster pass (gSvIrradiance/gSvCount). Verifies the atomics that
-            // mode 10 (analytic id hash) cannot. Same 3x3x3 occupied search so a
-            // surface point maps to its occupied cell.
-            int3 occupiedCoord = int3(-1, -1, -1);
-            [unroll] for (int dz = -1; dz <= 1; ++dz)
-            [unroll] for (int dy = -1; dy <= 1; ++dy)
-            [unroll] for (int dx = -1; dx <= 1; ++dx)
-            {
-                int3 neighborCoord = voxelCoord + int3(dx, dy, dz);
-                if (all(neighborCoord >= 0) && all(neighborCoord < int(voxGridDim)) && gVoxelOccupancy[neighborCoord] != 0u)
-                    occupiedCoord = neighborCoord;
-            }
-            if (occupiedCoord.x >= 0)
-            {
-                uint factor   = max(voxSupervoxelFactor, 1u);
-                uint svDim    = (voxGridDim + factor - 1u) / factor;
-                uint3 svCoord = uint3(occupiedCoord) / factor;
-                uint svIndex  = svCoord.x + svCoord.y * svDim + svCoord.z * svDim * svDim;
-                if (svIndex >= MAX_SUPERVOXELS)
-                    return float4(1.0, 0.0, 1.0, 1.0); // magenta = index overflow (cluster drops these)
-
-                uint count = gSvCount[svIndex];
-                if (count == 0u)
-                    return float4(0.02, 0.02, 0.02, 1.0); // active voxel but no supervoxel sum = bug signal
-                float meanIrradiance = (float(gSvIrradiance[svIndex]) / 100.0) / float(count);
-                return float4(HeatColor(1.0 - exp(-meanIrradiance * voxHeatScale)), 1.0);
-            }
-        }
         else if (mode == 9)
         {
             uint vplCount = gVoxelVplCount[voxelCoord];
@@ -154,7 +123,7 @@ bool TryDebugView(int mode, DebugData d, float3 posW, float2 screenUV, out float
         color = DebugView_Superpixels(mode, screenUV);
         return true;
     }
-    if ((mode == 8 || mode == 9 || mode == 10 || mode == 14) && voxGridDim > 0)
+    if ((mode == 8 || mode == 9 || mode == 10) && voxGridDim > 0)
     {
         color = DebugView_Voxels(mode, posW);
         return true;
