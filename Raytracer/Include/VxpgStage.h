@@ -10,6 +10,8 @@ enum class VxpgStage : int
 	Voxelize,
 	Inject,
 	GuidingBuild,
+	Fingerprint,
+	Cluster,
 	Supervoxel,
 	Superpixel,
 };

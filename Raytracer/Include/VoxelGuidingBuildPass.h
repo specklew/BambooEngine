@@ -30,7 +30,7 @@ public:
     RWStructuredBuffer<uint32_t>* GetCompactIdsBuffer() const { return m_compactIds.get(); }
     RWStructuredBuffer<float>*    GetCdfBuffer() const { return m_cdf.get(); }
     RWStructuredBuffer<int32_t>*  GetInverseIndexBuffer() const { return m_inverseIndex.get(); }
-    RWStructuredBuffer<DirectX::XMFLOAT4>* GetRepresentVplBuffer() const { return m_representVpl.get(); }
+    RWStructuredBuffer<DirectX::XMFLOAT4>* GetCompactVoxelLightPointsBuffer() const { return m_compactVoxelLightPoints.get(); }
     RWStructuredBuffer<float>*    GetPremulIrradianceBuffer() const { return m_premulIrradiance.get(); }
     RWStructuredBuffer<DirectX::XMUINT4>* GetLiveBoundMinBuffer() const { return m_liveBoundMin.get(); }
     RWStructuredBuffer<DirectX::XMUINT4>* GetLiveBoundMaxBuffer() const { return m_liveBoundMax.get(); }
@@ -54,7 +54,7 @@ private:
     std::unique_ptr<RWStructuredBuffer<int32_t>>  m_inverseIndex;      // grid-sized
     std::unique_ptr<RWStructuredBuffer<DirectX::XMUINT4>> m_liveBoundMin; // grid-sized
     std::unique_ptr<RWStructuredBuffer<DirectX::XMUINT4>> m_liveBoundMax; // grid-sized
-    std::unique_ptr<RWStructuredBuffer<DirectX::XMFLOAT4>> m_representVpl;
+    std::unique_ptr<RWStructuredBuffer<DirectX::XMFLOAT4>> m_compactVoxelLightPoints; // SIByL u_RepresentVPL
     std::unique_ptr<RWStructuredBuffer<float>>    m_premulIrradiance;
 
     // Private heap: [0]=irradiance [1]=vpl count [2]=representative VPL tex.

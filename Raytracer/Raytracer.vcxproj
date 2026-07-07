@@ -123,6 +123,8 @@
     <ClInclude Include="Include\VoxelizationPass.h" />
     <ClInclude Include="Include\LightInjectionPass.h" />
     <ClInclude Include="Include\VBufferPass.h" />
+    <ClInclude Include="Include\VxpgFingerprintPass.h" />
+    <ClInclude Include="Include\VxpgClusterPass.h" />
     <ClInclude Include="Include\Techniques\GuidedPathTracingPass.h" />
     <ClInclude Include="Include\GuidingDebugView.h" />
     <ClInclude Include="Include\VoxelGuidingBuildPass.h" />
@@ -347,6 +349,8 @@
     <None Include="Resources\Shaders\lightInjection.hlsl" />
     <None Include="Resources\Shaders\VBuffer.hlsl" />
     <None Include="Resources\Shaders\vbufferPass.hlsl" />
+    <None Include="Resources\Shaders\vxpgFingerprint.hlsl" />
+    <None Include="Resources\Shaders\vxpgCluster.hlsl" />
     <None Include="Resources\Shaders\guidedPathTracing.hlsl" />
     <None Include="Resources\Shaders\voxelGuidingBuild.hlsl" />
     <None Include="Resources\Shaders\supervoxelCluster.hlsl" />
@@ -370,6 +374,8 @@
     <ClCompile Include="Source\VoxelizationPass.cpp" />
     <ClCompile Include="Source\LightInjectionPass.cpp" />
     <ClCompile Include="Source\VBufferPass.cpp" />
+    <ClCompile Include="Source\VxpgFingerprintPass.cpp" />
+    <ClCompile Include="Source\VxpgClusterPass.cpp" />
     <ClCompile Include="Source\Techniques\GuidedPathTracingPass.cpp" />
     <ClCompile Include="Source\VoxelGuidingBuildPass.cpp" />
     <ClCompile Include="Source\SupervoxelClusterPass.cpp" />
@@ -484,6 +490,10 @@
     <Content Include="Resources\Shaders\voxelGuidingBuild.clear.shader" />
     <Content Include="Resources\Shaders\voxelGuidingBuild.reload.shader" />
     <Content Include="Resources\Shaders\voxelGuidingBuild.compact.shader" />
+    <Content Include="Resources\Shaders\vxpgFingerprint.presample.shader" />
+    <Content Include="Resources\Shaders\vxpgFingerprint.visibility.shader" />
+    <Content Include="Resources\Shaders\vxpgCluster.seed.shader" />
+    <Content Include="Resources\Shaders\vxpgCluster.assign.shader" />
     <Content Include="Resources\Shaders\voxelGuidingBuild.cdf.shader" />
     <Content Include="Resources\Shaders\supervoxelCluster.clear.shader" />
     <Content Include="Resources\Shaders\supervoxelCluster.accum.shader" />

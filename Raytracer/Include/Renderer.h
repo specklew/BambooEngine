@@ -34,6 +34,8 @@ class RaytracePass;
 class VBufferPass;
 class LightInjectionPass;
 class VoxelGuidingBuildPass;
+class VxpgFingerprintPass;
+class VxpgClusterPass;
 class SupervoxelClusterPass;
 class SuperpixelBuildPass;
 class FrameAccumulationPass;
@@ -139,7 +141,7 @@ private:
 	void WriteSuperpixelUavsToGlobalHeap();
 	void WireGuidingResources();
 	// Runs the linear VXPG pipeline (voxelize -> inject -> guiding build ->
-	// supervoxel cluster) up to and including the requested stage.
+	// fingerprint -> cluster) up to and including the requested stage.
 	void RunVxpgPipelineUpTo(VxpgStage stage);
 
 	std::shared_ptr<RaytracePass> m_raytracePass;
@@ -226,6 +228,8 @@ private:
 	std::shared_ptr<PlacesManager> m_placesManager;
 	std::shared_ptr<VoxelizationPass> m_voxelizationPass;
 	std::shared_ptr<VoxelGuidingBuildPass> m_voxelGuidingBuildPass;
+	std::shared_ptr<VxpgFingerprintPass> m_fingerprintPass;
+	std::shared_ptr<VxpgClusterPass> m_clusterPass;
 	std::shared_ptr<SupervoxelClusterPass> m_supervoxelClusterPass;
 	std::shared_ptr<SuperpixelBuildPass> m_superpixelBuildPass;
 

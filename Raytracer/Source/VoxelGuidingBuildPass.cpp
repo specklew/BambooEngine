@@ -36,7 +36,7 @@ void VoxelGuidingBuildPass::CreateBuffers()
     m_compactIds   = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, capacity, L"VoxelGuiding CompactIds");
     m_weights      = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Weights");
     m_cdf          = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity,    L"VoxelGuiding Cdf");
-    m_representVpl = std::make_unique<RWStructuredBuffer<DirectX::XMFLOAT4>>(m_device, capacity, L"VoxelGuiding RepresentVPL");
+    m_compactVoxelLightPoints = std::make_unique<RWStructuredBuffer<DirectX::XMFLOAT4>>(m_device, capacity, L"VoxelGuiding CompactVoxelLightPoints");
     m_premulIrradiance = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity, L"VoxelGuiding PremulIrradiance");
 
     CreateGridSizedBuffers();
@@ -174,7 +174,7 @@ void VoxelGuidingBuildPass::Run(ID3D12Resource* representativeTex)
     m_commandList->SetComputeRootUnorderedAccessView(6,  m_inverseIndex->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(7,  m_liveBoundMin->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(8,  m_liveBoundMax->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(9,  m_representVpl->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(9,  m_compactVoxelLightPoints->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(10, m_premulIrradiance->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(11, m_voxelPass->GetBakedBoundMinBuffer()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(12, m_voxelPass->GetBakedBoundMaxBuffer()->GetGPUVirtualAddress());
@@ -198,7 +198,7 @@ void VoxelGuidingBuildPass::Run(ID3D12Resource* representativeTex)
     m_compactIds->UavBarrier(cmd);
     m_weights->UavBarrier(cmd);
     m_inverseIndex->UavBarrier(cmd);
-    m_representVpl->UavBarrier(cmd);
+    m_compactVoxelLightPoints->UavBarrier(cmd);
     m_premulIrradiance->UavBarrier(cmd);
 
     m_commandList->SetPipelineState(m_cdfPso.Get());

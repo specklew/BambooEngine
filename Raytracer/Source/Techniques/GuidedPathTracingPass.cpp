@@ -6,6 +6,8 @@
 #include "Renderer.h"
 #include "VoxelizationPass.h"
 #include "VoxelGuidingBuildPass.h"
+#include "VxpgFingerprintPass.h"
+#include "VxpgClusterPass.h"
 #include "Window.h"
 #include "Resources/ShaderBindingTable.h"
 #include "Resources/StructuredBuffer.h"
@@ -133,7 +135,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
                                          texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
                                          voxelRepresentativeRange, vplPositionRange, vbufferRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[12];
+    CD3DX12_ROOT_PARAMETER rootParameters[15];
     rootParameters[0].InitAsDescriptorTable(12, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
@@ -146,8 +148,11 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     rootParameters[9].InitAsUnorderedAccessView(4, 0);  // Guiding compact ids
     rootParameters[10].InitAsUnorderedAccessView(5, 0); // Guiding CDF
     rootParameters[11].InitAsUnorderedAccessView(6, 0); // Guiding inverse index
+    rootParameters[12].InitAsUnorderedAccessView(10, 0); // Voxel fingerprints (debug view 8)
+    rootParameters[13].InitAsUnorderedAccessView(11, 0); // Cluster assignments (debug view 9)
+    rootParameters[14].InitAsUnorderedAccessView(12, 0); // Cluster seeds (debug view 9)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(12, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(15, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -162,7 +167,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
 
 void GuidedPathTracingPass::Render()
 {
-    if (!m_voxelPass || !m_buildPass)
+    if (!m_voxelPass || !m_buildPass || !m_fingerprintPass || !m_clusterPass)
     {
         spdlog::warn("GuidedPathTracingPass: guiding resources not wired, skipping render");
         return;
@@ -188,6 +193,9 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootUnorderedAccessView(9, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(10, m_buildPass->GetCdfBuffer()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(11, m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(12, m_fingerprintPass->GetVoxelFingerprintsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(13, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(14, m_clusterPass->GetClusterSeedCompactIdsBuffer()->GetGPUVirtualAddress());
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(

@@ -3,8 +3,8 @@
 #include "DebugViewDoc.h"
 
 // Debug visualization for the guided path tracing technique.
-// Encoded into PassConstants::guidingFlags bits 1-3 (see guidedPathTracing.hlsl).
-// NOTE: 3 bits are full (views 0-7). The next view needs a wider bitfield.
+// Encoded into PassConstants::guidingFlags bits 1-4 (see guidedPathTracing.hlsl).
+// NOTE: 4 bits (views 0-15). The next view past 15 needs a wider bitfield.
 enum class GuidingDebugView : int
 {
 	None = 0,
@@ -15,6 +15,8 @@ enum class GuidingDebugView : int
 	InverseIndexRoundTrip = 5,
 	RepresentativeCheck = 6,
 	VplPositionView = 7,
+	FingerprintView = 8,
+	ClusterView = 9,
 };
 
 // Runtime docs, one per enum entry in order (FormatDebugViewDocs static_asserts the count).
@@ -27,4 +29,6 @@ inline constexpr DebugViewDoc kGuidingDebugViewDocs[] = {
 	{"VoxelGuidingBuildPass inverse index (Pass 1)", "green on surfaces in active voxels, black elsewhere, ZERO red", "round-trip check: voxelID -> gInverseIndex -> compactID -> gCompactIds must map back to the same voxelID"},
 	{"LightInjectionPass representative VPL (Pass 2)", "green on surfaces in active voxels, black elsewhere, ZERO red/magenta (disable accumulation for a crisp read)", "reads gVoxelRepresentative at the primary hit's voxel: red = active voxel missing data, magenta = stored position outside the voxel, green = OK"},
 	{"LightInjectionPass per-pixel VPL buffer (Pass 2)", "noisy direction colors (second-bounce world), black where the VPL bounce missed", "decodes gVplPosition's octahedral normal per pixel straight from raygen, no trace"},
+	{"VxpgFingerprintPass voxel fingerprints (Pass 3)", "mid-gray spatially-coherent interior surfaces, dark blue on unlit/sky, ZERO magenta; 128 green dots scattering per frame; all-black or all-white = shadow-ray or facing bug", "grayscale = popcount(fingerprint)/128 at the primary hit's voxel; magenta = bad inverse-index; green = the sampled representative pixels"},
+	{"VxpgClusterPass cluster assignments (Pass 4)", "~32 spatially coherent color patches (colors RESHUFFLE per frame - compaction order churn, expected); white dots spread across the scene = the 32 seeds; ZERO magenta; salt-and-pepper noise = assignment bug, single color = distance/center bug, no white = seeding bug", "categorical color = gVoxelClusterAssignments at the primary hit's voxel; white = seed voxel; magenta = bad inverse-index or unassigned; dark blue = unlit/sky"},
 };

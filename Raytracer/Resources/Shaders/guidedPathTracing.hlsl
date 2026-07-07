@@ -40,6 +40,14 @@ RWTexture2D<float4> gVplPosition         : register(u8);
 // from here; all spp samples of a frame share it and diverge at the bounce.
 RWTexture2D<uint4> gVBuffer : register(u9);
 
+// Voxel fingerprints (4 uints = 128-bit visibility mask per compact voxel),
+// built by VxpgFingerprintPass. Read only by debug view 8.
+RWStructuredBuffer<uint> gVoxelFingerprints : register(u10);
+
+// Cluster pass outputs (debug view 9). SIByL u_Clusters / u_Seeds.
+RWStructuredBuffer<int> gVoxelClusterAssignments : register(u11);
+RWStructuredBuffer<int> gClusterSeedCompactIds   : register(u12);
+
 cbuffer VoxelGridCB : register(b4)
 {
     float3 voxGridMin;
@@ -444,7 +452,7 @@ void GuidedRayGen()
 
     // View 7: per-pixel VPL buffer — decode its octahedral normal directly,
     // no rays needed. Black where the injection bounce missed (buffer zero).
-    if (((guidingFlags >> 1) & 7u) == 7u)
+    if (((guidingFlags >> 1) & 15u) == 7u)
     {
         float4 vpl = gVplPosition[launchIndex];
         float3 col = all(vpl == 0.0f)
@@ -499,7 +507,7 @@ void GuidedRayGen()
     surface.roughness = roughness;
     surface.metallic  = metallic;
 
-    uint debugView = (guidingFlags >> 1) & 7u;
+    uint debugView = (guidingFlags >> 1) & 15u;
 
     // View 5: inverse-index round-trip. For the primary hit's voxel, look up
     // gInverseIndex -> compactID and confirm gCompactIds maps back to the same
@@ -547,6 +555,97 @@ void GuidedRayGen()
                     col = float3(1, 0, 1);
                 else
                     col = float3(0, 1, 0);
+            }
+        }
+        gOutput[launchIndex] = float4(col, 1.0);
+        return;
+    }
+
+    // View 8: voxel fingerprints. popcount(fingerprint)/128 as grayscale at the
+    // primary hit's voxel (bright = sees many representatives). Green overlay =
+    // the 128 stratified representative pixels this frame (recomputed with the
+    // same hash the presample kernel used). magenta = inverse index points past
+    // the compacted count (corruption). dark blue = unlit voxel / sky.
+    if (debugView == 8u)
+    {
+        uint2 dims = DispatchRaysDimensions().xy;
+        uint randSeed = pcg_hash(frameIndex);
+        float2 cellSize = float2(dims) / float2(16.0, 8.0);
+        [loop] for (uint c = 0; c < 128u; ++c)
+        {
+            uint cx = c % 16u;
+            uint cy = c / 16u;
+            uint s = pcg_hash((c * 9781u + randSeed * 26699u) | 1u);
+            int2 p = clamp(int2(cellSize * (float2(cx, cy) + Random2D(s))),
+                           int2(0, 0), int2(dims) - int2(1, 1));
+            if (all(uint2(p) == launchIndex))
+            {
+                gOutput[launchIndex] = float4(0, 1, 0, 1);
+                return;
+            }
+        }
+
+        float3 col = float3(0, 0, 0.15); // unlit / out of grid
+        int3 v = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
+        if (all(v >= 0) && all(v < int(voxGridDim)))
+        {
+            uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+            int ci = gVoxInverseIndex[flatId];
+            if (ci >= 0)
+            {
+                if (uint(ci) >= gVoxCounters[0])
+                {
+                    col = float3(1, 0, 1); // compactID past the count = corruption
+                }
+                else
+                {
+                    uint bits = countbits(gVoxelFingerprints[ci * 4 + 0])
+                              + countbits(gVoxelFingerprints[ci * 4 + 1])
+                              + countbits(gVoxelFingerprints[ci * 4 + 2])
+                              + countbits(gVoxelFingerprints[ci * 4 + 3]);
+                    col = float3(float(bits) / 128.0, float(bits) / 128.0, float(bits) / 128.0);
+                }
+            }
+        }
+        gOutput[launchIndex] = float4(col, 1.0);
+        return;
+    }
+
+    // View 9: cluster assignments. Categorical color per cluster id at the
+    // primary hit's voxel — expect ~32 coherent patches whose colors reshuffle
+    // every frame (compaction order churn, not a bug). white = one of the 32
+    // seed voxels. magenta = bad inverse index or unassigned voxel. dark
+    // blue = unlit voxel / sky.
+    if (debugView == 9u)
+    {
+        float3 col = float3(0, 0, 0.15); // unlit / out of grid
+        int3 v = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
+        if (all(v >= 0) && all(v < int(voxGridDim)))
+        {
+            uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+            int ci = gVoxInverseIndex[flatId];
+            if (ci >= 0)
+            {
+                int cluster = (uint(ci) < gVoxCounters[0]) ? gVoxelClusterAssignments[ci] : -1;
+                bool isSeed = false;
+                [loop] for (uint s = 0; s < 32u; ++s)
+                {
+                    if (gClusterSeedCompactIds[s] == ci) isSeed = true;
+                }
+                if (isSeed)
+                {
+                    col = float3(1, 1, 1);
+                }
+                else if (cluster < 0 || cluster >= 32)
+                {
+                    col = float3(1, 0, 1); // bad inverse index or unassigned
+                }
+                else
+                {
+                    uint h = pcg_hash(uint(cluster) * 2654435761u);
+                    col = 0.25 + 0.75 * float3(float(h & 255u), float((h >> 8) & 255u),
+                                               float((h >> 16) & 255u)) / 255.0;
+                }
             }
         }
         gOutput[launchIndex] = float4(col, 1.0);

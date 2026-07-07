@@ -4,6 +4,8 @@
 
 class VoxelizationPass;
 class VoxelGuidingBuildPass;
+class VxpgFingerprintPass;
+class VxpgClusterPass;
 
 // VXPG guided path tracing technique. Two-sample MIS at the first bounce
 // between BSDF sampling and the voxel irradiance distribution (CDF over
@@ -15,24 +17,32 @@ public:
     // Wired by the Renderer after construction (registry factory takes no args)
     void SetGuidingResources(
         const std::shared_ptr<VoxelizationPass>& voxelPass,
-        const std::shared_ptr<VoxelGuidingBuildPass>& buildPass)
+        const std::shared_ptr<VoxelGuidingBuildPass>& buildPass,
+        const std::shared_ptr<VxpgFingerprintPass>& fingerprintPass,
+        const std::shared_ptr<VxpgClusterPass>& clusterPass)
     {
         m_voxelPass = voxelPass;
         m_buildPass = buildPass;
+        m_fingerprintPass = fingerprintPass;
+        m_clusterPass = clusterPass;
     }
 
     void Render() override;
 
-    // Consumes voxelize -> inject -> guiding distribution. The legacy grid-cell
-    // supervoxel stage is NOT read by this technique — requiring it would burn
-    // GPU time every frame and skew equal-time benchmarks.
-    VxpgStage RequiredVxpgStage() const override { return VxpgStage::GuidingBuild; }
+    // Consumes voxelize -> inject -> guiding distribution -> fingerprint ->
+    // cluster. The legacy grid-cell supervoxel stage is NOT read by this
+    // technique. Fingerprint + cluster are required always (not just for debug
+    // views 8/9): the tree passes consume them and their cost belongs in
+    // equal-time benchmarks.
+    VxpgStage RequiredVxpgStage() const override { return VxpgStage::Cluster; }
 
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;
 
 private:
-    std::shared_ptr<VoxelizationPass>     m_voxelPass;
+    std::shared_ptr<VoxelizationPass>      m_voxelPass;
     std::shared_ptr<VoxelGuidingBuildPass> m_buildPass;
+    std::shared_ptr<VxpgFingerprintPass>   m_fingerprintPass;
+    std::shared_ptr<VxpgClusterPass>       m_clusterPass;
 };

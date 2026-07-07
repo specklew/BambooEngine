@@ -26,7 +26,9 @@ RWStructuredBuffer<int>    gInverseIndex : register(u7);
 RWStructuredBuffer<uint4>  gLiveBoundMin : register(u8);
 RWStructuredBuffer<uint4>  gLiveBoundMax : register(u9);
 // Compact-indexed outputs for the guiding passes downstream (fingerprint, tree).
-RWStructuredBuffer<float4> gRepresentVPL      : register(u10);
+// SIByL u_RepresentVPL. One representative light-carrying surface point per
+// compact voxel (pos + octa normal), consumed by the fingerprint shadow rays.
+RWStructuredBuffer<float4> gCompactVoxelLightPoints : register(u10);
 RWStructuredBuffer<float>  gPremulIrradiance  : register(u11);
 
 // Bake outputs (read-only here; UAV-typed to stay in UNORDERED_ACCESS and skip
@@ -102,7 +104,7 @@ void CompactVoxels(uint3 tid : SV_DispatchThreadID)
 
     // Zero representative = "no VPL landed here" — written through so the
     // consumer sees an explicit sentinel instead of stale data.
-    gRepresentVPL[slot] = gVoxelRepresentative[tid];
+    gCompactVoxelLightPoints[slot] = gVoxelRepresentative[tid];
 
     // Irradiance premultiplied by the bound's dominant-face area. Full-cube
     // bounds (bake flags off) give area = 1, so this equals the plain weight;

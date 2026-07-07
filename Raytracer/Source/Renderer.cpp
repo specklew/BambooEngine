@@ -26,6 +26,8 @@
 #include "LightInjectionPass.h"
 #include "VBufferPass.h"
 #include "VoxelGuidingBuildPass.h"
+#include "VxpgFingerprintPass.h"
+#include "VxpgClusterPass.h"
 #include "SupervoxelClusterPass.h"
 #include "SuperpixelBuildPass.h"
 #include "Techniques/GuidedPathTracingPass.h"
@@ -46,6 +48,8 @@
 #include "Utils/PassConstants.h"
 
 #include <filesystem>
+
+#include "AccelerationStructures.h"
 
 #ifdef _DEBUG
 #define ENABLE_GPU_BASED_VALIDATION 1
@@ -191,6 +195,14 @@ void Renderer::Initialize()
 	m_voxelGuidingBuildPass = std::make_shared<VoxelGuidingBuildPass>();
 	m_voxelGuidingBuildPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass);
 
+	m_fingerprintPass = std::make_shared<VxpgFingerprintPass>();
+	m_fingerprintPass->Initialize(g_device, m_d3d12CommandList, m_voxelGuidingBuildPass, m_lightInjectionPass);
+	m_fingerprintPass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight());
+
+	m_clusterPass = std::make_shared<VxpgClusterPass>();
+	m_clusterPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass,
+		m_voxelGuidingBuildPass, m_fingerprintPass);
+
 	m_supervoxelClusterPass = std::make_shared<SupervoxelClusterPass>();
 	m_supervoxelClusterPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass);
 
@@ -329,8 +341,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.frameIndex++;
 	m_passConstants->data.guidingFlags =
 		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
-		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 7u) << 1);
-	static_assert(static_cast<int>(GuidingDebugView::VplPositionView) <= 7, "GuidingDebugView must fit in 3 bits of guidingFlags");
+		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 15u) << 1);
+	static_assert(static_cast<int>(GuidingDebugView::ClusterView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
@@ -598,6 +610,8 @@ void Renderer::OnResize()
 		m_vbufferPass->OnResize();
 	if (m_lightInjectionPass)
 		m_lightInjectionPass->OnResize();
+	if (m_fingerprintPass)
+		m_fingerprintPass->OnResize(window.GetWidth(), window.GetHeight());
 
 	if (m_superpixelBuildPass && m_lightInjectionPass)
 	{
@@ -1124,6 +1138,16 @@ bool Renderer::CheckRayTracingSupport() const
 		return false;
 	}
 
+	// VXPG fingerprint / cvis visibility kernels use inline RayQuery (Tier 1.1,
+	// above) plus [WaveSize(32)] ballot packing, which needs shader model 6.6.
+	D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { D3D_SHADER_MODEL_6_6 };
+	ThrowIfFailed(g_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
+	if (shaderModel.HighestShaderModel < D3D_SHADER_MODEL_6_6)
+	{
+		spdlog::error("Shader model 6.6 not supported (required by VXPG wave-intrinsic passes)!");
+		return false;
+	}
+
 	spdlog::info("Ray tracing supported!");
 	return true;
 }
@@ -1340,7 +1364,8 @@ void Renderer::SetLights(const std::vector<LightData>& lights)
 void Renderer::WireGuidingResources()
 {
 	if (auto guided = std::dynamic_pointer_cast<GuidedPathTracingPass>(m_raytracePass))
-		guided->SetGuidingResources(m_voxelizationPass, m_voxelGuidingBuildPass);
+		guided->SetGuidingResources(m_voxelizationPass, m_voxelGuidingBuildPass,
+			m_fingerprintPass, m_clusterPass);
 }
 
 void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
@@ -1392,11 +1417,24 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 		m_voxelGuidingBuildPass->Run(
 			m_lightInjectionPass ? m_lightInjectionPass->GetVoxelRepresentativeTexture().Get() : nullptr);
 
-	// Stage 4: cluster voxels into supervoxels.
+	// Stage 4: fingerprint every lit voxel (128 stratified screen representatives
+	// -> per-voxel visibility mask via inline shadow rays).
+	if (stage >= VxpgStage::Fingerprint && m_fingerprintPass && m_scene)
+	{
+		auto tlas = m_scene->GetAccelerationStructures()->GetTopLevelAS().p_result;
+		m_fingerprintPass->Run(tlas ? tlas->GetGPUVirtualAddress() : 0,
+			m_passConstants->data.frameIndex);
+	}
+
+	// Stage 5: k-means++ cluster the fingerprinted voxels into 32 supervoxels.
+	if (stage >= VxpgStage::Cluster && m_clusterPass)
+		m_clusterPass->Run(m_passConstants->data.frameIndex);
+
+	// Stage 6: legacy grid-cell supervoxels (raster debug views only).
 	if (stage >= VxpgStage::Supervoxel && m_supervoxelClusterPass)
 		m_supervoxelClusterPass->Run();
 
-	// Stage 5: SLIC superpixel clustering over the ShadingPoints G-buffer.
+	// Stage 7: SLIC superpixel clustering over the ShadingPoints G-buffer.
 	if (stage >= VxpgStage::Superpixel && m_superpixelBuildPass)
 		m_superpixelBuildPass->Run(
 			m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
