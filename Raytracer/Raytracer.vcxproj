@@ -126,6 +126,8 @@
     <ClInclude Include="Include\VxpgFingerprintPass.h" />
     <ClInclude Include="Include\VxpgClusterPass.h" />
     <ClInclude Include="Include\VxpgClusterVisibilityPass.h" />
+    <ClInclude Include="Include\BitonicSortPass.h" />
+    <ClInclude Include="Include\VxpgLightTreePass.h" />
     <ClInclude Include="Include\Techniques\GuidedPathTracingPass.h" />
     <ClInclude Include="Include\GuidingDebugView.h" />
     <ClInclude Include="Include\VoxelGuidingBuildPass.h" />
@@ -352,6 +354,10 @@
     <None Include="Resources\Shaders\vxpgFingerprint.hlsl" />
     <None Include="Resources\Shaders\vxpgCluster.hlsl" />
     <None Include="Resources\Shaders\vxpgClusterVisibility.hlsl" />
+    <None Include="Resources\Shaders\BitonicCommon.hlsl" />
+    <None Include="Resources\Shaders\LightTreeNode.hlsl" />
+    <None Include="Resources\Shaders\vxpgBitonicSort.hlsl" />
+    <None Include="Resources\Shaders\vxpgLightTree.hlsl" />
     <None Include="Resources\Shaders\guidedPathTracing.hlsl" />
     <None Include="Resources\Shaders\voxelGuidingBuild.hlsl" />
     <None Include="Resources\Shaders\superpixelBuild.hlsl" />
@@ -377,6 +383,8 @@
     <ClCompile Include="Source\VxpgFingerprintPass.cpp" />
     <ClCompile Include="Source\VxpgClusterPass.cpp" />
     <ClCompile Include="Source\VxpgClusterVisibilityPass.cpp" />
+    <ClCompile Include="Source\BitonicSortPass.cpp" />
+    <ClCompile Include="Source\VxpgLightTreePass.cpp" />
     <ClCompile Include="Source\Techniques\GuidedPathTracingPass.cpp" />
     <ClCompile Include="Source\VoxelGuidingBuildPass.cpp" />
     <ClCompile Include="Source\SuperpixelBuildPass.cpp" />
@@ -497,6 +505,14 @@
     <Content Include="Resources\Shaders\vxpgClusterVisibility.clear.shader" />
     <Content Include="Resources\Shaders\vxpgClusterVisibility.gather.shader" />
     <Content Include="Resources\Shaders\vxpgClusterVisibility.check.shader" />
+    <Content Include="Resources\Shaders\vxpgBitonicSort.presort.shader" />
+    <Content Include="Resources\Shaders\vxpgBitonicSort.outer.shader" />
+    <Content Include="Resources\Shaders\vxpgBitonicSort.inner.shader" />
+    <Content Include="Resources\Shaders\vxpgLightTree.clearleaf.shader" />
+    <Content Include="Resources\Shaders\vxpgLightTree.encode.shader" />
+    <Content Include="Resources\Shaders\vxpgLightTree.initial.shader" />
+    <Content Include="Resources\Shaders\vxpgLightTree.internal.shader" />
+    <Content Include="Resources\Shaders\vxpgLightTree.merge.shader" />
     <Content Include="Resources\Shaders\voxelGuidingBuild.cdf.shader" />
     <Content Include="Resources\Shaders\superpixelBuild.initSeed.shader" />
     <Content Include="Resources\Shaders\superpixelBuild.findAssoc.shader" />

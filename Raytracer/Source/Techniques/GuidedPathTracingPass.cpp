@@ -8,6 +8,7 @@
 #include "VoxelGuidingBuildPass.h"
 #include "VxpgFingerprintPass.h"
 #include "VxpgClusterPass.h"
+#include "VxpgLightTreePass.h"
 #include "Window.h"
 #include "Resources/ShaderBindingTable.h"
 #include "Resources/StructuredBuffer.h"
@@ -143,7 +144,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
                                          texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
                                          voxelRepresentativeRange, vplPositionRange, vbufferRange, clusterMaskRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[15];
+    CD3DX12_ROOT_PARAMETER rootParameters[18];
     rootParameters[0].InitAsDescriptorTable(13, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
@@ -159,8 +160,11 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     rootParameters[12].InitAsUnorderedAccessView(10, 0); // Voxel fingerprints (debug view 8)
     rootParameters[13].InitAsUnorderedAccessView(11, 0); // Cluster assignments (debug view 9)
     rootParameters[14].InitAsUnorderedAccessView(12, 0); // Cluster seeds (debug view 9)
+    rootParameters[15].InitAsUnorderedAccessView(14, 0); // Light tree nodes (debug view 11)
+    rootParameters[16].InitAsUnorderedAccessView(15, 0); // Compact->leaf map (debug view 11)
+    rootParameters[17].InitAsUnorderedAccessView(16, 0); // Cluster root nodes (debug view 11)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(15, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(18, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -175,7 +179,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
 
 void GuidedPathTracingPass::Render()
 {
-    if (!m_voxelPass || !m_buildPass || !m_fingerprintPass || !m_clusterPass)
+    if (!m_voxelPass || !m_buildPass || !m_fingerprintPass || !m_clusterPass || !m_lightTreePass)
     {
         spdlog::warn("GuidedPathTracingPass: guiding resources not wired, skipping render");
         return;
@@ -204,6 +208,9 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootUnorderedAccessView(12, m_fingerprintPass->GetVoxelFingerprintsBuffer()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(13, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(14, m_clusterPass->GetClusterSeedCompactIdsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(15, m_lightTreePass->GetNodesBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(16, m_lightTreePass->GetCompactToLeafBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(17, m_lightTreePass->GetClusterRootsBufferVA());
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(

@@ -5,6 +5,67 @@
 #include "Renderer.h"
 #include "tinygltf/tiny_gltf.h"
 
+// DRED post-mortem: which command in which command list the GPU died on, plus
+// the page-faulting allocation if the reason was an invalid address.
+static void DumpDeviceRemovedExtendedData()
+{
+	Microsoft::WRL::ComPtr<ID3D12DeviceRemovedExtendedData> dred;
+	if (FAILED(Renderer::g_device->QueryInterface(IID_PPV_ARGS(&dred))))
+	{
+		spdlog::error("DRED: not available (QueryInterface failed)");
+		return;
+	}
+
+	D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT breadcrumbs = {};
+	if (SUCCEEDED(dred->GetAutoBreadcrumbsOutput(&breadcrumbs)))
+	{
+		for (const D3D12_AUTO_BREADCRUMB_NODE* node = breadcrumbs.pHeadAutoBreadcrumbNode;
+		     node != nullptr; node = node->pNext)
+		{
+			const UINT last = node->pLastBreadcrumbValue ? *node->pLastBreadcrumbValue : 0;
+			if (last == 0 || last == node->BreadcrumbCount)
+				continue; // fully executed or never started -> not the culprit
+
+			const char* listName = node->pCommandListDebugNameA ? node->pCommandListDebugNameA : "<unnamed list>";
+			spdlog::error("DRED: command list '{}' IN FLIGHT at breadcrumb {}/{}",
+				listName, last, node->BreadcrumbCount);
+			const UINT from = (last > 8) ? last - 8 : 0;
+			const UINT to = (last + 4 < node->BreadcrumbCount) ? last + 4 : node->BreadcrumbCount;
+			for (UINT i = from; i < to; ++i)
+				spdlog::error("DRED:   op[{}] = {}{}", i,
+					static_cast<uint32_t>(node->pCommandHistory[i]),
+					(i == last) ? "   <-- LAST EXECUTED (6=Dispatch 15=Barrier 34=DispatchRays 3/4=Draw 31=BuildRTAS)" : "");
+		}
+	}
+
+	D3D12_DRED_PAGE_FAULT_OUTPUT pageFault = {};
+	if (SUCCEEDED(dred->GetPageFaultAllocationOutput(&pageFault)) && pageFault.PageFaultVA != 0)
+	{
+		spdlog::error("DRED: PAGE FAULT at GPU VA 0x{:X}", pageFault.PageFaultVA);
+		// Bamboo names resources with wide SetName -> names land in ObjectNameW.
+		auto nodeName = [](const D3D12_DRED_ALLOCATION_NODE* node) -> std::string
+		{
+			if (node->ObjectNameW) return ConvertWcharToString(node->ObjectNameW);
+			if (node->ObjectNameA) return node->ObjectNameA;
+			return "<unnamed>";
+		};
+		for (const D3D12_DRED_ALLOCATION_NODE* node = pageFault.pHeadExistingAllocationNode;
+		     node != nullptr; node = node->pNext)
+			spdlog::error("DRED:   existing allocation: '{}' (type {})", nodeName(node),
+				static_cast<uint32_t>(node->AllocationType));
+		for (const D3D12_DRED_ALLOCATION_NODE* node = pageFault.pHeadRecentFreedAllocationNode;
+		     node != nullptr; node = node->pNext)
+			spdlog::error("DRED:   recently freed: '{}' (type {})", nodeName(node),
+				static_cast<uint32_t>(node->AllocationType));
+	}
+	else
+	{
+		spdlog::error("DRED: no page fault recorded (likely a hang/TDR, not a bad address)");
+	}
+
+	spdlog::default_logger()->flush(); // process dies right after; don't lose this
+}
+
 void ThrowIfFailed(HRESULT hr)
 {
 	if (FAILED(hr))
@@ -28,8 +89,9 @@ void ThrowIfFailed(HRESULT hr)
 			std::wstring w2 = deviceRemovedMsg;
 			std::string deviceRemovedError = std::string(w2.begin(), w2.end());
 			spdlog::error("REASON: {}", deviceRemovedError);
+			DumpDeviceRemovedExtendedData();
 		}
-		
+
    		throw std::runtime_error(errorMessage);
 	}
 }

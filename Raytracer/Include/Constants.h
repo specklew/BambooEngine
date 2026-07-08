@@ -35,6 +35,12 @@ namespace Constants
         constexpr int STATIC_SAMPLERS_COUNT = 6;
         // Max voxels in the compacted guiding distribution (matches SIByL VXGuider_MAX_CAPACITY)
         constexpr int VOXEL_GUIDING_CAPACITY = 131072;
+        // Bottom light tree: the uint16 node-index ceiling. The node array holds
+        // 2N-1 entries and every index must fit uint16, so 2N-1 <= 65535 => N <=
+        // 32768. The encode kernel clamps the lit-voxel count to this (see ADR 0003).
+        constexpr int LIGHT_TREE_MAX_LEAVES = 32768;
+        // Bitonic sort-key buffer capacity (SIByL element_count = 65536).
+        constexpr int LIGHT_TREE_SORT_CAPACITY = 65536;
         // VXPG V2 supervoxels: coarse grid cell = voxelCoord / clusterFactor. The
         // factor is a FLOOR (SUPERVOXEL_GRID_FACTOR) that adapts upward so svDim
         // never exceeds SUPERVOXEL_DIM_CAP, keeping the supervoxel count within

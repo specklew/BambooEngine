@@ -14,6 +14,7 @@ enum class VxpgStage : int
 	Cluster,
 	Superpixel,
 	ClusterVisibility,
+	LightTree,
 };
 
 inline bool operator>=(VxpgStage a, VxpgStage b)

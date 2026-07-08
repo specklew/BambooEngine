@@ -37,6 +37,7 @@ class VoxelGuidingBuildPass;
 class VxpgFingerprintPass;
 class VxpgClusterPass;
 class VxpgClusterVisibilityPass;
+class VxpgLightTreePass;
 class SuperpixelBuildPass;
 class FrameAccumulationPass;
 class PostProcessPass;
@@ -233,6 +234,7 @@ private:
 	std::shared_ptr<VxpgFingerprintPass> m_fingerprintPass;
 	std::shared_ptr<VxpgClusterPass> m_clusterPass;
 	std::shared_ptr<VxpgClusterVisibilityPass> m_clusterVisibilityPass;
+	std::shared_ptr<VxpgLightTreePass> m_lightTreePass;
 	std::shared_ptr<SuperpixelBuildPass> m_superpixelBuildPass;
 
 	ScreenshotMetadata BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const;

@@ -30,6 +30,7 @@
 #include "VxpgFingerprintPass.h"
 #include "VxpgClusterPass.h"
 #include "VxpgClusterVisibilityPass.h"
+#include "VxpgLightTreePass.h"
 #include "SuperpixelBuildPass.h"
 #include "Techniques/GuidedPathTracingPass.h"
 #include "RasterDebugMode.h"
@@ -106,7 +107,7 @@ static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world posi
 static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
-static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 1, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_exposure("renderer.postprocess.exposure","Exposure multiplier applied before display", 1.0f, CVarFlags::EditDrag, 0.0f, 10.0f);
 static AutoCVarFloat g_contrast("renderer.postprocess.contrast", "Pre-ACES contrast power curve", 1.0f, CVarFlags::EditDrag, 0.1f, 3.0f);
 static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES saturation", 1.0f, CVarFlags::EditDrag, 0.0f, 2.0f);
@@ -250,6 +251,10 @@ void Renderer::Initialize()
 	m_clusterVisibilityPass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight());
 	WriteClusterVisibilityUavsToGlobalHeap();
 
+	m_lightTreePass = std::make_shared<VxpgLightTreePass>();
+	m_lightTreePass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass,
+		m_voxelGuidingBuildPass, m_clusterPass);
+
 	WireGuidingResources();
 
 	spdlog::info("Renderer initialized successfully.");
@@ -380,7 +385,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.guidingFlags =
 		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
 		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 15u) << 1);
-	static_assert(static_cast<int>(GuidingDebugView::ClusterVisibilityView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
+	static_assert(static_cast<int>(GuidingDebugView::LightTreeView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
@@ -725,6 +730,15 @@ void Renderer::SetupDeviceAndDebug()
 	ComPtr<ID3D12Debug> debugController;
 	D3D12GetDebugInterface(IID_PPV_ARGS(&debugController));
 	debugController->EnableDebugLayer();
+
+	// DRED: on device-removed, ThrowIfFailed dumps auto-breadcrumbs (which
+	// command in which command list hung/faulted) + page-fault allocation info.
+	ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dredSettings;
+	if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dredSettings))))
+	{
+		dredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+		dredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+	}
 #endif
 	
 	UINT createFactoryFlags = 0;
@@ -1184,6 +1198,24 @@ bool Renderer::CheckRayTracingSupport() const
 		return false;
 	}
 
+	// VXPG light tree: uint64 bitonic sort keys need Int64ShaderOps; the
+	// byte-identical uint16 TreeNode layout needs native 16-bit shader ops.
+	D3D12_FEATURE_DATA_D3D12_OPTIONS1 options1 = {};
+	ThrowIfFailed(g_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(options1)));
+	if (!options1.Int64ShaderOps)
+	{
+		spdlog::error("Int64 shader ops not supported (required by the VXPG light-tree sort)!");
+		return false;
+	}
+
+	D3D12_FEATURE_DATA_D3D12_OPTIONS4 options4 = {};
+	ThrowIfFailed(g_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &options4, sizeof(options4)));
+	if (!options4.Native16BitShaderOpsSupported)
+	{
+		spdlog::error("Native 16-bit shader ops not supported (required by the VXPG light-tree nodes)!");
+		return false;
+	}
+
 	spdlog::info("Ray tracing supported!");
 	return true;
 }
@@ -1403,7 +1435,7 @@ void Renderer::WireGuidingResources()
 {
 	if (auto guided = std::dynamic_pointer_cast<GuidedPathTracingPass>(m_raytracePass))
 		guided->SetGuidingResources(m_voxelizationPass, m_voxelGuidingBuildPass,
-			m_fingerprintPass, m_clusterPass);
+			m_fingerprintPass, m_clusterPass, m_lightTreePass);
 }
 
 void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
@@ -1477,6 +1509,11 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	// Stage 7: per-superpixel x per-cluster soft visibility (cvis).
 	if (stage >= VxpgStage::ClusterVisibility && m_clusterVisibilityPass)
 		m_clusterVisibilityPass->Run(m_passConstants->data.frameIndex);
+
+	// Stage 8: bottom light tree (Karras LBVH over lit voxels: encode -> sort ->
+	// initial -> internal -> merge).
+	if (stage >= VxpgStage::LightTree && m_lightTreePass)
+		m_lightTreePass->Run();
 }
 
 void Renderer::WriteVoxelUavsToGlobalHeap()

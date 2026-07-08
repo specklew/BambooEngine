@@ -16,6 +16,7 @@
 #include "raytracing.hlsl"
 #include "Octahedral.hlsl"
 #include "VBuffer.hlsl"
+#include "LightTreeNode.hlsl"
 
 #define VOXEL_GUIDING_CAPACITY 131072
 
@@ -51,6 +52,11 @@ RWStructuredBuffer<int> gClusterSeedCompactIds   : register(u12);
 // Cluster-visibility mask (debug view 10). SIByL u_spixel_visibility: bit k =
 // this superpixel tile can see light cluster k. Global-heap slot 530.
 RWTexture2D<uint> gClusterVisibilityMask : register(u13);
+
+// Bottom light tree (debug view 11). SIByL u_Nodes / compact2leaf / cluster_roots.
+RWStructuredBuffer<LightTreeNode> gLightTreeNodes  : register(u14);
+RWStructuredBuffer<int>           gCompactToLeaf   : register(u15);
+RWStructuredBuffer<int>           gClusterRootNodes : register(u16);
 
 cbuffer VoxelGridCB : register(b4)
 {
@@ -672,6 +678,62 @@ void GuidedRayGen()
         uint mask = gClusterVisibilityMask[maskCoord];
         float g = float(countbits(mask)) / 32.0;
         gOutput[launchIndex] = float4(g, g, g, 1.0);
+        return;
+    }
+
+    // View 11: bottom light tree health. Walk gLightTreeNodes from the hit
+    // voxel's leaf up to the root, checking the cluster's root node is on the
+    // ancestor path. green = root reached + cluster root ancestor; yellow = root
+    // reached but cluster root not ancestor; red = parent-walk never reached the
+    // root (pointer cycle/corruption); magenta = bad compact->leaf / vx_idx
+    // round-trip / overflow frame; dark blue = unlit/sky.
+    if (debugView == 11u)
+    {
+        float3 col = float3(0, 0, 0.15); // unlit / out of grid
+        int3 v = int3(floor((hit.position - voxGridMin) / voxVoxelSize));
+        if (all(v >= 0) && all(v < int(voxGridDim)))
+        {
+            uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+            int compactID = gVoxInverseIndex[flatId];
+            if (compactID >= 0)
+            {
+                if (uint(compactID) >= gVoxCounters[0])
+                {
+                    col = float3(1, 0, 1); // lit voxel outside the compacted list
+                }
+                else
+                {
+                    int leaf = gCompactToLeaf[compactID];
+                    bool badMapping = (leaf < 0) ||
+                        (uint(gLightTreeNodes[leaf].voxelIndex) != uint(compactID)); // overflow / round-trip fail
+                    if (badMapping)
+                    {
+                        col = float3(1, 0, 1);
+                    }
+                    else
+                    {
+                        int cluster = gVoxelClusterAssignments[compactID];
+                        bool unassigned = (cluster < 0 || cluster >= 32);
+                        int clusterRoot = unassigned ? -1 : gClusterRootNodes[cluster];
+                        int cur = leaf;
+                        bool onPath = false;
+                        bool reachedRoot = false;
+                        [loop] for (uint step = 0; step < 64u; ++step)
+                        {
+                            if (cur == clusterRoot) onPath = true;
+                            uint parent = uint(gLightTreeNodes[cur].parentIndex);
+                            if (parent == 0xFFFFu) { reachedRoot = true; break; }
+                            cur = int(parent);
+                        }
+                        if (!reachedRoot)       col = float3(1, 0, 0);       // red: walk failed
+                        else if (unassigned)    col = float3(0, 1, 1);       // cyan: voxel has no cluster (assignment -1)
+                        else if (onPath)        col = float3(0, 1, 0);       // green: healthy
+                        else                    col = float3(1, 1, 0);       // yellow: cluster root not ancestor
+                    }
+                }
+            }
+        }
+        gOutput[launchIndex] = float4(col, 1.0);
         return;
     }
 

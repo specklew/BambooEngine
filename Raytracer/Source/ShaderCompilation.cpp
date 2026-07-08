@@ -53,6 +53,20 @@ ComPtr<IDxcBlob> CompileShader(const ShaderMetadata& meta)
 		L"-I", L"Include",
 		standardDefines,
 	};
+
+	// Native uint16_t (VXPG light-tree nodes, ADR 0003) needs -enable-16bit-types,
+	// which DXC only accepts for shader model >= 6.2. Gate on the target model so
+	// the SM 5.x raster shaders (colorShader etc.) still compile.
+	{
+		int major = 0, minor = 0;
+		const char* underscore = meta.szTarget ? strchr(meta.szTarget, '_') : nullptr;
+		if (underscore && sscanf_s(underscore + 1, "%d_%d", &major, &minor) == 2 &&
+			(major > 6 || (major == 6 && minor >= 2)))
+		{
+			args.push_back(L"-enable-16bit-types");
+		}
+	}
+
 	if (userDefines)
 	{
 		args.push_back(userDefines.get());
