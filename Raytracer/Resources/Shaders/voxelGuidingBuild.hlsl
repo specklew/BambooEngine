@@ -1,9 +1,9 @@
 // VXPG guiding distribution build: reload baked geometry bounds for lit voxels,
-// compact nonzero-irradiance voxels into a flat list, then build an
-// inclusive-prefix-sum CDF for binary-search sampling. Entry points dispatched
-// in order each frame after light injection:
-//   ClearCounters -> BakeReload -> CompactVoxels -> BuildCdf
-// (SIByL vxguiding: bake-reload.slang dense branch + geometry/compact.slang.)
+// then compact nonzero-irradiance voxels into a flat list. Entry points
+// dispatched in order each frame after light injection:
+//   ClearCounters -> BakeReload -> CompactVoxels
+// (SIByL vxguiding: bake-reload.slang dense branch + geometry/compact.slang.
+// The V1 flat-CDF kernel is gone — voxel selection lives in the light tree.)
 
 #define VOXEL_GUIDING_CAPACITY 131072
 
@@ -13,28 +13,26 @@ RWTexture3D<uint>   gVoxVplCount          : register(u1);
 // during light injection (last-writer-wins).
 RWTexture3D<float4> gVoxelRepresentative  : register(u2);
 
-// [0] = compacted voxel count, [1] = asuint(total weight)
+// [0] = compacted voxel count ([1] retired with the flat CDF)
 RWStructuredBuffer<uint>   gCounters     : register(u3);
 RWStructuredBuffer<uint>   gCompactIds   : register(u4);
-RWStructuredBuffer<float>  gWeights      : register(u5);
-RWStructuredBuffer<float>  gCdf          : register(u6);
 // voxelID (flat) -> compactID, sentinel -1. Sized gridDim^3. Each cell written
 // only by its own CompactVoxels thread, so it doubles as its own clear.
-RWStructuredBuffer<int>    gInverseIndex : register(u7);
+RWStructuredBuffer<int>    gInverseIndex : register(u5);
 // Live per-voxel bounds, quantized to the voxel cube. BakeReload copies the
 // baked values in for lit voxels; unlit cells are stale and never read.
-RWStructuredBuffer<uint4>  gLiveBoundMin : register(u8);
-RWStructuredBuffer<uint4>  gLiveBoundMax : register(u9);
+RWStructuredBuffer<uint4>  gLiveBoundMin : register(u6);
+RWStructuredBuffer<uint4>  gLiveBoundMax : register(u7);
 // Compact-indexed outputs for the guiding passes downstream (fingerprint, tree).
 // SIByL u_RepresentVPL. One representative light-carrying surface point per
 // compact voxel (pos + octa normal), consumed by the fingerprint shadow rays.
-RWStructuredBuffer<float4> gCompactVoxelLightPoints : register(u10);
-RWStructuredBuffer<float>  gPremulIrradiance  : register(u11);
+RWStructuredBuffer<float4> gCompactVoxelLightPoints : register(u8);
+RWStructuredBuffer<float>  gPremulIrradiance  : register(u9);
 
 // Bake outputs (read-only here; UAV-typed to stay in UNORDERED_ACCESS and skip
 // per-bake state transitions).
-RWStructuredBuffer<uint4> gBakedBoundMin : register(u12);
-RWStructuredBuffer<uint4> gBakedBoundMax : register(u13);
+RWStructuredBuffer<uint4> gBakedBoundMin : register(u10);
+RWStructuredBuffer<uint4> gBakedBoundMax : register(u11);
 
 cbuffer BuildCB : register(b0)
 {
@@ -53,7 +51,6 @@ float UnpackIrradiance(uint packed)
 void ClearCounters(uint3 tid : SV_DispatchThreadID)
 {
     gCounters[0] = 0u;
-    gCounters[1] = asuint(0.0f);
 }
 
 // Copy baked per-voxel bounds into the live buffers for voxels that received
@@ -99,7 +96,6 @@ void CompactVoxels(uint3 tid : SV_DispatchThreadID)
     if (slot >= VOXEL_GUIDING_CAPACITY) return; // overflow: drop voxel
 
     gCompactIds[slot] = flatId;
-    gWeights[slot] = weight;
     gInverseIndex[flatId] = int(slot);
 
     // Zero representative = "no VPL landed here" — written through so the
@@ -114,49 +110,4 @@ void CompactVoxels(uint3 tid : SV_DispatchThreadID)
     float3 boundMax = float3(gLiveBoundMax[flatId].xyz) / maxUint;
     float3 extend = max(boundMax - boundMin, 0.0f);
     gPremulIrradiance[slot] = weight * DominantFaceArea(extend);
-}
-
-// Single-group scan: each thread serially scans its chunk, thread 0 scans the
-// 1024 partials, then chunk offsets are added back. n <= capacity (131072)
-// gives chunks of <= 128 elements per thread.
-groupshared float sPartials[1024];
-
-[numthreads(1024, 1, 1)]
-void BuildCdf(uint tid : SV_GroupThreadID)
-{
-    const uint n = min(gCounters[0], VOXEL_GUIDING_CAPACITY);
-    const uint chunk = (n + 1023u) / 1024u;
-    const uint begin = tid * chunk;
-    const uint end = min(begin + chunk, n);
-
-    float sum = 0.0f;
-    for (uint i = begin; i < end; ++i)
-    {
-        sum += gWeights[i];
-        gCdf[i] = sum;
-    }
-    sPartials[tid] = sum;
-
-    GroupMemoryBarrierWithGroupSync();
-
-    if (tid == 0)
-    {
-        float running = 0.0f;
-        for (uint p = 0; p < 1024; ++p)
-        {
-            float v = sPartials[p];
-            sPartials[p] = running; // exclusive
-            running += v;
-        }
-        gCounters[1] = asuint(running); // total weight
-    }
-
-    GroupMemoryBarrierWithGroupSync();
-
-    const float offset = sPartials[tid];
-    if (offset != 0.0f)
-    {
-        for (uint i = begin; i < end; ++i)
-            gCdf[i] += offset;
-    }
 }

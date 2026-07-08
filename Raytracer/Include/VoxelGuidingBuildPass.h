@@ -5,10 +5,11 @@
 class VoxelizationPass;
 
 // VXPG guiding distribution build (compute): reloads baked per-voxel bounds
-// for lit voxels, compacts nonzero-irradiance voxels into a flat list (with
-// compact-indexed representative VPLs and area-premultiplied irradiance), and
-// builds a prefix-sum CDF over their weights. Runs each frame after light
-// injection; consumed by GuidedPathTracingPass and the passes downstream.
+// for lit voxels and compacts nonzero-irradiance voxels into a flat list (with
+// compact-indexed representative VPLs and area-premultiplied irradiance).
+// Runs each frame after light injection; consumed by GuidedPathTracingPass
+// and the passes downstream. (V1's flat-CDF kernel retired — voxel selection
+// lives in the light tree now.)
 class VoxelGuidingBuildPass
 {
 public:
@@ -25,10 +26,9 @@ public:
     // have flushed the GPU first (the old buffers may be in flight).
     void OnVoxelGridResize();
 
-    // [0] = compacted voxel count, [1] = asuint(total weight)
+    // [0] = compacted voxel count ([1] retired with the flat CDF)
     RWStructuredBuffer<uint32_t>* GetCountersBuffer() const { return m_counters.get(); }
     RWStructuredBuffer<uint32_t>* GetCompactIdsBuffer() const { return m_compactIds.get(); }
-    RWStructuredBuffer<float>*    GetCdfBuffer() const { return m_cdf.get(); }
     RWStructuredBuffer<int32_t>*  GetInverseIndexBuffer() const { return m_inverseIndex.get(); }
     RWStructuredBuffer<DirectX::XMFLOAT4>* GetCompactVoxelLightPointsBuffer() const { return m_compactVoxelLightPoints.get(); }
     RWStructuredBuffer<float>*    GetPremulIrradianceBuffer() const { return m_premulIrradiance.get(); }
@@ -49,8 +49,6 @@ private:
 
     std::unique_ptr<RWStructuredBuffer<uint32_t>> m_counters;
     std::unique_ptr<RWStructuredBuffer<uint32_t>> m_compactIds;
-    std::unique_ptr<RWStructuredBuffer<float>>    m_weights;
-    std::unique_ptr<RWStructuredBuffer<float>>    m_cdf;
     std::unique_ptr<RWStructuredBuffer<int32_t>>  m_inverseIndex;      // grid-sized
     std::unique_ptr<RWStructuredBuffer<DirectX::XMUINT4>> m_liveBoundMin; // grid-sized
     std::unique_ptr<RWStructuredBuffer<DirectX::XMUINT4>> m_liveBoundMax; // grid-sized
@@ -67,7 +65,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_reloadPso;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_compactPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_cdfPso;
 
     bool m_initialized = false;
 };

@@ -1,16 +1,22 @@
 #ifndef GUIDED_PATH_TRACING_HLSL
 #define GUIDED_PATH_TRACING_HLSL
 
-// VXPG guided path tracing (stage B): two-sample MIS at the first bounce
-// between BSDF sampling and the voxel irradiance distribution. A voxel is
-// picked by binary-searching a CDF over compacted nonzero-irradiance voxels
-// (built by VoxelGuidingBuildPass), then a direction is cone-sampled toward
-// that voxel's bounding sphere ("voxel2sphere"). The guided contribution is
-// gated to hits inside the chosen voxel's AABB, mirroring the reference
-// integrator (vxguiding-gi.slang, strategy 4).
+// VXPG guided path tracing: two-sample MIS at the first bounce between BSDF
+// sampling and the tree-backed voxel guide (vxguiding-gi.slang, strategy 5
+// "EXT"). Forward: superpixel -> per-superpixel importance heap (5 binary
+// decisions -> cluster + pdf_top) -> cluster-root light-tree walk by intensity
+// ratios (-> voxel + pdf_tree) -> cone toward the voxel's bounding sphere
+// (pdf_dir; deviation: SIByL samples spherical quads, ADR 0003). Reverse pdf
+// for the BSDF sample telescopes to two divisions (heap leaf/total x tree
+// leaf/root intensity) via the inverse index / cluster assignments /
+// compact->leaf maps. pdf products ride in double, faithful to SIByL
+// (DoublePrecisionFloatShaderOps hard-checked at init).
 //
-// Falls back to a uniform-sphere guide when no guiding data exists yet
-// (e.g. injection disabled), which is exactly the verified stage-A path.
+// Guiding is applied at the FIRST vertex only; deeper bounces are vanilla
+// recursion (deviation: SIByL's degraded second-bounce bolt-on omitted,
+// ADR 0003). When the guide is dead for a pixel (superpixel heap root 0 or
+// no lit voxels) the pixel is BSDF-only that frame at full MIS weight —
+// SIByL-faithful; the old stage-A uniform-sphere fallback is gone.
 //
 // Reuses scene bindings and BRDF helpers from raytracing.hlsl.
 #include "raytracing.hlsl"
@@ -18,17 +24,18 @@
 #include "VBuffer.hlsl"
 #include "LightTreeNode.hlsl"
 
-#define VOXEL_GUIDING_CAPACITY 131072
-
 // ---- VXPG guiding resources ----
 
 RWTexture3D<uint> gVoxIrradiance : register(u1);
 RWTexture3D<uint> gVoxVplCount   : register(u2);
 
-// [0] = compacted voxel count, [1] = asuint(total weight)
+// [0] = compacted voxel count ([1] retired with the flat CDF)
 RWStructuredBuffer<uint>  gVoxCounters     : register(u3);
 RWStructuredBuffer<uint>  gVoxCompactIds   : register(u4);
-RWStructuredBuffer<float> gVoxCdf          : register(u5);
+// Per-pixel SLIC superpixel assignment (flat map index, -1 invalid), written by
+// SuperpixelBuildPass. SIByL u_spixelIdx. NOT pixel/32 — assignment follows
+// geometry. Global-heap slot 523.
+RWTexture2D<int> gSpixelIndexImage : register(u5);
 // voxelID (flat) -> compactID, sentinel -1 (built by VoxelGuidingBuildPass).
 RWStructuredBuffer<int>   gVoxInverseIndex : register(u6);
 
@@ -53,12 +60,14 @@ RWStructuredBuffer<int> gClusterSeedCompactIds   : register(u12);
 // this superpixel tile can see light cluster k. Global-heap slot 530.
 RWTexture2D<uint> gClusterVisibilityMask : register(u13);
 
-// Bottom light tree (debug view 11). SIByL u_Nodes / compact2leaf / cluster_roots.
+// Bottom light tree (guided sampling + debug view 11). SIByL u_Nodes /
+// compact2leaf / cluster_roots.
 RWStructuredBuffer<LightTreeNode> gLightTreeNodes  : register(u14);
 RWStructuredBuffer<int>           gCompactToLeaf   : register(u15);
 RWStructuredBuffer<int>           gClusterRootNodes : register(u16);
 
-// Top-level tree (debug view 12). SIByL tltree: per-superpixel 64-slot heap.
+// Top-level tree (guided sampling + debug view 12). SIByL tltree:
+// per-superpixel 64-slot importance heap.
 RWStructuredBuffer<float>         gSpixelClusterImportanceHeap : register(u17);
 
 cbuffer VoxelGridCB : register(b4)
@@ -157,13 +166,17 @@ float3 SampleBsdfDir(SurfaceData s, float specularProb, float2 xi, out float pdf
     return dir;
 }
 
-// ---- Voxel guide distribution ----
+// ---- Voxel guide distribution (tree-backed, vxguiding-gi strategy 5) ----
 
-bool GuidingDataValid(out uint n, out float total)
+// uint16 leaf ceiling of the bottom tree (Constants::Graphics::LIGHT_TREE_MAX_LEAVES).
+#define LIGHT_TREE_MAX_LEAVES 32768
+
+// Lit-voxel count clamped exactly like tree-encode clamped it when building
+// this frame's tree — the raw counter would put the leaf boundary past the
+// real tree on overflow frames (SIByL reads the raw counter; ADR 0003).
+uint LitVoxelCount()
 {
-    n = min(gVoxCounters[0], VOXEL_GUIDING_CAPACITY);
-    total = asfloat(gVoxCounters[1]);
-    return n > 0u && total > 0.0f;
+    return min(gVoxCounters[0], LIGHT_TREE_MAX_LEAVES);
 }
 
 // Cone pdf toward the bounding sphere of voxel v as seen from shadingPos.
@@ -185,38 +198,148 @@ float ConePdfTowardVoxel(float3 shadingPos, int3 v, out float3 center, out float
     return 1.0f / (2.0f * PI * (1.0f - cosThetaMax) + EPSILON);
 }
 
-// Probability of the guide picking the voxel containing worldPos.
-float VoxelSelectionProb(float3 worldPos, float total, out int3 v)
+// Walks a superpixel's 64-slot implicit importance heap from the root down to
+// one of the 32 cluster leaves (5 binary decisions by child-sum ratio).
+// Returns the cluster index and its selection pdf, or -1 when the heap root is
+// 0 (guide dead for this superpixel). One random draw drives the whole walk:
+// after every branch the surviving interval is re-stretched to [0,1).
+// SIByL SampleTopLevelTree (vxguiding_interface.hlsli).
+int SampleSuperpixelClusterHeap(uint spixelFlat, float rnd, out double pdfTop)
 {
-    v = int3(floor((worldPos - voxGridMin) / voxVoxelSize));
-    if (any(v < 0) || any(v >= int(voxGridDim)))
-        return 0.0f;
+    const uint heapBase = spixelFlat * 64u;
+    pdfTop = 0.0;
+    if (gSpixelClusterImportanceHeap[heapBase + 1u] == 0.0f)
+        return -1;
 
-    uint count = gVoxVplCount[v];
-    if (count == 0u)
-        return 0.0f;
+    uint heapIndex = 1u;
+    double walkPdf = 1.0;
+    [unroll] for (uint level = 0u; level < 5u; ++level)
+    {
+        const uint leftIndex = heapIndex << 1;
+        const float leftImportance  = gSpixelClusterImportanceHeap[heapBase + leftIndex];
+        const float rightImportance = gSpixelClusterImportanceHeap[heapBase + leftIndex + 1u];
+        float probLeft;
+        if (leftImportance == 0.0f)       probLeft = 0.0f;
+        else if (rightImportance == 0.0f) probLeft = 1.0f;
+        else probLeft = leftImportance / (leftImportance + rightImportance);
 
-    float w = UnpackIrradiance(gVoxIrradiance[v]) / float(count);
-    if (w <= 0.0f)
-        return 0.0f;
-
-    return w / total;
+        if (rnd < probLeft)
+        {
+            heapIndex = leftIndex;
+            rnd /= probLeft;
+            walkPdf *= double(probLeft);
+        }
+        else
+        {
+            heapIndex = leftIndex + 1u;
+            rnd = (rnd - probLeft) / (1.0f - probLeft);
+            walkPdf *= double(1.0f - probLeft);
+        }
+    }
+    pdfTop = walkPdf;
+    return int(heapIndex - 32u);
 }
 
-// Guide pdf of a BSDF-sampled ray, evaluated at its hit position: probability
-// of selecting the hit voxel times the cone pdf toward it (reference:
-// PdfVoxelGuiding with flat/no-tree voxel selection).
-float EvalGuidePdf(float3 shadingPos, float3 hitPos, float total)
+// Descends the bottom light tree from a cluster root to a leaf, branching by
+// child intensity ratio (intensity-only: ApproxBSDFWeight / SLC distance cut,
+// ADR 0003). Node ids >= leafStartIndex (= leafCount - 1) are leaves. Returns
+// the leaf NODE id (not compactID), or -1 on a dead branch — unreachable when
+// internal intensity is an exact child sum, kept faithful to SIByL
+// TraverseLightTree (tree/shared.hlsli).
+int TraverseLightTreeToLeaf(int nodeId, uint leafStartIndex, float rnd, out double pdfTree)
 {
-    int3 v;
-    float pVoxel = VoxelSelectionProb(hitPos, total, v);
-    if (pVoxel <= 0.0f)
-        return 0.0f;
+    pdfTree = 1.0;
+    [loop] while (uint(nodeId) < leafStartIndex)
+    {
+        const uint leftChild  = uint(gLightTreeNodes[nodeId].leftIndex);
+        const uint rightChild = uint(gLightTreeNodes[nodeId].rightIndex);
+        const float leftIntensity  = gLightTreeNodes[leftChild].intensity;
+        const float rightIntensity = gLightTreeNodes[rightChild].intensity;
+
+        float probLeft;
+        if (leftIntensity == 0.0f)
+        {
+            if (rightIntensity == 0.0f)
+                return -1; // dead branch: invalid sample
+            probLeft = 0.0f;
+        }
+        else if (rightIntensity == 0.0f)
+        {
+            probLeft = 1.0f;
+        }
+        else
+        {
+            probLeft = leftIntensity / (leftIntensity + rightIntensity);
+        }
+
+        if (rnd < probLeft)
+        {
+            nodeId = int(leftChild);
+            rnd /= probLeft;
+            pdfTree *= double(probLeft);
+        }
+        else
+        {
+            nodeId = int(rightChild);
+            rnd = (rnd - probLeft) / (1.0f - probLeft);
+            pdfTree *= double(1.0f - probLeft);
+        }
+    }
+    return nodeId;
+}
+
+// Reverse pdf of the tree walk. Intensity-ratio branching telescopes — every
+// intermediate intensity cancels — leaving one division. SIByL
+// PdfTraverseLightTree_Intensity.
+double PdfTraverseLightTreeIntensity(int clusterRootId, int leafNodeId)
+{
+    return double(gLightTreeNodes[leafNodeId].intensity) /
+           double(gLightTreeNodes[clusterRootId].intensity);
+}
+
+// Guide pdf of a BSDF-sampled ray evaluated at its hit position: the
+// probability the guide would have picked the hit voxel from this pixel's
+// superpixel (heap leaf/total x telescoped tree leaf/root) times the cone pdf
+// toward that voxel. 0 whenever any link is missing — hit voxel unlit,
+// cluster unassigned (such leaves sort past every cluster run and sit under
+// no cluster root, so the forward walk truly cannot reach them), or heap
+// empty — which hands the BSDF sample full MIS weight.
+// (vxguiding-gi.slang strategy 5, reverse block.)
+double EvalTreeGuidePdf(int spixelFlat, float3 shadingPos, float3 hitPos)
+{
+    if (spixelFlat < 0)
+        return 0.0;
+
+    int3 v = int3(floor((hitPos - voxGridMin) / voxVoxelSize));
+    if (any(v < 0) || any(v >= int(voxGridDim)))
+        return 0.0;
+    const uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+
+    const int compactID = gVoxInverseIndex[flatId];
+    if (compactID < 0 || uint(compactID) >= LitVoxelCount())
+        return 0.0;
+
+    const int cluster = gVoxelClusterAssignments[compactID];
+    if (cluster < 0 || cluster >= 32)
+        return 0.0;
+
+    const uint heapBase = uint(spixelFlat) * 64u;
+    const float topTotal = gSpixelClusterImportanceHeap[heapBase + 1u];
+    if (topTotal == 0.0f)
+        return 0.0;
+    const float topLeaf = gSpixelClusterImportanceHeap[heapBase + 32u + uint(cluster)];
+    const double pdfTop = double(topLeaf) / double(topTotal);
+
+    const int leafNodeId    = gCompactToLeaf[compactID];
+    const int clusterRootId = gClusterRootNodes[cluster];
+    if (leafNodeId < 0 || clusterRootId < 0)
+        return 0.0;
+    const double pdfTree = PdfTraverseLightTreeIntensity(clusterRootId, leafNodeId);
 
     float3 center;
     float cosThetaMax;
-    float pdfDir = ConePdfTowardVoxel(shadingPos, v, center, cosThetaMax);
-    return pVoxel * pdfDir;
+    const float pdfDir = ConePdfTowardVoxel(shadingPos, v, center, cosThetaMax);
+    return pdfTop * pdfTree * double(pdfDir);
 }
 
 float3 SampleCone(float3 axis, float cosThetaMax, float2 xi)
@@ -231,65 +354,40 @@ float3 SampleCone(float3 axis, float cosThetaMax, float2 xi)
     return TangentToWorld(local, axis, T, B);
 }
 
-// Samples the voxel guide: pick a voxel by CDF binary search, cone-sample a
-// direction toward its bounding sphere. Outputs the chosen voxel's AABB for
-// the semi-NEE gate.
-float3 SampleVoxelGuideDir(
-    float3 shadingPos, uint n, float total, float selectXi, float2 coneXi,
-    out float pdf, out float3 aabbMin, out float3 aabbMax)
+// Decodes a compact-list flat voxel id back to grid coordinates.
+int3 VoxelCoordFromFlatId(uint flatId)
 {
-    // Binary search: smallest k with cdf[k] >= target
-    const float target = selectXi * total;
-    uint lo = 0u, hi = n - 1u;
-    while (lo < hi)
-    {
-        uint mid = (lo + hi) / 2u;
-        if (gVoxCdf[mid] < target) lo = mid + 1u;
-        else                       hi = mid;
-    }
-    const uint k = lo;
-
-    const float cdfLo = (k > 0u) ? gVoxCdf[k - 1u] : 0.0f;
-    const float pVoxel = max(gVoxCdf[k] - cdfLo, 0.0f) / total;
-
-    const uint flatId = gVoxCompactIds[k];
     int3 v;
     v.x = int(flatId % voxGridDim);
     v.y = int((flatId / voxGridDim) % voxGridDim);
     v.z = int(flatId / (voxGridDim * voxGridDim));
+    return v;
+}
 
+// Cone-samples a direction toward the voxel's bounding sphere (full sphere
+// when the shading point sits inside it) and outputs the voxel AABB for the
+// semi-NEE gate. Deviation: SIByL samples the voxel's visible faces as
+// spherical quads (ADR 0003); the same cone formula serves both the forward
+// sample here and the reverse query, so the pdfs stay consistent.
+float3 SampleConeTowardVoxel(
+    float3 shadingPos, int3 v, float2 coneXi,
+    out float pdfDir, out float3 aabbMin, out float3 aabbMax)
+{
     aabbMin = voxGridMin + float3(v) * voxVoxelSize;
     aabbMax = aabbMin + voxVoxelSize;
 
     float3 center;
     float cosThetaMax;
-    const float pdfDir = ConePdfTowardVoxel(shadingPos, v, center, cosThetaMax);
+    pdfDir = ConePdfTowardVoxel(shadingPos, v, center, cosThetaMax);
 
-    float3 dir;
     if (cosThetaMax < -0.5f) // shading point inside voxel bounding sphere
     {
         float z = 1.0f - 2.0f * coneXi.x;
         float r = sqrt(max(0.0f, 1.0f - z * z));
         float phi = 2.0f * PI * coneXi.y;
-        dir = float3(r * cos(phi), r * sin(phi), z);
+        return float3(r * cos(phi), r * sin(phi), z);
     }
-    else
-    {
-        dir = SampleCone(normalize(center - shadingPos), cosThetaMax, coneXi);
-    }
-
-    pdf = pVoxel * pdfDir;
-    return dir;
-}
-
-// Stage-A fallback: uniform sphere
-float3 SampleUniformSphereDir(float2 xi, out float pdf)
-{
-    float z = 1.0f - 2.0f * xi.x;
-    float r = sqrt(max(0.0f, 1.0f - z * z));
-    float phi = 2.0f * PI * xi.y;
-    pdf = 1.0f / (4.0f * PI);
-    return float3(r * cos(phi), r * sin(phi), z);
+    return SampleCone(normalize(center - shadingPos), cosThetaMax, coneXi);
 }
 
 // ---- MIS weight (balance or power heuristic via guidingFlags bit 0) ----
@@ -327,28 +425,30 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, out float3 hitP
     return p.color;
 }
 
-// ---- First path vertex: two-sample MIS between BSDF and voxel guide ----
+// ---- First path vertex: two-sample MIS between BSDF and the tree guide ----
 // Runs in raygen on the VBuffer-reconstructed hit (ADR 0004); deeper bounces
-// continue through the closest hit. debugView = guidingFlags bits 1-3
+// continue through the closest hit. debugView = guidingFlags bits 1-4
 // (1 = BSDF strategy only, 2 = guide strategy only, 3 = MIS weight
 // false-color, 4 = guided sample acceptance green/red/blue).
 
-float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, uint debugView, inout uint seed)
+float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, uint debugView,
+                        int spixelFlat, inout uint seed)
 {
     if (numBounces == 0)
         return CalculateDirectLightning(hit, surface);
 
-    uint n;
-    float total;
-    const bool guidingActive = GuidingDataValid(n, total);
+    const uint litVoxelCount = LitVoxelCount();
+    // Guide-dead pixels (no lit voxels, or no superpixel) run BSDF-only at
+    // full MIS weight — no uniform fallback (faithful, see header).
+    const bool guideAlive = (litVoxelCount > 0u) && (spixelFlat >= 0);
 
     float3 radiance = (debugView >= 3u) ? float3(0, 0, 0)
                                         : CalculateDirectLightning(hit, surface);
 
     float misWeightB = 0.0;
     float misWeightG = 0.0;
-    // Acceptance classification (view 4): 0 = pre-trace reject (blue),
-    // 1 = traced but gate-rejected (red), 2 = accepted (green)
+    // Acceptance classification (view 4): 0 = pre-trace reject / guide dead
+    // (blue), 1 = traced but gate-rejected (red), 2 = accepted (green)
     uint guideOutcome = 0u;
 
     // BSDF strategy
@@ -368,13 +468,13 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 bool didHit;
                 float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit);
 
-                // Guide pdf at the BSDF sample: evaluated at the ray's hit
-                // voxel (0 for misses — the guide only targets voxels)
-                float pdfGAtDir;
-                if (guidingActive)
-                    pdfGAtDir = didHit ? EvalGuidePdf(hit.position, hitPos, total) : 0.0;
-                else
-                    pdfGAtDir = 1.0 / (4.0 * PI); // stage-A uniform fallback
+                // Guide pdf at the BSDF sample, evaluated through the reverse
+                // chain at the ray's hit voxel (0 for misses / unreachable
+                // voxels -> weight 1 for this sample).
+                float pdfGAtDir = 0.0;
+                if (guideAlive && didHit)
+                    pdfGAtDir = float(EvalTreeGuidePdf(spixelFlat, hit.position, hitPos));
+                if (isnan(pdfGAtDir)) pdfGAtDir = 0.0; // SIByL w2 guard
 
                 float weight = MisWeight(pdfB, pdfGAtDir);
                 misWeightB = weight;
@@ -387,49 +487,63 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         }
     }
 
-    // Guide strategy
-    if (debugView != 1u)
+    // Guide strategy (forward chain: heap -> cluster root -> tree -> voxel -> cone)
+    if (debugView != 1u && guideAlive)
     {
-        float2 selectXi = Random2D(seed);
+        float2 walkXi = Random2D(seed);
         seed = pcg_hash(seed);
         float2 coneXi = Random2D(seed);
         seed = pcg_hash(seed);
 
-        float pdfG;
-        float3 dir;
-        float3 aabbMin = float3(-1e30f, -1e30f, -1e30f);
-        float3 aabbMax = float3( 1e30f,  1e30f,  1e30f);
-        if (guidingActive)
-            dir = SampleVoxelGuideDir(hit.position, n, total, selectXi.x, coneXi, pdfG, aabbMin, aabbMax);
-        else
-            dir = SampleUniformSphereDir(coneXi, pdfG);
-
-        if (pdfG > EPSILON && dot(dir, surface.N) > 0.0)
+        double pdfTop;
+        const int cluster = SampleSuperpixelClusterHeap(uint(spixelFlat), walkXi.x, pdfTop);
+        const int clusterRootId = (cluster >= 0) ? gClusterRootNodes[cluster] : -1;
+        if (clusterRootId >= 0)
         {
-            float3 f = EvalBsdfBounce(surface, dir);
-            if (any(f > 0))
+            double pdfTree;
+            const int leafNodeId = TraverseLightTreeToLeaf(
+                clusterRootId, litVoxelCount - 1u, walkXi.y, pdfTree);
+            if (leafNodeId < 0)
             {
-                float3 hitPos;
-                bool didHit;
-                float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit);
+                // SIByL strategy 5 wipes the whole sample on a dead branch.
+                // Unreachable with intensity-only traversal (internal
+                // intensity = exact child sum), kept verbatim.
+                return float3(0, 0, 0);
+            }
 
-                // Semi-NEE gate: the claimed pdf belongs to the chosen
-                // voxel, so only count hits inside its AABB (reference
-                // does the same). Uniform fallback gates on nothing.
-                bool accepted = guidingActive
-                    ? (didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax))
-                    : true;
+            const uint compactID = uint(gLightTreeNodes[leafNodeId].voxelIndex);
+            const int3 v = VoxelCoordFromFlatId(gVoxCompactIds[compactID]);
 
-                guideOutcome = accepted ? 2u : 1u;
+            float pdfDir;
+            float3 aabbMin, aabbMax;
+            float3 dir = SampleConeTowardVoxel(hit.position, v, coneXi, pdfDir, aabbMin, aabbMax);
+            const double pdfG = pdfTop * pdfTree * double(pdfDir);
 
-                if (accepted)
+            if (pdfG > 0.0 && dot(dir, surface.N) > 0.0)
+            {
+                float3 f = EvalBsdfBounce(surface, dir);
+                if (any(f > 0))
                 {
-                    float weight = MisWeight(pdfG, PdfBsdf(surface, specularProb, dir));
-                    misWeightG = weight;
-                    if (debugView < 3u)
+                    float3 hitPos;
+                    bool didHit;
+                    float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit);
+
+                    // Semi-NEE gate: the claimed pdf belongs to the chosen
+                    // voxel, so only count hits inside its AABB.
+                    bool accepted = didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax);
+                    guideOutcome = accepted ? 2u : 1u;
+
+                    if (accepted)
                     {
-                        float NdotL = dot(surface.N, dir);
-                        radiance += f * NdotL * incoming * weight / pdfG;
+                        float pdfBAtDir = PdfBsdf(surface, specularProb, dir);
+                        if (isnan(pdfBAtDir)) pdfBAtDir = 0.0; // SIByL w1 guard
+                        float weight = MisWeight(float(pdfG), pdfBAtDir);
+                        misWeightG = weight;
+                        if (debugView < 3u)
+                        {
+                            float NdotL = dot(surface.N, dir);
+                            radiance += f * NdotL * incoming * weight / float(pdfG);
+                        }
                     }
                 }
             }
@@ -781,15 +895,121 @@ void GuidedRayGen()
         return;
     }
 
+    // View 13: forward/reverse pdf round trip. Sample the discrete guide chain
+    // once (heap walk + tree walk), then reverse-query the SAME outcome through
+    // the lookup chain the BSDF-sample pdf uses. The two must telescope to the
+    // same probability and map back to the same leaf/cluster — any mismatch is
+    // a silent-bias bug the image alone would never show. green = match,
+    // magenta = mismatch, red = NaN/inf, dark blue = guide dead here.
+    if (debugView == 13u)
+    {
+        float3 col = float3(0, 0, 0.15); // guide dead / sky-adjacent
+        const int spixelFlat = gSpixelIndexImage[launchIndex];
+        const uint litVoxelCount = LitVoxelCount();
+        if (litVoxelCount > 0u && spixelFlat >= 0)
+        {
+            uint seed = pcg_hash(pixelId ^ (frameIndex * 805459861u));
+            float2 xi = Random2D(seed);
+            double pdfTop;
+            const int cluster = SampleSuperpixelClusterHeap(uint(spixelFlat), xi.x, pdfTop);
+            if (cluster >= 0)
+            {
+                const int clusterRootId = gClusterRootNodes[cluster];
+                if (clusterRootId < 0)
+                {
+                    col = float3(1, 0, 1); // heap picked a cluster with no tree root
+                }
+                else
+                {
+                    double pdfTree;
+                    const int leafNodeId = TraverseLightTreeToLeaf(
+                        clusterRootId, litVoxelCount - 1u, xi.y, pdfTree);
+                    if (leafNodeId < 0)
+                    {
+                        col = float3(1, 0, 1); // dead branch under a live root
+                    }
+                    else
+                    {
+                        const uint compactID = uint(gLightTreeNodes[leafNodeId].voxelIndex);
+
+                        // Reverse chain on the sampled outcome.
+                        const uint heapBase = uint(spixelFlat) * 64u;
+                        const float topTotal = gSpixelClusterImportanceHeap[heapBase + 1u];
+                        const float topLeaf  = gSpixelClusterImportanceHeap[heapBase + 32u + uint(cluster)];
+                        const double pdfTopReverse = (topTotal == 0.0f) ? 0.0
+                            : double(topLeaf) / double(topTotal);
+                        const int leafBack    = gCompactToLeaf[compactID];
+                        const int clusterBack = (compactID < litVoxelCount)
+                            ? gVoxelClusterAssignments[compactID] : -1;
+                        const double pdfTreeReverse = (leafBack >= 0)
+                            ? PdfTraverseLightTreeIntensity(clusterRootId, leafBack) : 0.0;
+
+                        const float forward = float(pdfTop * pdfTree);
+                        const float reverse = float(pdfTopReverse * pdfTreeReverse);
+                        const bool anyNaN = isnan(forward) || isinf(forward)
+                                         || isnan(reverse) || isinf(reverse);
+                        const bool mismatch = (leafBack != leafNodeId)
+                                           || (clusterBack != cluster)
+                                           || abs(forward - reverse) > 1e-3f * max(forward, 1e-12f);
+                        if (anyNaN)        col = float3(1, 0, 0);
+                        else if (mismatch) col = float3(1, 0, 1);
+                        else               col = float3(0, 1, 0);
+                    }
+                }
+            }
+        }
+        gOutput[launchIndex] = float4(col, 1.0);
+        return;
+    }
+
+    // View 14: forward-selected cluster. One heap walk per pixel per frame,
+    // painted in the view-9 hue wheel — expect superpixel-blocky regions whose
+    // boundaries line up with view 10's tiles and whose colors strobe per frame
+    // (frame-varying draw + recluster churn). magenta = heap picked a cluster
+    // with no tree root; dark blue = guide dead here.
+    if (debugView == 14u)
+    {
+        float3 col = float3(0, 0, 0.15);
+        const int spixelFlat = gSpixelIndexImage[launchIndex];
+        if (LitVoxelCount() > 0u && spixelFlat >= 0)
+        {
+            uint seed = pcg_hash(pixelId ^ (frameIndex * 805459861u));
+            double pdfTop;
+            const int cluster = SampleSuperpixelClusterHeap(
+                uint(spixelFlat), Random2D(seed).x, pdfTop);
+            if (cluster >= 0)
+            {
+                if (gClusterRootNodes[cluster] < 0)
+                {
+                    col = float3(1, 0, 1);
+                }
+                else
+                {
+                    float hue = frac(float(cluster) * 0.618034);
+                    float h6 = hue * 6.0;
+                    col = saturate(float3(abs(h6 - 3.0) - 1.0,
+                                          2.0 - abs(h6 - 2.0),
+                                          2.0 - abs(h6 - 4.0)));
+                }
+            }
+        }
+        gOutput[launchIndex] = float4(col, 1.0);
+        return;
+    }
+
     float3 F = FresnelSchlick(NdotV, surface.F0);
     float specularProb = (F.r + F.g + F.b) / 3.0;
+
+    // SLIC superpixel of this pixel — selects the importance-heap row for both
+    // MIS strategies. Read once; every spp sample shares it.
+    const int spixelFlat = gSpixelIndexImage[launchIndex];
 
     float3 accumulated = float3(0, 0, 0);
     for (uint i = 0; i < (uint)samplesPerPixel; i++)
     {
         uint seed = pcg_hash(pixelId ^ (i * 2654435761u) ^ (frameIndex * 805459861u));
         seed = pcg_hash(seed);
-        accumulated += ShadeFirstVertex(hit, surface, specularProb, debugView, seed);
+        accumulated += ShadeFirstVertex(hit, surface, specularProb, debugView, spixelFlat, seed);
     }
 
     gOutput[launchIndex] = min(float4(accumulated / samplesPerPixel, 1.0), 100.0f);

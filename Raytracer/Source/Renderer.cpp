@@ -121,7 +121,9 @@ static AutoCVarInt   g_vbufferJitter("vxpg.vbufferJitter", "Sub-pixel jitter for
 static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence weight: screen-xy vs world-position", 0.6f, CVarFlags::EditDrag, 0.0f, 4.0f);
 static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer", "SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
-static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 0, CVarFlags::EditCheckbox);
+// Default = power: the ported integrator (vxguiding-gi strategy 5) hardcodes
+// power-heuristic squaring; balance stays available as a variance experiment.
+static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 1, CVarFlags::EditCheckbox);
 static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization", GuidingDebugView::None,
                                         CVarFlags::None, FormatDebugViewDocs<GuidingDebugView>(kGuidingDebugViewDocs));
 
@@ -386,7 +388,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.guidingFlags =
 		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
 		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 15u) << 1);
-	static_assert(static_cast<int>(GuidingDebugView::TopLevelHeapView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
+	static_assert(static_cast<int>(GuidingDebugView::SelectedClusterView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
@@ -1217,6 +1219,16 @@ bool Renderer::CheckRayTracingSupport() const
 	if (!options4.Native16BitShaderOpsSupported)
 	{
 		spdlog::error("Native 16-bit shader ops not supported (required by the VXPG light-tree nodes)!");
+		return false;
+	}
+
+	// VXPG guided integrator carries its sampling pdfs in double, faithful to
+	// SIByL (ADR 0003 integrator-swap section).
+	D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
+	ThrowIfFailed(g_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)));
+	if (!options.DoublePrecisionFloatShaderOps)
+	{
+		spdlog::error("Double-precision shader ops not supported (required by the VXPG guided integrator pdfs)!");
 		return false;
 	}
 
