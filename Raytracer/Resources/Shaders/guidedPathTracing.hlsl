@@ -1023,7 +1023,13 @@ void GuidedMiss(inout GuidedPayload payload : SV_RayPayload)
     float3 dir = normalize(WorldRayDirection());
     float u = atan2(dir.z, dir.x) / (2.0 * PI) + 0.5;
     float v = -asin(clamp(dir.y, -1.0, 1.0)) / PI + 0.5;
-    payload.color = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
+    float3 sky = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
+    // Firefly clamp: every ray reaching GuidedMiss is indirect (primary sky is
+    // sampled directly in raygen), so cap the HDR sun disc unconditionally.
+    // 0 = disabled. Identical clamp to raytracing.hlsl so both converge alike.
+    if (indirectSkyClamp > 0.0)
+        sky = min(sky, indirectSkyClamp.xxx);
+    payload.color = sky;
     payload.hitFlag = 0;
 }
 

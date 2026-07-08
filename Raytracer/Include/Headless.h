@@ -32,6 +32,10 @@ struct HeadlessConfig
     float saturation = 1.0f;
     float lift       = 0.0f;
 
+    // Indirect skybox firefly clamp (pathtracing.indirectSkyClamp). 0 = disabled.
+    // Set >0 for benchmark convergence; applied identically to PT and VXPG.
+    float indirectSkyClamp = 0.0f;
+
     float       defaultSeconds = 5.0f;
     std::string outputDir      = "SavedUserData/Screenshots";
 

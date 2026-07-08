@@ -124,6 +124,7 @@ static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map sc
 // Default = power: the ported integrator (vxguiding-gi strategy 5) hardcodes
 // power-heuristic squaring; balance stays available as a variance experiment.
 static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 1, CVarFlags::EditCheckbox);
+static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp", "Clamp indirect-bounce skybox radiance to suppress HDR-sun fireflies for benchmark convergence. 0 = disabled (unbiased)", 0.0f, CVarFlags::EditDrag, 0.0f, 1000.0f);
 static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization", GuidingDebugView::None,
                                         CVarFlags::None, FormatDebugViewDocs<GuidingDebugView>(kGuidingDebugViewDocs));
 
@@ -395,6 +396,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	// Per-pixel jitter is derived in-shader from (pixel, frameIndex); the CB
 	// just carries the on/off switch.
 	m_passConstants->data.vbufferJitterEnabled = (g_vbufferJitter.Get() != 0) ? 1u : 0u;
+	m_passConstants->data.indirectSkyClamp = g_indirectSkyClamp.Get();
 	m_passConstants->Map();
 
 	if (m_scene->IsLightDataDirty())
@@ -1436,6 +1438,11 @@ void Renderer::ApplyRenderConfig(const HeadlessConfig& config)
 	g_contrast.Set(config.contrast);
 	g_saturation.Set(config.saturation);
 	g_lift.Set(config.lift);
+	g_indirectSkyClamp.Set(config.indirectSkyClamp);
+	// Headless timed capture integrates over the armed window, so temporal
+	// accumulation MUST be on — otherwise every capture is a single frame and
+	// --seconds only burns wall-time (the camera is static, so nothing resets it).
+	g_accumulationEnabled.Set(1);
 }
 
 void Renderer::SetLights(const std::vector<LightData>& lights)

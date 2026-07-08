@@ -158,7 +158,16 @@ int HeadlessRunner::Run()
         for (const std::string& place : m_args.places)
         {
             m_renderer.GoToPlace(place);
-            PumpFrame(); // absorb setup/technique-init time so the first armed frame has a normal delta
+
+            // Warm up several frames before arming. One frame is NOT enough: a
+            // slow first frame (technique switch rebuilding the VXPG passes, PSO
+            // creation, first dispatch) costs seconds, and that cost lands in the
+            // NEXT frame's clock delta — so the first armed frame would read a
+            // huge delta and trigger an immediate single-frame capture (observed
+            // as frameIndex 0 for VXPG at --seconds 1). Pumping until frames are
+            // cheap keeps the one-time stall out of the timed capture window.
+            for (int warmup = 0; warmup < 16; ++warmup)
+                PumpFrame();
 
             m_renderer.ArmScreenshot(seconds, model, place, runDir, place + "-" + technique);
             while (!m_renderer.ScreenshotIdle())

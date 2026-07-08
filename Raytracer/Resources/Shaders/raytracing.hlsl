@@ -55,7 +55,13 @@ void Miss(inout Payload payload : SV_RayPayload)
     float3 dir = normalize(WorldRayDirection());
     float u = atan2(dir.z, dir.x) / (2.0 * PI) + 0.5;
     float v = -asin(clamp(dir.y, -1.0, 1.0)) / PI + 0.5;
-    payload.color = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
+    float3 sky = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
+    // Firefly clamp: cap the HDR sun disc on indirect bounce rays only
+    // (bounceCount>0). The primary ray (bounceCount 0) keeps the directly-viewed
+    // sky at full brightness. 0 = disabled. Matches GuidedMiss's clamp.
+    if (indirectSkyClamp > 0.0 && payload.bounceCount > 0)
+        sky = min(sky, indirectSkyClamp.xxx);
+    payload.color = sky;
 }
 
 // ---- Closest hit ----

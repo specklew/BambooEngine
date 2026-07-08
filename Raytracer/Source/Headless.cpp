@@ -86,6 +86,7 @@ HeadlessConfig LoadHeadlessConfig(const std::string& path)
     readFloat("contrast",   config.contrast);
     readFloat("saturation", config.saturation);
     readFloat("lift",       config.lift);
+    readFloat("indirectSkyClamp", config.indirectSkyClamp);
     readFloat("defaultSeconds", config.defaultSeconds);
     if (doc.HasMember("outputDir") && doc["outputDir"].IsString())
         config.outputDir = doc["outputDir"].GetString();

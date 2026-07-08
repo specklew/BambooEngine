@@ -15,7 +15,10 @@ cbuffer PassConstants : register(b3)
     // 1 = apply per-pixel sub-pixel jitter to the shared VBuffer primaries; the
     // jitter itself is derived per pixel from (pixel, frameIndex) in-shader.
     uint vbufferJitterEnabled;
-    uint _passPad0;
+    // Indirect (bounceCount>0) skybox radiance clamp for firefly suppression /
+    // benchmark convergence. 0 = disabled (unbiased). Biases equally across PT
+    // and VXPG, so both converge to the same clamped target.
+    float indirectSkyClamp;
 }
 
 #endif

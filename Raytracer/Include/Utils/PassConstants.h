@@ -26,7 +26,9 @@ public:
         // 1 = per-pixel sub-pixel jitter on the shared VBuffer primaries (the
         // jitter is derived per pixel in-shader from pixel + frameIndex).
         uint32_t vbufferJitterEnabled = 0;
-        uint32_t _passPad0 = 0;
+        // Indirect skybox radiance clamp (firefly suppression for benchmark
+        // convergence). 0 = disabled/unbiased. See passConstants.hlsl.
+        float indirectSkyClamp = 0.0f;
     } data;
 
 private:
