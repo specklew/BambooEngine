@@ -144,7 +144,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
                                          texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
                                          voxelRepresentativeRange, vplPositionRange, vbufferRange, clusterMaskRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[18];
+    CD3DX12_ROOT_PARAMETER rootParameters[19];
     rootParameters[0].InitAsDescriptorTable(13, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
@@ -163,8 +163,9 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     rootParameters[15].InitAsUnorderedAccessView(14, 0); // Light tree nodes (debug view 11)
     rootParameters[16].InitAsUnorderedAccessView(15, 0); // Compact->leaf map (debug view 11)
     rootParameters[17].InitAsUnorderedAccessView(16, 0); // Cluster root nodes (debug view 11)
+    rootParameters[18].InitAsUnorderedAccessView(17, 0); // Top-level importance heap (debug view 12)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(18, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(19, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -211,6 +212,7 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootUnorderedAccessView(15, m_lightTreePass->GetNodesBufferVA());
     m_commandList->SetComputeRootUnorderedAccessView(16, m_lightTreePass->GetCompactToLeafBufferVA());
     m_commandList->SetComputeRootUnorderedAccessView(17, m_lightTreePass->GetClusterRootsBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(18, m_lightTreePass->GetSuperpixelClusterHeapBufferVA());
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(

@@ -6,6 +6,7 @@
 class VoxelizationPass;
 class VoxelGuidingBuildPass;
 class VxpgClusterPass;
+class VxpgClusterVisibilityPass;
 
 // VXPG bottom light tree: a Karras LBVH over the lit voxels (SIByL vxguiding
 // tree-encode -> bitonic sort -> tree-initial -> tree-internal -> tree-merge).
@@ -18,9 +19,14 @@ public:
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5>              device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>       globalHeap,
         std::shared_ptr<VoxelizationPass>                  voxelPass,
         std::shared_ptr<VoxelGuidingBuildPass>             buildPass,
-        std::shared_ptr<VxpgClusterPass>                   clusterPass);
+        std::shared_ptr<VxpgClusterPass>                   clusterPass,
+        std::shared_ptr<VxpgClusterVisibilityPass>         clusterVisibilityPass);
+
+    // Sizes the per-superpixel importance heap (mapX*mapY*64 floats).
+    void OnResize(uint32_t width, uint32_t height);
 
     void Run();
 
@@ -45,6 +51,7 @@ public:
     D3D12_GPU_VIRTUAL_ADDRESS GetNodesBufferVA() const { return m_nodes->GetGPUVirtualAddress(); }
     D3D12_GPU_VIRTUAL_ADDRESS GetCompactToLeafBufferVA() const { return m_compactToLeaf->GetGPUVirtualAddress(); }
     D3D12_GPU_VIRTUAL_ADDRESS GetClusterRootsBufferVA() const { return m_clusterRoots->GetGPUVirtualAddress(); }
+    D3D12_GPU_VIRTUAL_ADDRESS GetSuperpixelClusterHeapBufferVA() const { return m_spixelClusterHeap->GetGPUVirtualAddress(); }
 
 private:
     void CreateBuffers();
@@ -53,9 +60,11 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>       m_globalHeap;
     std::shared_ptr<VoxelizationPass>                  m_voxelPass;
     std::shared_ptr<VoxelGuidingBuildPass>             m_buildPass;
     std::shared_ptr<VxpgClusterPass>                   m_clusterPass;
+    std::shared_ptr<VxpgClusterVisibilityPass>         m_clusterVisibilityPass;
 
     BitonicSortPass m_sort;
 
@@ -66,6 +75,7 @@ private:
     std::unique_ptr<RWStructuredBuffer<int32_t>>                  m_clusterRoots;  // SIByL cluster_roots
     std::unique_ptr<RWStructuredBuffer<TreeBuildDispatchArgsGpu>> m_dispatchArgs;  // SIByL u_ConstrIndirectArgs
     std::unique_ptr<RWStructuredBuffer<uint32_t>>                 m_nodeVisited;   // merge sibling-gate (own scalar buffer)
+    std::unique_ptr<RWStructuredBuffer<float>>                   m_spixelClusterHeap; // SIByL tltree (mapX*mapY*64)
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
@@ -73,6 +83,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_initialPso;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_internalPso;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_mergePso;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_topLevelPso;
 
+    uint32_t m_mapX = 0;
+    uint32_t m_mapY = 0;
     bool m_initialized = false;
 };

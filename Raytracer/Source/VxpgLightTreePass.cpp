@@ -5,11 +5,21 @@
 #include "VoxelizationPass.h"
 #include "VoxelGuidingBuildPass.h"
 #include "VxpgClusterPass.h"
+#include "VxpgClusterVisibilityPass.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
+#include "Utils/CVars.h"
 #include "Utils/Utils.h"
 
 using Microsoft::WRL::ComPtr;
+
+// SIByL ships the top-level tree with visibility = 1 (Average / soft weighting).
+// 0 switches to Binary (a cluster is fully in or fully out per superpixel). Both
+// signals are produced by the cluster-visibility pass every frame, so this is a
+// quality knob, not a cost knob.
+static AutoCVarInt g_topLevelUseAvgVisibility("vxpg.topLevelTree.useAvgVisibility",
+    "Weight top-level cluster importance by soft avg-visibility (1=SIByL Average, 0=Binary mask)",
+    1, CVarFlags::EditCheckbox);
 
 namespace
 {
@@ -20,22 +30,28 @@ namespace
     constexpr uint32_t kCompactCapacity = Constants::Graphics::VOXEL_GUIDING_CAPACITY;
     // Byte offset of numValidVoxels inside TreeBuildDispatchArgs (int3 first).
     constexpr uint32_t kCounterByteOffset = 12;
+    constexpr uint32_t kSuperpixelSize = Constants::Graphics::SUPERPIXEL_SIZE;
+    constexpr uint32_t kClusterCount = 32;
 }
 
 void VxpgLightTreePass::Initialize(
     ComPtr<ID3D12Device5>              device,
     ComPtr<ID3D12GraphicsCommandList4> commandList,
+    ComPtr<ID3D12DescriptorHeap>       globalHeap,
     std::shared_ptr<VoxelizationPass>      voxelPass,
     std::shared_ptr<VoxelGuidingBuildPass> buildPass,
-    std::shared_ptr<VxpgClusterPass>       clusterPass)
+    std::shared_ptr<VxpgClusterPass>       clusterPass,
+    std::shared_ptr<VxpgClusterVisibilityPass> clusterVisibilityPass)
 {
     spdlog::info("Initializing VXPG light tree pass...");
 
     m_device      = device;
     m_commandList = commandList;
+    m_globalHeap  = globalHeap;
     m_voxelPass   = std::move(voxelPass);
     m_buildPass   = std::move(buildPass);
     m_clusterPass = std::move(clusterPass);
+    m_clusterVisibilityPass = std::move(clusterVisibilityPass);
 
     m_sort.Initialize(device, commandList);
 
@@ -66,13 +82,23 @@ void VxpgLightTreePass::CreateBuffers()
 
 void VxpgLightTreePass::CreateRootSignature()
 {
-    // b0 grid CBV + u0..u9 root UAVs (keys, nodes, leaf ranges, compact->leaf,
+    // b0 grid CBV + u0..u10 root UAVs (keys, nodes, leaf ranges, compact->leaf,
     // cluster roots, args, compact ids, cluster assignments, premul irradiance,
-    // lit-voxel counter, merge visited-gate).
-    CD3DX12_ROOT_PARAMETER params[12];
+    // lit-voxel counter, merge visited-gate). Top-level tree adds b1 root
+    // constants (map dims + mode), u11 avg-visibility, u12 heap, and the mask
+    // texture as a shared-heap descriptor table (u13, at slot 530).
+    CD3DX12_DESCRIPTOR_RANGE maskRange;
+    maskRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 13, 0,
+        Constants::Graphics::CLUSTER_VISIBILITY_MASK_DESCRIPTOR_INDEX); // u13 @ 530
+
+    CD3DX12_ROOT_PARAMETER params[16];
     params[0].InitAsConstantBufferView(0);
     for (uint32_t i = 0; i < 11; ++i)
         params[1 + i].InitAsUnorderedAccessView(i);
+    params[12].InitAsConstants(4, 1);           // b1: mapX, mapY, useAvgVisibility, pad
+    params[13].InitAsUnorderedAccessView(11);   // u11 avg-visibility
+    params[14].InitAsUnorderedAccessView(12);   // u12 importance heap
+    params[15].InitAsDescriptorTable(1, &maskRange); // u13 visibility mask
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);
@@ -105,6 +131,16 @@ void VxpgLightTreePass::CreatePSOs()
     createCsPso("resources/shaders/vxpgLightTree.initial.shader",   L"LightTree Initial PSO",  m_initialPso);
     createCsPso("resources/shaders/vxpgLightTree.internal.shader",  L"LightTree Internal PSO", m_internalPso);
     createCsPso("resources/shaders/vxpgLightTree.merge.shader",     L"LightTree Merge PSO",    m_mergePso);
+    createCsPso("resources/shaders/vxpgLightTree.toplevel.shader",  L"LightTree TopLevel PSO", m_topLevelPso);
+}
+
+void VxpgLightTreePass::OnResize(uint32_t width, uint32_t height)
+{
+    m_mapX = (width  + kSuperpixelSize - 1) / kSuperpixelSize;
+    m_mapY = (height + kSuperpixelSize - 1) / kSuperpixelSize;
+    // Implicit 64-slot binary heap per superpixel (SIByL tltree).
+    m_spixelClusterHeap = std::make_unique<RWStructuredBuffer<float>>(
+        m_device, std::max(1u, m_mapX * m_mapY * 64u), L"LightTree SpixelClusterHeap");
 }
 
 void VxpgLightTreePass::Run()
@@ -113,6 +149,12 @@ void VxpgLightTreePass::Run()
         return;
 
     auto* cmd = m_commandList.Get();
+
+    // Bind the shared heap up front: it stays bound through the bitonic sort
+    // (which uses only root descriptors) and is needed by the top-level tree's
+    // mask descriptor table at the tail.
+    ID3D12DescriptorHeap* heaps[] = { m_globalHeap.Get() };
+    cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
     // Binds the tree root sig + all resources (re-called after the sort swaps in
     // its own root signature).
@@ -181,4 +223,27 @@ void VxpgLightTreePass::Run()
     cmd->Dispatch(leafGroups, 1, 1);
     m_nodes->UavBarrier(cmd);
     m_clusterRoots->UavBarrier(cmd);
+
+    // Top-level tree: per-superpixel implicit heap of the 32 clusters' view-
+    // weighted importance. Consumes the just-built cluster roots + node
+    // intensities and the cluster-visibility pass's mask / avg buffers.
+    auto* avgVisibility = m_clusterVisibilityPass ? m_clusterVisibilityPass->GetAvgVisibilityBuffer() : nullptr;
+    if (m_spixelClusterHeap && avgVisibility && m_mapX > 0)
+    {
+        const uint32_t constants[4] = {
+            m_mapX, m_mapY,
+            static_cast<uint32_t>(g_topLevelUseAvgVisibility.Get() != 0),
+            0u
+        };
+        cmd->SetComputeRoot32BitConstants(12, 4, constants, 0);
+        cmd->SetComputeRootUnorderedAccessView(13, avgVisibility->GetGPUVirtualAddress());
+        cmd->SetComputeRootUnorderedAccessView(14, m_spixelClusterHeap->GetGPUVirtualAddress());
+        cmd->SetComputeRootDescriptorTable(15, m_globalHeap->GetGPUDescriptorHandleForHeapStart());
+
+        // One warp (32 lanes) per superpixel; 8 warps per group => ceil(mapX/8)
+        // groups wide, mapY tall (SIByL dispatch (5,23) for its 40x23 map).
+        cmd->SetPipelineState(m_topLevelPso.Get());
+        cmd->Dispatch((m_mapX + 7) / 8, m_mapY, 1);
+        m_spixelClusterHeap->UavBarrier(cmd);
+    }
 }

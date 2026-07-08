@@ -58,6 +58,9 @@ RWStructuredBuffer<LightTreeNode> gLightTreeNodes  : register(u14);
 RWStructuredBuffer<int>           gCompactToLeaf   : register(u15);
 RWStructuredBuffer<int>           gClusterRootNodes : register(u16);
 
+// Top-level tree (debug view 12). SIByL tltree: per-superpixel 64-slot heap.
+RWStructuredBuffer<float>         gSpixelClusterImportanceHeap : register(u17);
+
 cbuffer VoxelGridCB : register(b4)
 {
     float3 voxGridMin;
@@ -733,6 +736,47 @@ void GuidedRayGen()
                 }
             }
         }
+        gOutput[launchIndex] = float4(col, 1.0);
+        return;
+    }
+
+    // View 12: top-level tree heap health (screen-space, per superpixel). The
+    // implicit binary heap must satisfy heap[i] == heap[2i]+heap[2i+1] for the 31
+    // internal slots (slot 0 is dead). green = invariant holds + root > 0;
+    // magenta = a parent != sum of its children (wave-reduction translation bug);
+    // red = NaN/inf anywhere in the heap; dark blue = root 0 (superpixel sees no
+    // lit cluster / sky). Blocky at 32px superpixel granularity (expected).
+    if (debugView == 12u)
+    {
+        uint2 dims = DispatchRaysDimensions().xy;
+        uint mapX = (dims.x + 31u) / 32u; // SUPERPIXEL_SIZE
+        uint2 spixel = launchIndex / 32u;
+        uint base = (spixel.y * mapX + spixel.x) * 64u;
+
+        bool anyBad = false;
+        bool anyNaN = false;
+        [loop] for (uint i = 1u; i < 32u; ++i)
+        {
+            float parent = gSpixelClusterImportanceHeap[base + i];
+            float childSum = gSpixelClusterImportanceHeap[base + 2u * i]
+                           + gSpixelClusterImportanceHeap[base + 2u * i + 1u];
+            if (isnan(parent) || isinf(parent) || isnan(childSum) || isinf(childSum))
+                anyNaN = true;
+            if (abs(parent - childSum) > 1e-3 * max(abs(parent), 1e-6))
+                anyBad = true;
+        }
+        [loop] for (uint l = 32u; l < 64u; ++l)
+        {
+            float v = gSpixelClusterImportanceHeap[base + l];
+            if (isnan(v) || isinf(v)) anyNaN = true;
+        }
+
+        float root = gSpixelClusterImportanceHeap[base + 1u];
+        float3 col;
+        if (anyNaN)          col = float3(1, 0, 0);    // red: NaN/inf
+        else if (anyBad)     col = float3(1, 0, 1);    // magenta: invariant broken
+        else if (root > 0.0) col = float3(0, 1, 0);    // green: healthy
+        else                 col = float3(0, 0, 0.15); // dark blue: empty superpixel
         gOutput[launchIndex] = float4(col, 1.0);
         return;
     }

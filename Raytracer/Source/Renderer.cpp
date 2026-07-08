@@ -252,8 +252,9 @@ void Renderer::Initialize()
 	WriteClusterVisibilityUavsToGlobalHeap();
 
 	m_lightTreePass = std::make_shared<VxpgLightTreePass>();
-	m_lightTreePass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass,
-		m_voxelGuidingBuildPass, m_clusterPass);
+	m_lightTreePass->Initialize(g_device, m_d3d12CommandList, m_srvCbvUavDescriptorHeap,
+		m_voxelizationPass, m_voxelGuidingBuildPass, m_clusterPass, m_clusterVisibilityPass);
+	m_lightTreePass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight());
 
 	WireGuidingResources();
 
@@ -385,7 +386,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.guidingFlags =
 		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
 		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 15u) << 1);
-	static_assert(static_cast<int>(GuidingDebugView::LightTreeView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
+	static_assert(static_cast<int>(GuidingDebugView::TopLevelHeapView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
@@ -662,6 +663,9 @@ void Renderer::OnResize()
 		m_clusterVisibilityPass->OnResize(window.GetWidth(), window.GetHeight());
 		WriteClusterVisibilityUavsToGlobalHeap();
 	}
+
+	if (m_lightTreePass)
+		m_lightTreePass->OnResize(window.GetWidth(), window.GetHeight());
 
 	ExecuteCommandsAndReset();
 }

@@ -19,6 +19,7 @@ enum class GuidingDebugView : int
 	ClusterView = 9,
 	ClusterVisibilityView = 10,
 	LightTreeView = 11,
+	TopLevelHeapView = 12,
 };
 
 // Runtime docs, one per enum entry in order (FormatDebugViewDocs static_asserts the count).
@@ -35,4 +36,5 @@ inline constexpr DebugViewDoc kGuidingDebugViewDocs[] = {
 	{"VxpgClusterPass cluster assignments (Pass 4)", "DISABLE ACCUMULATION (colors reshuffle per frame). Per frame: saturated hue-wheel regions, coherent-ISH with voxel-level interleaving at boundaries (clusters live in fingerprint+intensity space, not position - speckle inherits the fingerprint checkerboard); 32 single-voxel white dots on lit geometry = the seeds; ZERO magenta; pure structureless noise = assignment bug, single color = distance/center bug, no white dots = seeding bug", "categorical color = gVoxelClusterAssignments at the primary hit's voxel; white = seed voxel; magenta = bad inverse-index or unassigned; dark blue = unlit/sky"},
 	{"VxpgClusterVisibilityPass mask (Pass 5)", "blocky 32px-tile grayscale: bright in open areas, darker in occluded pockets (behind curtains); all-black = check kernel dead / no VPLs, all-white = mask OR-saturation bug", "grayscale = popcount(gClusterVisibilityMask)/32 at the pixel's superpixel tile = how many of the 32 light clusters the screen region can see"},
 	{"VxpgLightTreePass bottom tree (Pass 6)", "DISABLE ACCUMULATION. green on lit geometry = leaf walks up to the root AND its cluster root sits on that ancestor path; cyan = voxel has no cluster (assignment -1, faithful k-means++ outcome when all 32 centers are too far - fine in moderation); yellow = root reached but cluster root NOT an ancestor (cluster-root bookkeeping bug); red = parent-walk failed to reach the root in 64 steps; magenta = bad compact->leaf mapping / vx_idx round-trip fail / uint16-overflow frame; dark blue = unlit/sky. Mostly-green = healthy; any red = pointer cycle/corruption", "walks gLightTreeNodes from the hit voxel's leaf (via gCompactToLeaf) to the root, checking gClusterRootNodes[cluster] is on the path"},
+	{"VxpgLightTreePass top-level tree (Pass 7)", "DISABLE ACCUMULATION. Screen-space per-superpixel (32px blocky). green = heap sum invariant holds (parent == sum of children for slots 1..31) and root > 0; magenta = invariant broken (wave-reduction translation bug); red = NaN/inf in the heap; dark blue = root 0 (superpixel sees no lit cluster / sky). Mostly green+blue = healthy; any magenta = the top-level reduction is wrong", "verifies the per-superpixel implicit importance heap gSpixelClusterImportanceHeap: heap[i] must equal heap[2i]+heap[2i+1] for the 31 internal slots"},
 };

@@ -55,6 +55,21 @@ RWStructuredBuffer<uint> gVoxCounters : register(u9); // SIByL u_vxCounter ([0] 
 // race -> merge parent-walk cycles -> GPU hang). node.flag stays pure clusterID.
 globallycoherent RWStructuredBuffer<uint> gNodeVisited : register(u10);
 
+// ---- Top-level tree bindings (BuildSuperpixelClusterHeaps only) -------------
+// SIByL vxguiding/tree/tree-top-level-constr: per-superpixel implicit heap of
+// the 32 clusters' view-weighted importance. These are unused by the six
+// bottom-tree kernels above (DXC strips them per-entry).
+cbuffer TopLevelTreeCB : register(b1)
+{
+    uint gMapX;             // superpixel columns = ceil(width / SUPERPIXEL_SIZE)
+    uint gMapY;             // superpixel rows
+    uint gUseAvgVisibility; // 1 = SIByL Average (soft), 0 = Binary (mask bit)
+    uint gTopLevelPad;
+}
+RWStructuredBuffer<float> gAvgVisibility : register(u11);               // SIByL avg_visibility (spixelFlat*32+cluster)
+RWStructuredBuffer<float> gSpixelClusterImportanceHeap : register(u12); // SIByL tltree (spixelFlat*64 implicit heap)
+RWTexture2D<uint> gClusterVisibilityMask : register(u13);              // SIByL visibilityIMG (bit c = sees cluster c)
+
 // ---- voxel + Morton helpers (SIByL vxgi_interface / space_filling_curve) ----
 
 int3 ReconstructVoxelCoord(uint voxelID) // SIByL ReconstructIndex
@@ -401,4 +416,76 @@ void MergeTreeNodes(uint3 dtid : SV_DispatchThreadID)
         lhsNodeId = int(parent);
         parent = gNodes[parent].parentIndex;
     }
+}
+
+// ---- BuildSuperpixelClusterHeaps (tree-top-level-constr) --------------------
+// Top-level tree. One warp (32 lanes) per superpixel, lane = cluster index. For
+// each cluster it reads that cluster's root-node intensity (0 if the cluster has
+// no root), gates it by the superpixel's view visibility, then folds the 32
+// values into an implicit binary heap: leaves [32..63], pairwise sums up to
+// [1] = total. Slot 0 is never written (dead). The integrator later samples a
+// cluster per pixel from this heap by walking [1] down to a leaf.
+//
+// SIByL subgroup ops translate to wave ops (kmpp WaveReadLaneAt precedent):
+//   subgroupClusteredAdd(x, 2)  == x + WaveReadLaneAt(x, lane ^ 1)  (pair sum)
+//   subgroupShuffle(x, lane<<1) == WaveReadLaneAt(x, (lane<<1) & 31) (gather down)
+// Only the low N lanes write each level; the high lanes' reads are masked into
+// bounds and their (unused) values never feed a written low lane.
+
+[numthreads(256, 1, 1)]
+[WaveSize(32)]
+void BuildSuperpixelClusterHeaps(uint3 gid : SV_GroupID, uint groupIndex : SV_GroupIndex)
+{
+    const uint laneId = WaveGetLaneIndex(); // 0..31 = cluster
+    const uint warpId = groupIndex / 32u;   // 0..7 = warp (SIByL gl_SubgroupID)
+    const uint2 spixel = uint2(gid.x * 8u + warpId, gid.y);
+
+    // DEVIATION from SIByL: guard the arbitrary map width. SIByL's 40x23 map
+    // divides by 8 exactly (dispatch (5,23)); Bamboo's ceil(width/32) does not.
+    // spixel.x is warp-uniform, so the whole warp returns together -> wave-safe.
+    if (spixel.x >= gMapX)
+        return;
+
+    const uint spixelFlat = spixel.y * gMapX + spixel.x;
+
+    const int clusterNodeId = gClusterRoots[laneId];
+    float clusterIntensity = (clusterNodeId != -1) ? gNodes[clusterNodeId].intensity : 0.0f;
+
+    if (gUseAvgVisibility == 0u)
+    {
+        // Binary mode: mask bit clear => this superpixel can't see the cluster.
+        const uint visibilityPack = gClusterVisibilityMask[spixel];
+        if ((visibilityPack & (1u << laneId)) == 0u)
+            clusterIntensity = 0.0f;
+    }
+    else
+    {
+        // Average mode (SIByL default visibility=1): soft BRDF-weighted fraction.
+        const float avgVisibility = gAvgVisibility[spixelFlat * 32u + laneId] / 32.0f;
+        clusterIntensity *= avgVisibility;
+    }
+
+    float importance = clusterIntensity;
+    const uint offset = spixelFlat * 64u;
+
+    gSpixelClusterImportanceHeap[offset + 32u + laneId] = importance;
+
+    importance += WaveReadLaneAt(importance, laneId ^ 1u);
+    importance  = WaveReadLaneAt(importance, (laneId << 1) & 31u);
+    if (laneId < 16u) gSpixelClusterImportanceHeap[offset + 16u + laneId] = importance;
+
+    importance += WaveReadLaneAt(importance, laneId ^ 1u);
+    importance  = WaveReadLaneAt(importance, (laneId << 1) & 31u);
+    if (laneId < 8u) gSpixelClusterImportanceHeap[offset + 8u + laneId] = importance;
+
+    importance += WaveReadLaneAt(importance, laneId ^ 1u);
+    importance  = WaveReadLaneAt(importance, (laneId << 1) & 31u);
+    if (laneId < 4u) gSpixelClusterImportanceHeap[offset + 4u + laneId] = importance;
+
+    importance += WaveReadLaneAt(importance, laneId ^ 1u);
+    importance  = WaveReadLaneAt(importance, (laneId << 1) & 31u);
+    if (laneId < 2u) gSpixelClusterImportanceHeap[offset + 2u + laneId] = importance;
+
+    importance += WaveReadLaneAt(importance, laneId ^ 1u);
+    if (laneId < 1u) gSpixelClusterImportanceHeap[offset + 1u + laneId] = importance;
 }
