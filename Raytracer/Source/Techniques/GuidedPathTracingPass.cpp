@@ -156,7 +156,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
                                          voxelRepresentativeRange, vplPositionRange, vbufferRange, clusterMaskRange,
                                          spixelIndexRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[18];
+    CD3DX12_ROOT_PARAMETER rootParameters[20];
     rootParameters[0].InitAsDescriptorTable(14, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
@@ -175,8 +175,10 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     rootParameters[15].InitAsUnorderedAccessView(15, 0); // Compact->leaf map (sampling + view 11)
     rootParameters[16].InitAsUnorderedAccessView(16, 0); // Cluster root nodes (sampling + view 11)
     rootParameters[17].InitAsUnorderedAccessView(17, 0); // Top-level importance heap (sampling + view 12)
+    rootParameters[18].InitAsUnorderedAccessView(18, 0); // Live voxel bound min (compact-bound guide sampling)
+    rootParameters[19].InitAsUnorderedAccessView(19, 0); // Live voxel bound max (compact-bound guide sampling)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(18, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(20, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -223,6 +225,8 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootUnorderedAccessView(15, m_lightTreePass->GetCompactToLeafBufferVA());
     m_commandList->SetComputeRootUnorderedAccessView(16, m_lightTreePass->GetClusterRootsBufferVA());
     m_commandList->SetComputeRootUnorderedAccessView(17, m_lightTreePass->GetSuperpixelClusterHeapBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(18, m_buildPass->GetLiveBoundMinBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(19, m_buildPass->GetLiveBoundMaxBuffer()->GetGPUVirtualAddress());
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(

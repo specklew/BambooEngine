@@ -29,6 +29,10 @@ public:
         // Indirect skybox radiance clamp (firefly suppression for benchmark
         // convergence). 0 = disabled/unbiased. See passConstants.hlsl.
         float indirectSkyClamp = 0.0f;
+        // 1 = skybox radiance lights surfaces via indirect rays (default);
+        // 0 = sky stays visible as background but contributes no lighting.
+        // See passConstants.hlsl.
+        uint32_t skyLightingEnabled = 1;
     } data;
 
 private:

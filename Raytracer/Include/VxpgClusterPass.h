@@ -43,6 +43,7 @@ private:
     void CreateBuffers();
     void CreateRootSignature();
     void CreatePSOs();
+    void CreateCommandSignature();
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
@@ -57,6 +58,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_seedPso;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_assignPso;
+
+    // Dispatch-indirect signature for the assign kernel (pure DISPATCH arg).
+    Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchCommandSignature;
 
     bool m_initialized = false;
 };

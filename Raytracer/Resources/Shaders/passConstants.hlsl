@@ -19,6 +19,12 @@ cbuffer PassConstants : register(b3)
     // benchmark convergence. 0 = disabled (unbiased). Biases equally across PT
     // and VXPG, so both converge to the same clamped target.
     float indirectSkyClamp;
+    // 1 = skybox radiance lights surfaces via indirect rays (default); 0 = sky
+    // stays visible as primary-ray background but contributes no lighting.
+    // Benchmark isolation: VXPG's guide targets first-bounce DIRECT-lit
+    // surfaces only (injection deposits CalculateDirectLightning), so sky-driven
+    // indirect is unguidable variance in both techniques.
+    uint skyLightingEnabled;
 }
 
 #endif

@@ -43,6 +43,7 @@ void VxpgFingerprintPass::Initialize(
     CreatePrivateHeap();
     CreateRootSignatures();
     CreatePSOs();
+    CreateCommandSignature();
 
     m_initialized = true;
 }
@@ -151,6 +152,23 @@ void VxpgFingerprintPass::CreatePSOs()
                 L"VxpgFingerprint Visibility PSO", m_visibilityPso);
 }
 
+void VxpgFingerprintPass::CreateCommandSignature()
+{
+    D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+    arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+
+    D3D12_COMMAND_SIGNATURE_DESC desc = {};
+    desc.ByteStride       = sizeof(DirectX::XMUINT4); // one args entry (xyz + count)
+    desc.NumArgumentDescs = 1;
+    desc.pArgumentDescs   = &arg;
+
+    // Pure dispatch signature: no root arguments change per command, so the root
+    // signature is null and this object is reusable for any indirect dispatch.
+    ThrowIfFailed(m_device->CreateCommandSignature(&desc, nullptr,
+        IID_PPV_ARGS(&m_dispatchCommandSignature)));
+    m_dispatchCommandSignature->SetName(L"VxpgFingerprint DispatchCommandSignature");
+}
+
 void VxpgFingerprintPass::OnResize(uint32_t width, uint32_t height)
 {
     m_width  = width;
@@ -188,18 +206,33 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
     m_guidingDispatchArgs->UavBarrier(cmd);
 
     // ---- Kernel 2: fingerprint every lit voxel via inline shadow rays ----
-    // Fixed worst-case dispatch (ExecuteIndirect deferred, ADR 0003 option b):
-    // X = 4 groups of 32 = 128 representatives; Y covers CAPACITY voxels, with a
-    // per-thread early-out on compactID >= litVoxelCount.
+    // Dispatched indirectly off gGuidingDispatchArgs[2] = (4, ceil(litVoxelCount/8),
+    // 1): X = 4 groups of 32 = 128 representatives; Y sized to the live lit-voxel
+    // count. Replaces the worst-case (4, ceil(CAPACITY/8)=16384, 1) fixed dispatch
+    // (ADR 0003 option b). The presample kernel emitted the count this frame.
     cmd->SetComputeRootSignature(m_visibilityRootSig.Get());
     cmd->SetComputeRootShaderResourceView(0, tlasVa);
     cmd->SetComputeRootUnorderedAccessView(1, m_screenRepresentativePoints->GetGPUVirtualAddress());
     cmd->SetComputeRootUnorderedAccessView(2, m_buildPass->GetCompactVoxelLightPointsBuffer()->GetGPUVirtualAddress());
     cmd->SetComputeRootUnorderedAccessView(3, m_guidingDispatchArgs->GetGPUVirtualAddress());
     cmd->SetComputeRootUnorderedAccessView(4, m_voxelFingerprints->GetGPUVirtualAddress());
-
-    const uint32_t voxelGroups = (Constants::Graphics::VOXEL_GUIDING_CAPACITY + 7) / 8;
     cmd->SetPipelineState(m_visibilityPso.Get());
-    cmd->Dispatch(4, voxelGroups, 1);
+
+    // The args buffer was just written as a UAV; flip it to INDIRECT_ARGUMENT for
+    // the ExecuteIndirect read, then back to UAV so the downstream cluster pass
+    // and next frame's presample see it as a UAV again.
+    ID3D12Resource* argsResource = m_guidingDispatchArgs->GetUnderlyingResource().Get();
+    auto toIndirect = CD3DX12_RESOURCE_BARRIER::Transition(argsResource,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    cmd->ResourceBarrier(1, &toIndirect);
+
+    constexpr uint32_t kVisibilityArgsOffset = 2 * sizeof(DirectX::XMUINT4); // entry [2]
+    cmd->ExecuteIndirect(m_dispatchCommandSignature.Get(), 1, argsResource,
+        kVisibilityArgsOffset, nullptr, 0);
+
+    auto toUav = CD3DX12_RESOURCE_BARRIER::Transition(argsResource,
+        D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    cmd->ResourceBarrier(1, &toUav);
+
     m_voxelFingerprints->UavBarrier(cmd);
 }

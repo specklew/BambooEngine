@@ -14,9 +14,9 @@ class LightInjectionPass;
 //                                   the visibility bits ARE the fingerprint
 // The visibility kernel uses inline RayQuery in compute (DXR 1.1) and
 // [WaveSize(32)] ballot packing, so it requires SM 6.6 + RT Tier 1.1.
-// ExecuteIndirect is deferred (ADR 0003 option b): worst-case fixed dispatch
-// with a per-thread early-out; the dispatch-args buffer is still emitted so the
-// later retrofit is C++-only.
+// The visibility kernel dispatches indirectly off gGuidingDispatchArgs[2] =
+// (4, ceil(litVoxelCount/8), 1), sized to the live lit-voxel count rather than
+// the worst-case grid capacity (ADR 0003 option b retrofit).
 class VxpgFingerprintPass
 {
 public:
@@ -42,6 +42,7 @@ private:
     void RebindShadingPointsIfChanged();
     void CreateRootSignatures();
     void CreatePSOs();
+    void CreateCommandSignature();
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
@@ -60,6 +61,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_visibilityRootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_presamplePso;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_visibilityPso;
+
+    // Dispatch-indirect signature for the visibility kernel (pure DISPATCH arg,
+    // no root-argument changes, so pRootSignature is null and it is reusable).
+    Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchCommandSignature;
 
     uint32_t m_width  = 0;
     uint32_t m_height = 0;

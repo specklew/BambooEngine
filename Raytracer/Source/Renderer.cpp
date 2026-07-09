@@ -12,6 +12,7 @@
 #include "PlacesManager.h"
 #include "PostProcessPass.h"
 #include "Utils/CVars.h"
+#include "Utils/GpuMarker.h"
 #include "Utils/Utils.h"
 #include "SceneResources/GameObject.h"
 #include "imgui.h"
@@ -115,7 +116,10 @@ static AutoCVarFloat g_lift("renderer.postprocess.lift", "Post-ACES shadow lift"
 static AutoCVarInt   g_voxelGridDim("voxel.gridDim", "Voxel grid resolution (one axis)", 64, CVarFlags::EditDrag, 32, 256);
 static AutoCVarFloat g_voxelAabbPad("voxel.aabbPadCells", "Voxel grid padding in cells (unused V1)", 0.5f, CVarFlags::EditDrag, 0.0f, 4.0f);
 static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accumulation: 1 = average (add + count), 0 = max", 1, CVarFlags::EditCheckbox);
-static AutoCVarInt   g_voxelBakeUseCompact("voxel.bake.useCompact", "Bake tight per-voxel triangle AABBs instead of full cubes (SIByL default: off)", 0, CVarFlags::EditCheckbox);
+// Default ON (deviation from SIByL's shipped default): full-cube bounds made the
+// guided sampler aim at mostly-empty cube space — view-4 acceptance was ~red
+// everywhere; tight bounds turned the lit half of Sponza green (2026-07-09).
+static AutoCVarInt   g_voxelBakeUseCompact("voxel.bake.useCompact", "Bake tight per-voxel triangle AABBs instead of full cubes (SIByL default: off)", 1, CVarFlags::EditCheckbox);
 static AutoCVarInt   g_voxelBakeClipping("voxel.bake.clipping", "Clip triangles against the voxel cube before the tight AABB (SIByL default: off)", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt   g_vbufferJitter("vxpg.vbufferJitter", "Sub-pixel jitter for the shared VBuffer primaries (off = SIByL-literal pixel-center, no edge AA)", 1, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence weight: screen-xy vs world-position", 0.6f, CVarFlags::EditDrag, 0.0f, 4.0f);
@@ -125,6 +129,7 @@ static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map sc
 // power-heuristic squaring; balance stays available as a variance experiment.
 static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 1, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp", "Clamp indirect-bounce skybox radiance to suppress HDR-sun fireflies for benchmark convergence. 0 = disabled (unbiased)", 0.0f, CVarFlags::EditDrag, 0.0f, 1000.0f);
+static AutoCVarInt   g_skyLighting("pathtracing.skyLighting", "Skybox radiance lights surfaces via indirect rays; 0 = sky is background-only (benchmark isolation: the VXPG guide only targets direct-lit surfaces)", 1, CVarFlags::EditCheckbox);
 static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization", GuidingDebugView::None,
                                         CVarFlags::None, FormatDebugViewDocs<GuidingDebugView>(kGuidingDebugViewDocs));
 
@@ -397,6 +402,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	// just carries the on/off switch.
 	m_passConstants->data.vbufferJitterEnabled = (g_vbufferJitter.Get() != 0) ? 1u : 0u;
 	m_passConstants->data.indirectSkyClamp = g_indirectSkyClamp.Get();
+	m_passConstants->data.skyLightingEnabled = (g_skyLighting.Get() != 0) ? 1u : 0u;
 	m_passConstants->Map();
 
 	if (m_scene->IsLightDataDirty())
@@ -526,7 +532,10 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	}
 	else
 	{
-		m_raytracePass->Render();
+		{
+			ScopedGpuMarker marker(m_d3d12CommandList.Get(), "Raytrace Technique");
+			m_raytracePass->Render();
+		}
 
 		PostProcessParams postProcessParams;
 		postProcessParams.exposure   = g_exposure.Get();
@@ -534,6 +543,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		postProcessParams.saturation = g_saturation.Get();
 		postProcessParams.lift       = g_lift.Get();
 
+		ScopedGpuMarker postMarker(m_d3d12CommandList.Get(), "Accumulation+PostProcess");
 		if (g_accumulationEnabled.Get())
 		{
 			m_accumulationPass->Render(m_raytracePass->GetOutputResource());
@@ -1439,6 +1449,7 @@ void Renderer::ApplyRenderConfig(const HeadlessConfig& config)
 	g_saturation.Set(config.saturation);
 	g_lift.Set(config.lift);
 	g_indirectSkyClamp.Set(config.indirectSkyClamp);
+	g_skyLighting.Set(config.skyLighting ? 1 : 0);
 	// Headless timed capture integrates over the armed window, so temporal
 	// accumulation MUST be on — otherwise every capture is a single frame and
 	// --seconds only burns wall-time (the camera is static, so nothing resets it).
@@ -1481,8 +1492,11 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	if (requestedGridDim != m_voxelizationPass->GetGridDim())
 		FlushCommandQueue();
 
-	m_voxelizationPass->RunFrame(*m_scene, requestedGridDim,
-		g_voxelBakeUseCompact.Get() != 0, g_voxelBakeClipping.Get() != 0);
+	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Voxelize/BakeClear");
+		m_voxelizationPass->RunFrame(*m_scene, requestedGridDim,
+			g_voxelBakeUseCompact.Get() != 0, g_voxelBakeClipping.Get() != 0);
+	}
 	if (m_voxelizationPass->DidResize())
 	{
 		WriteVoxelUavsToGlobalHeap();
@@ -1500,20 +1514,30 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	// light injection reconstructing its first vertex from it (also emits the
 	// ShadingPoints G-buffer).
 	if (stage >= VxpgStage::Inject && m_vbufferPass)
+	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG VBuffer");
 		m_vbufferPass->Render();
+	}
 	if (stage >= VxpgStage::Inject && m_lightInjectionPass)
+	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightInjection");
 		m_lightInjectionPass->Render();
+	}
 
 	// Stage 3: build the guiding distribution from the injected voxels
 	// (reload baked bounds -> compact -> CDF).
 	if (stage >= VxpgStage::GuidingBuild && m_voxelGuidingBuildPass)
+	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG GuidingBuild");
 		m_voxelGuidingBuildPass->Run(
 			m_lightInjectionPass ? m_lightInjectionPass->GetVoxelRepresentativeTexture().Get() : nullptr);
+	}
 
 	// Stage 4: fingerprint every lit voxel (128 stratified screen representatives
 	// -> per-voxel visibility mask via inline shadow rays).
 	if (stage >= VxpgStage::Fingerprint && m_fingerprintPass && m_scene)
 	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Fingerprint");
 		auto tlas = m_scene->GetAccelerationStructures()->GetTopLevelAS().p_result;
 		m_fingerprintPass->Run(tlas ? tlas->GetGPUVirtualAddress() : 0,
 			m_passConstants->data.frameIndex);
@@ -1521,22 +1545,34 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 
 	// Stage 5: k-means++ cluster the fingerprinted voxels into 32 supervoxels.
 	if (stage >= VxpgStage::Cluster && m_clusterPass)
+	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Cluster");
 		m_clusterPass->Run(m_passConstants->data.frameIndex);
+	}
 
 	// Stage 6: SLIC superpixel clustering over the ShadingPoints G-buffer.
 	if (stage >= VxpgStage::Superpixel && m_superpixelBuildPass)
+	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Superpixel");
 		m_superpixelBuildPass->Run(
 			m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
 			g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
+	}
 
 	// Stage 7: per-superpixel x per-cluster soft visibility (cvis).
 	if (stage >= VxpgStage::ClusterVisibility && m_clusterVisibilityPass)
+	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG ClusterVisibility");
 		m_clusterVisibilityPass->Run(m_passConstants->data.frameIndex);
+	}
 
 	// Stage 8: bottom light tree (Karras LBVH over lit voxels: encode -> sort ->
 	// initial -> internal -> merge).
 	if (stage >= VxpgStage::LightTree && m_lightTreePass)
+	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightTree");
 		m_lightTreePass->Run();
+	}
 }
 
 void Renderer::WriteVoxelUavsToGlobalHeap()

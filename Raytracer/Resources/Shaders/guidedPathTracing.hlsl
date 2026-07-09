@@ -5,10 +5,11 @@
 // sampling and the tree-backed voxel guide (vxguiding-gi.slang, strategy 5
 // "EXT"). Forward: superpixel -> per-superpixel importance heap (5 binary
 // decisions -> cluster + pdf_top) -> cluster-root light-tree walk by intensity
-// ratios (-> voxel + pdf_tree) -> cone toward the voxel's bounding sphere
-// (pdf_dir; deviation: SIByL samples spherical quads, ADR 0003). Reverse pdf
-// for the BSDF sample telescopes to two divisions (heap leaf/total x tree
-// leaf/root intensity) via the inverse index / cluster assignments /
+// ratios (-> voxel + pdf_tree) -> exact solid-angle sampling of the voxel's
+// visible AABB faces as spherical quads (pdf_dir; SIByL SampleSphericalVoxel —
+// the cone-toward-bounding-sphere deviation was reversed 2026-07-09, ADR 0003).
+// Reverse pdf for the BSDF sample telescopes to two divisions (heap leaf/total
+// x tree leaf/root intensity) via the inverse index / cluster assignments /
 // compact->leaf maps. pdf products ride in double, faithful to SIByL
 // (DoublePrecisionFloatShaderOps hard-checked at init).
 //
@@ -23,6 +24,7 @@
 #include "Octahedral.hlsl"
 #include "VBuffer.hlsl"
 #include "LightTreeNode.hlsl"
+#include "SphericalQuad.hlsl"
 
 // ---- VXPG guiding resources ----
 
@@ -69,6 +71,13 @@ RWStructuredBuffer<int>           gClusterRootNodes : register(u16);
 // Top-level tree (guided sampling + debug view 12). SIByL tltree:
 // per-superpixel 64-slot importance heap.
 RWStructuredBuffer<float>         gSpixelClusterImportanceHeap : register(u17);
+
+// Live per-voxel geometry bounds, quantized to the voxel cube (uint 0 =
+// cube min, 0xffffffff = cube max), reloaded from the bake each frame by
+// VoxelGuidingBuildPass. With voxel.bake.useCompact off (default) the bake
+// stores the full cube, so unpacking is an exact no-op. SIByL u_pMin/u_pMax.
+RWStructuredBuffer<uint4>         gVoxelLiveBoundMin : register(u18);
+RWStructuredBuffer<uint4>         gVoxelLiveBoundMax : register(u19);
 
 cbuffer VoxelGridCB : register(b4)
 {
@@ -179,23 +188,78 @@ uint LitVoxelCount()
     return min(gVoxCounters[0], LIGHT_TREE_MAX_LEAVES);
 }
 
-// Cone pdf toward the bounding sphere of voxel v as seen from shadingPos.
-// Returns the solid-angle pdf; handles the "inside the sphere" case as a
-// full-sphere distribution.
-float ConePdfTowardVoxel(float3 shadingPos, int3 v, out float3 center, out float cosThetaMax)
+// ---- Voxel solid-angle sampling (SIByL SampleSphericalVoxel family) ----
+// The <=3 AABB faces facing the shading point become spherical quads; a face
+// is CDF-picked by its exact solid angle, then sampled uniformly within it
+// (Urena). The resulting distribution is uniform over the voxel's whole
+// silhouette, so pdf = 1 / (total visible solid angle) — direction-independent,
+// which keeps the forward sample and the reverse query trivially consistent.
+// Every drawn direction geometrically enters the voxel: the semi-NEE gate can
+// only fail on occlusion, never on a geometric miss (unlike the old cone).
+// Shipped SIByL bakes full-cube per-voxel bounds (tight bounds off, ADR 0004),
+// so the plain cube AABB here matches its compact_bound path exactly.
+
+// Permutation matrices mapping world axes onto each face's local frame
+// (local z = face normal axis). SIByL rotations[3].
+static const float3x3 kVoxelFaceRotations[3] = {
+    float3x3(+0, +1, +0, +0, +0, +1, +1, +0, +0), // x axis rotation
+    float3x3(+1, +0, +0, +0, +0, +1, +0, +1, +0), // y axis rotation
+    float3x3(+1, +0, +0, +0, +1, +0, +0, +0, +1), // z axis rotation
+};
+
+// Builds the three candidate face quads of voxel v as seen from shadingPos and
+// returns each face's solid angle (0 for edge-on / degenerate faces). Shared
+// by the forward sampler and the reverse pdf so both see identical geometry.
+// Sampling targets the voxel's COMPACT geometry bounds (SIByL UnpackCompactAABB
+// on u_pMin/u_pMax); the semi-NEE gate aabb stays the FULL cube — SIByL
+// semantics (gi.slang gates on the VoxelToBound out param). With full-cube
+// bakes (useCompact off) compact == cube and behavior is unchanged.
+void BuildVoxelFaceQuads(
+    float3 shadingPos, int3 v,
+    out SphericalQuad squads[3], out float3 locals[3], out float3 faceSolidAngles,
+    out float3 aabbMin, out float3 aabbMax)
 {
-    center = voxGridMin + (float3(v) + 0.5f) * voxVoxelSize;
-    const float radius = voxVoxelSize * 0.8660254f; // half voxel diagonal
-    const float dist = length(center - shadingPos);
+    aabbMin = voxGridMin + float3(v) * voxVoxelSize;
+    aabbMax = aabbMin + voxVoxelSize;
 
-    if (dist <= radius)
-    {
-        cosThetaMax = -1.0f;
-        return 1.0f / (4.0f * PI);
-    }
+    // SIByL UnpackCompactAABB: quantized uint bounds -> world, relative to the cube.
+    const uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+    const float3 compactMin = float3(gVoxelLiveBoundMin[flatId].xyz) / 4294967295.0f * voxVoxelSize + aabbMin;
+    const float3 compactMax = float3(gVoxelLiveBoundMax[flatId].xyz) / 4294967295.0f * voxVoxelSize + aabbMin;
 
-    cosThetaMax = sqrt(max(0.0f, 1.0f - (radius * radius) / (dist * dist)));
-    return 1.0f / (2.0f * PI * (1.0f - cosThetaMax) + EPSILON);
+    const float3 center = 0.5f * (compactMin + compactMax);
+    const float3 extend = 0.5f * (compactMax - compactMin);
+
+    // sign() = 0 exactly on a face plane => that face contributes nothing.
+    const float3 dirSign = sign(shadingPos - center);
+    const float3 xFaceCenter = center + float3(dirSign.x * extend.x, 0, 0);
+    const float3 yFaceCenter = center + float3(0, dirSign.y * extend.y, 0);
+    const float3 zFaceCenter = center + float3(0, 0, dirSign.z * extend.z);
+
+    locals[0] = mul(kVoxelFaceRotations[0] * dirSign.x, shadingPos - xFaceCenter);
+    squads[0] = CreateSphericalQuad(locals[0], extend.yz);
+    locals[1] = mul(kVoxelFaceRotations[1] * dirSign.y, shadingPos - yFaceCenter);
+    squads[1] = CreateSphericalQuad(locals[1], extend.xz);
+    locals[2] = mul(kVoxelFaceRotations[2] * dirSign.z, shadingPos - zFaceCenter);
+    squads[2] = CreateSphericalQuad(locals[2], extend.xy);
+
+    faceSolidAngles.x = (dirSign.x == 0) || isnan(squads[0].S) ? 0 : squads[0].S;
+    faceSolidAngles.y = (dirSign.y == 0) || isnan(squads[1].S) ? 0 : squads[1].S;
+    faceSolidAngles.z = (dirSign.z == 0) || isnan(squads[2].S) ? 0 : squads[2].S;
+}
+
+// Reverse-query pdf of the voxel solid-angle distribution: 1 / total visible
+// solid angle. SIByL PdfSampleSphericalVoxel — kept verbatim including the
+// quirk that a degenerate view (all faces edge-on / shading point effectively
+// inside the voxel) returns +inf, which zeroes the BSDF sample's MIS weight.
+float PdfVoxelSolidAngle(float3 shadingPos, int3 v)
+{
+    SphericalQuad squads[3];
+    float3 locals[3];
+    float3 faceSolidAngles;
+    float3 aabbMin, aabbMax;
+    BuildVoxelFaceQuads(shadingPos, v, squads, locals, faceSolidAngles, aabbMin, aabbMax);
+    return 1.0f / (faceSolidAngles.x + faceSolidAngles.y + faceSolidAngles.z);
 }
 
 // Walks a superpixel's 64-slot implicit importance heap from the root down to
@@ -336,22 +400,8 @@ double EvalTreeGuidePdf(int spixelFlat, float3 shadingPos, float3 hitPos)
         return 0.0;
     const double pdfTree = PdfTraverseLightTreeIntensity(clusterRootId, leafNodeId);
 
-    float3 center;
-    float cosThetaMax;
-    const float pdfDir = ConePdfTowardVoxel(shadingPos, v, center, cosThetaMax);
+    const float pdfDir = PdfVoxelSolidAngle(shadingPos, v);
     return pdfTop * pdfTree * double(pdfDir);
-}
-
-float3 SampleCone(float3 axis, float cosThetaMax, float2 xi)
-{
-    float cosTheta = 1.0f - xi.x * (1.0f - cosThetaMax);
-    float sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
-    float phi = 2.0f * PI * xi.y;
-
-    float3 local = float3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
-    float3 T, B;
-    BuildONB(axis, T, B);
-    return TangentToWorld(local, axis, T, B);
 }
 
 // Decodes a compact-list flat voxel id back to grid coordinates.
@@ -364,30 +414,58 @@ int3 VoxelCoordFromFlatId(uint flatId)
     return v;
 }
 
-// Cone-samples a direction toward the voxel's bounding sphere (full sphere
-// when the shading point sits inside it) and outputs the voxel AABB for the
-// semi-NEE gate. Deviation: SIByL samples the voxel's visible faces as
-// spherical quads (ADR 0003); the same cone formula serves both the forward
-// sample here and the reverse query, so the pdfs stay consistent.
-float3 SampleConeTowardVoxel(
-    float3 shadingPos, int3 v, float2 coneXi,
+// Samples a direction uniformly over voxel v's visible solid angle (CDF over
+// the face solid angles, then a uniform spherical-quad draw within the picked
+// face) and outputs the voxel AABB for the semi-NEE gate. xi.x picks the face,
+// xi.yz sample the quad. pdf = 1 / total visible solid angle; 0 with a zero
+// direction when the view is degenerate (SIByL returns NaN there — behavior is
+// identical downstream because the caller gates on pdf > 0 before tracing).
+// SIByL SampleSphericalVoxel (vxguiding_interface.hlsli, float3-extend).
+float3 SampleVoxelSolidAngle(
+    float3 shadingPos, int3 v, float3 xi,
     out float pdfDir, out float3 aabbMin, out float3 aabbMax)
 {
-    aabbMin = voxGridMin + float3(v) * voxVoxelSize;
-    aabbMax = aabbMin + voxVoxelSize;
+    SphericalQuad squads[3];
+    float3 locals[3];
+    float3 faceSolidAngles;
+    BuildVoxelFaceQuads(shadingPos, v, squads, locals, faceSolidAngles, aabbMin, aabbMax);
 
-    float3 center;
-    float cosThetaMax;
-    pdfDir = ConePdfTowardVoxel(shadingPos, v, center, cosThetaMax);
+    // sign() of the shading point relative to the voxel center, rebuilt for
+    // the local->world transform of the sampled direction.
+    const float3 center = 0.5f * (aabbMin + aabbMax);
+    const float3 dirSign = sign(shadingPos - center);
 
-    if (cosThetaMax < -0.5f) // shading point inside voxel bounding sphere
+    float cdfs[3];
+    float sum = 0.0f;
+    pdfDir = 0.0f;
+    [unroll] for (int i = 0; i < 3; ++i)
     {
-        float z = 1.0f - 2.0f * coneXi.x;
-        float r = sqrt(max(0.0f, 1.0f - z * z));
-        float phi = 2.0f * PI * coneXi.y;
-        return float3(r * cos(phi), r * sin(phi), z);
+        if (faceSolidAngles[i] > 0.0f)
+            sum += faceSolidAngles[i];
+        cdfs[i] = sum;
     }
-    return SampleCone(normalize(center - shadingPos), cosThetaMax, coneXi);
+    if (sum == 0.0f)
+        return float3(0, 0, 0);
+    xi.x *= sum;
+
+    int selectedFace = -1;
+    float facePickPdf = 0.0f;
+    [unroll] for (int j = 0; j < 3; ++j)
+    {
+        if (xi.x <= cdfs[j])
+        {
+            selectedFace = j;
+            facePickPdf = faceSolidAngles[j] / sum;
+            break;
+        }
+    }
+
+    float3 localDir;
+    float faceQuadPdf;
+    SampleSphericalQuad(locals[selectedFace], squads[selectedFace], xi.yz, localDir, faceQuadPdf);
+
+    pdfDir = facePickPdf * faceQuadPdf; // telescopes to 1 / sum
+    return mul(localDir, kVoxelFaceRotations[selectedFace] * dirSign[selectedFace]);
 }
 
 // ---- MIS weight (balance or power heuristic via guidingFlags bit 0) ----
@@ -492,7 +570,9 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     {
         float2 walkXi = Random2D(seed);
         seed = pcg_hash(seed);
-        float2 coneXi = Random2D(seed);
+        float2 quadXi = Random2D(seed);
+        seed = pcg_hash(seed);
+        float faceXi = Random2D(seed).x;
         seed = pcg_hash(seed);
 
         double pdfTop;
@@ -516,7 +596,8 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
 
             float pdfDir;
             float3 aabbMin, aabbMax;
-            float3 dir = SampleConeTowardVoxel(hit.position, v, coneXi, pdfDir, aabbMin, aabbMax);
+            float3 dir = SampleVoxelSolidAngle(
+                hit.position, v, float3(faceXi, quadXi), pdfDir, aabbMin, aabbMax);
             const double pdfG = pdfTop * pdfTree * double(pdfDir);
 
             if (pdfG > 0.0 && dot(dir, surface.N) > 0.0)
@@ -1024,10 +1105,14 @@ void GuidedMiss(inout GuidedPayload payload : SV_RayPayload)
     float u = atan2(dir.z, dir.x) / (2.0 * PI) + 0.5;
     float v = -asin(clamp(dir.y, -1.0, 1.0)) / PI + 0.5;
     float3 sky = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
-    // Firefly clamp: every ray reaching GuidedMiss is indirect (primary sky is
-    // sampled directly in raygen), so cap the HDR sun disc unconditionally.
-    // 0 = disabled. Identical clamp to raytracing.hlsl so both converge alike.
-    if (indirectSkyClamp > 0.0)
+    // Sky-lighting switch + firefly clamp: every ray reaching GuidedMiss is
+    // indirect (primary sky is sampled directly in raygen), so apply both
+    // unconditionally. skyLightingEnabled 0 = sky is background-only, no
+    // illumination. Clamp 0 = disabled. Identical to raytracing.hlsl's Miss so
+    // both techniques converge to the same target.
+    if (skyLightingEnabled == 0)
+        sky = float3(0, 0, 0);
+    else if (indirectSkyClamp > 0.0)
         sky = min(sky, indirectSkyClamp.xxx);
     payload.color = sky;
     payload.hitFlag = 0;

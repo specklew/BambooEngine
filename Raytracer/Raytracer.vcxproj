@@ -159,6 +159,7 @@
     <ClInclude Include="Include\Shader.h" />
     <ClInclude Include="Include\ShaderCompilation.h" />
     <ClInclude Include="Include\Utils\CVars.h" />
+    <ClInclude Include="Include\Utils\GpuMarker.h" />
     <ClInclude Include="Include\Utils\PassConstants.h" />
     <ClInclude Include="Include\Utils\Random.h" />
     <ClInclude Include="Include\Utils\Utils.h" />
@@ -356,6 +357,7 @@
     <None Include="Resources\Shaders\vxpgClusterVisibility.hlsl" />
     <None Include="Resources\Shaders\BitonicCommon.hlsl" />
     <None Include="Resources\Shaders\LightTreeNode.hlsl" />
+    <None Include="Resources\Shaders\SphericalQuad.hlsl" />
     <None Include="Resources\Shaders\vxpgBitonicSort.hlsl" />
     <None Include="Resources\Shaders\vxpgLightTree.hlsl" />
     <None Include="Resources\Shaders\guidedPathTracing.hlsl" />

@@ -50,6 +50,7 @@ void VxpgClusterPass::Initialize(
     CreateBuffers();
     CreateRootSignature();
     CreatePSOs();
+    CreateCommandSignature();
 
     m_initialized = true;
 }
@@ -104,6 +105,21 @@ void VxpgClusterPass::CreatePSOs()
     createCsPso("resources/shaders/vxpgCluster.assign.shader", L"VxpgCluster Assign PSO", m_assignPso);
 }
 
+void VxpgClusterPass::CreateCommandSignature()
+{
+    D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+    arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+
+    D3D12_COMMAND_SIGNATURE_DESC desc = {};
+    desc.ByteStride       = sizeof(DirectX::XMUINT4); // one args entry (xyz + count)
+    desc.NumArgumentDescs = 1;
+    desc.pArgumentDescs   = &arg;
+
+    ThrowIfFailed(m_device->CreateCommandSignature(&desc, nullptr,
+        IID_PPV_ARGS(&m_dispatchCommandSignature)));
+    m_dispatchCommandSignature->SetName(L"VxpgCluster DispatchCommandSignature");
+}
+
 void VxpgClusterPass::Run(uint32_t frameIndex)
 {
     if (!m_initialized || !m_voxelPass || !m_buildPass || !m_fingerprintPass)
@@ -132,10 +148,26 @@ void VxpgClusterPass::Run(uint32_t frameIndex)
     m_clusterSeedCompactIds->UavBarrier(cmd);
 
     // ---- Kernel 2: nearest-center assignment for every compact voxel ----
-    // Fixed worst-case dispatch (ExecuteIndirect deferred, ADR 0003 option b)
-    // with a per-thread early-out on compactID >= litVoxelCount.
-    const uint32_t groups = (Constants::Graphics::VOXEL_GUIDING_CAPACITY + 255) / 256;
+    // Dispatched indirectly off gGuidingDispatchArgs[0] = (ceil(litVoxelCount/256),
+    // 1, 1), replacing the worst-case ceil(CAPACITY/256)=512 fixed dispatch
+    // (ADR 0003 option b). The fingerprint presample emitted the count this frame.
     cmd->SetPipelineState(m_assignPso.Get());
-    cmd->Dispatch(groups, 1, 1);
+
+    // The args buffer (owned by the fingerprint pass) is currently a UAV; flip it
+    // to INDIRECT_ARGUMENT for the ExecuteIndirect read, then back so the next
+    // frame's presample writes it as a UAV again.
+    ID3D12Resource* argsResource =
+        m_fingerprintPass->GetGuidingDispatchArgsBuffer()->GetUnderlyingResource().Get();
+    auto toIndirect = CD3DX12_RESOURCE_BARRIER::Transition(argsResource,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+    cmd->ResourceBarrier(1, &toIndirect);
+
+    cmd->ExecuteIndirect(m_dispatchCommandSignature.Get(), 1, argsResource,
+        0, nullptr, 0); // entry [0]
+
+    auto toUav = CD3DX12_RESOURCE_BARRIER::Transition(argsResource,
+        D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    cmd->ResourceBarrier(1, &toUav);
+
     m_voxelClusterAssignments->UavBarrier(cmd);
 }

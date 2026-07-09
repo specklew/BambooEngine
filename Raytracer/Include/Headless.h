@@ -36,6 +36,11 @@ struct HeadlessConfig
     // Set >0 for benchmark convergence; applied identically to PT and VXPG.
     float indirectSkyClamp = 0.0f;
 
+    // Skybox illumination switch (pathtracing.skyLighting). false = sky stays
+    // visible as background but lights nothing — benchmark isolation, since the
+    // VXPG guide only targets direct-lit surfaces.
+    bool skyLighting = true;
+
     float       defaultSeconds = 5.0f;
     std::string outputDir      = "SavedUserData/Screenshots";
 
