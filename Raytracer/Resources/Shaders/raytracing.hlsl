@@ -40,7 +40,7 @@ void RayGen()
         payload.throughput = float3(1, 1, 1);
         payload.bounceCount = 0;
         payload.seed = seed;
-        TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+        TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
         accumulated += payload.color;
     }
 
@@ -312,7 +312,7 @@ void Hit(inout Payload payload : SV_RayPayload, in Attributes attr)
     ray.TMax = RAY_TMAX;
     
     payload.bounceCount++;
-    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+    TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
     
     float3 directHere = CalculateDirectLightning(hit, surface);
     float3 incoming = payload.color;

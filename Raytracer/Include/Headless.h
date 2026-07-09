@@ -41,6 +41,11 @@ struct HeadlessConfig
     // VXPG guide only targets direct-lit surfaces.
     bool skyLighting = true;
 
+    // Guided PT debug view (guiding.debugView enum index; 0 = normal render).
+    // Diagnosis captures: 1 = BSDF MIS part, 2 = guide MIS part, 3 = MIS weight
+    // false-color, 4 = guided-sample acceptance.
+    uint32_t guidingDebugView = 0;
+
     float       defaultSeconds = 5.0f;
     std::string outputDir      = "SavedUserData/Screenshots";
 

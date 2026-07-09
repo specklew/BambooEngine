@@ -394,11 +394,13 @@ static DirectX::SimpleMath::Vector3 ReadNodeScale(const tinygltf::Node& node)
     return {1.0f, 1.0f, 1.0f};
 }
 
+static DirectX::XMMATRIX ComputeNodeLocalMatrix(const tinygltf::Node& node);
+
 static void TraverseNode(Renderer& renderer, const tinygltf::Model& model, SceneBuilder& sceneBuilder, int nodeIndex, std::shared_ptr<SceneNode> parentNode)
 {
     const tinygltf::Node& gltf_node = model.nodes[nodeIndex];
     auto current_node = std::make_shared<SceneNode>();
-    
+
     if (gltf_node.mesh >= 0)
     {
         auto gameObject = renderer.InstantiateGameObject();
@@ -406,9 +408,29 @@ static void TraverseNode(Renderer& renderer, const tinygltf::Model& model, Scene
         current_node->AddGameObject(gameObject);
     }
 
-    current_node->SetPosition(ReadNodePosition(gltf_node));
-    current_node->SetRotation(ReadNodeRotation(gltf_node));
-    current_node->SetScale(ReadNodeScale(gltf_node));
+    if (gltf_node.matrix.size() == 16)
+    {
+        // glTF nodes may carry their transform as a raw matrix
+        DirectX::XMVECTOR scale, rotation, translation;
+        if (DirectX::XMMatrixDecompose(&scale, &rotation, &translation,
+                ComputeNodeLocalMatrix(gltf_node)))
+        {
+            current_node->SetPosition(DirectX::SimpleMath::Vector3(translation));
+            current_node->SetRotation(DirectX::SimpleMath::Quaternion(rotation));
+            current_node->SetScale(DirectX::SimpleMath::Vector3(scale));
+        }
+        else
+        {
+            spdlog::warn("glTF node '{}' has a non-decomposable matrix (mirror/shear); transform dropped",
+                gltf_node.name);
+        }
+    }
+    else
+    {
+        current_node->SetPosition(ReadNodePosition(gltf_node));
+        current_node->SetRotation(ReadNodeRotation(gltf_node));
+        current_node->SetScale(ReadNodeScale(gltf_node));
+    }
 
     sceneBuilder.AddChild(parentNode, current_node);
     

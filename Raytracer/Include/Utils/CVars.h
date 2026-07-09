@@ -200,6 +200,8 @@ struct AutoCVarEnum : AutoCVar<T>
 
 	void Set(T value)
 	{
+		// enumValueIndex = position in the enum's value list (matches how the
+		// constructor stored the default), NOT the raw enum value.
 		uint32_t idx = 0;
 		for (auto val : magic_enum::enum_values<T>()) {
 			if (val == value) {
@@ -207,6 +209,6 @@ struct AutoCVarEnum : AutoCVar<T>
 			}
 			++idx;
 		}
-		CVarSystem::Get()->SetCVarEnumByIndex(this->m_index, value);
+		CVarSystem::Get()->SetCVarEnumByIndex(this->m_index, idx);
 	}
 };

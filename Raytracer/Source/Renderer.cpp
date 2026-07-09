@@ -1450,6 +1450,7 @@ void Renderer::ApplyRenderConfig(const HeadlessConfig& config)
 	g_lift.Set(config.lift);
 	g_indirectSkyClamp.Set(config.indirectSkyClamp);
 	g_skyLighting.Set(config.skyLighting ? 1 : 0);
+	g_guidingDebugView.Set(static_cast<GuidingDebugView>(config.guidingDebugView));
 	// Headless timed capture integrates over the armed window, so temporal
 	// accumulation MUST be on — otherwise every capture is a single frame and
 	// --seconds only burns wall-time (the camera is static, so nothing resets it).

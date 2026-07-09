@@ -17,9 +17,15 @@ using Microsoft::WRL::ComPtr;
 // 0 switches to Binary (a cluster is fully in or fully out per superpixel). Both
 // signals are produced by the cluster-visibility pass every frame, so this is a
 // quality knob, not a cost knob.
+// Default = Binary (deviation from SIByL's Average, 2026-07-09): Average reads
+// ONLY the check kernel's 32 probe pairs, which all fail for superpixels lit
+// through narrow openings (Sponza arcades) — their heap rows zero out and the
+// guide dies over ~35% of the frame (plus alive/dead flicker at ~2% pair
+// visibility). Binary reads the mask, which the gather kernel's free seed keeps
+// alive with every pixel's own proven bounce connection.
 static AutoCVarInt g_topLevelUseAvgVisibility("vxpg.topLevelTree.useAvgVisibility",
     "Weight top-level cluster importance by soft avg-visibility (1=SIByL Average, 0=Binary mask)",
-    1, CVarFlags::EditCheckbox);
+    0, CVarFlags::EditCheckbox);
 
 namespace
 {

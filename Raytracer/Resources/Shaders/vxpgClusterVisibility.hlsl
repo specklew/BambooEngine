@@ -220,6 +220,16 @@ void CheckClusterVisibility(uint3 dtid : SV_DispatchThreadID, uint gidx : SV_Gro
             HitData hit = GetHitData(vb.primitiveId, geometry.vertexOffset, geometry.indexOffset,
                                      vb.barycentrics, instance.objectToWorld);
             float3 hitNormal = normalize(mul((float3x3)instance.objectToWorld, hit.tri_normal));
+            // Face-forward against the camera ray, as SIByL's GetGeometryHit(vhit,
+            // ray) does before its facing gate (spt_implement.hlsli:99-102) — the
+            // port dropped this flip. With the raw winding normal, back-wound
+            // surfaces (Sponza vault undersides, arcade ceilings) failed the gate
+            // for EVERY VPL, zeroing those superpixels' entire visibility rows:
+            // dead guide across ~35-40% of the frame plus frame-to-frame flicker
+            // where the sampled pixel's winding changed per frame.
+            float3 cameraPos = mul(viewI, float4(0, 0, 0, 1)).xyz;
+            if (dot(hitNormal, normalize(cameraPos - hit.position)) < 0.0)
+                hitNormal = -hitNormal;
 
             const uint vplSlot = min(uint(NextRandom(rng) * clusterVplCount), clusterVplCount - 1u);
             const float4 vplPosNorm = gClusterGatheredLightPoints[clusterToCheck * CVIS_GATHER_CAP + vplSlot];

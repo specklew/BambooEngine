@@ -496,7 +496,7 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, out float3 hitP
     p.hitFlag = 0;
     p.bounceCount = 1;
     p.seed = seed;
-    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, p);
+    TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, p);
     seed = p.seed;
     hitPos = p.hitPos;
     didHit = (p.hitFlag != 0u);
@@ -585,10 +585,16 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 clusterRootId, litVoxelCount - 1u, walkXi.y, pdfTree);
             if (leafNodeId < 0)
             {
-                // SIByL strategy 5 wipes the whole sample on a dead branch.
-                // Unreachable with intensity-only traversal (internal
-                // intensity = exact child sum), kept verbatim.
-                return float3(0, 0, 0);
+                // SIByL strategy 5 wipes the STRATEGY contributions on a dead
+                // branch but adds direct light AFTER the wipe (gi.slang:512
+                // wipe, :635 direct) — returning black here also discarded the
+                // direct term, producing intermittent black samples (frame
+                // flicker). Return the direct-only radiance instead, matching
+                // SIByL's ordering. Rare with intensity-only traversal
+                // (internal intensity = exact child sum), but not impossible
+                // with float summation drift.
+                return (debugView >= 3u) ? float3(0, 0, 0)
+                                         : CalculateDirectLightning(hit, surface);
             }
 
             const uint compactID = uint(gLightTreeNodes[leafNodeId].voxelIndex);
@@ -1231,7 +1237,7 @@ void GuidedHit(inout GuidedPayload payload : SV_RayPayload, in Attributes attr)
     ray.TMax = RAY_TMAX;
 
     payload.bounceCount++;
-    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+    TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
 
     float3 directHere = CalculateDirectLightning(hit, surface);
     float3 incoming = payload.color;

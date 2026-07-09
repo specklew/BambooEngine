@@ -222,7 +222,7 @@ void InjectRayGen()
     payload.flags = 0;
     payload.seed = seed;
     payload.bounce = 1;
-    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, bounceRay, payload);
+    TraceRay(SceneBVH, 0, ~0, 0, 1, 0, bounceRay, payload);
     if (payload.flags == 0)
         return;
 
