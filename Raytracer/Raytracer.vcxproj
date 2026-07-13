@@ -363,6 +363,7 @@
     <None Include="Resources\Shaders\guidedPathTracing.hlsl" />
     <None Include="Resources\Shaders\voxelGuidingBuild.hlsl" />
     <None Include="Resources\Shaders\superpixelBuild.hlsl" />
+    <None Include="Resources\Shaders\ao.hlsl" />
     <ClCompile Include="Source\AccelerationStructures.cpp" />
     <ClCompile Include="Source\Application.cpp" />
     <ClCompile Include="Source\Headless.cpp" />
@@ -471,6 +472,9 @@
     <Natvis Include="Vendor\imgui\misc\debuggers\imgui.natvis" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="Resources\Shaders\ao.ch.shader" />
+    <Content Include="Resources\Shaders\ao.ms.shader" />
+    <Content Include="Resources\Shaders\ao.rg.shader" />
     <Content Include="Resources\Shaders\colorShader.ps.shader" />
     <Content Include="Resources\Shaders\colorShader.vs.shader" />
     <Content Include="Resources\Shaders\raytracing.ah.shader" />

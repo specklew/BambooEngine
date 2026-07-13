@@ -32,6 +32,11 @@ namespace Constants
         constexpr int SPIXEL_GATHERED_DESCRIPTOR_INDEX = VBUFFER_DESCRIPTOR_INDEX + 1; // 528
         constexpr int SPIXEL_COUNTER_DESCRIPTOR_INDEX = SPIXEL_GATHERED_DESCRIPTOR_INDEX + 1; // 529
         constexpr int CLUSTER_VISIBILITY_MASK_DESCRIPTOR_INDEX = SPIXEL_COUNTER_DESCRIPTOR_INDEX + 1; // 530
+        // Fuzzy 4-nearest superpixel blend (SIByL u_fuzzyWeight / u_fuzzyIdx):
+        // per-pixel 4 nearest superpixel centers + 1/dist^2 weights, written by
+        // the superpixel pass, consumed by the guided integrator's mixture pdf.
+        constexpr int FUZZY_WEIGHT_DESCRIPTOR_INDEX = CLUSTER_VISIBILITY_MASK_DESCRIPTOR_INDEX + 1; // 531
+        constexpr int FUZZY_INDEX_DESCRIPTOR_INDEX = FUZZY_WEIGHT_DESCRIPTOR_INDEX + 1; // 532
         constexpr int STATIC_SAMPLERS_COUNT = 6;
         // Max voxels in the compacted guiding distribution (matches SIByL VXGuider_MAX_CAPACITY)
         constexpr int VOXEL_GUIDING_CAPACITY = 131072;

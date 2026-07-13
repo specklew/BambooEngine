@@ -121,6 +121,10 @@ static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accum
 // everywhere; tight bounds turned the lit half of Sponza green (2026-07-09).
 static AutoCVarInt   g_voxelBakeUseCompact("voxel.bake.useCompact", "Bake tight per-voxel triangle AABBs instead of full cubes (SIByL default: off)", 1, CVarFlags::EditCheckbox);
 static AutoCVarInt   g_voxelBakeClipping("voxel.bake.clipping", "Clip triangles against the voxel cube before the tight AABB (SIByL default: off)", 0, CVarFlags::EditCheckbox);
+// Jitter ON is a deliberate deviation (SIByL uses pixel centers): the PT
+// reference anti-aliases its primaries, so a pixel-center VBuffer leaves a
+// constant silhouette mismatch vs the reference (measured 2026-07-10: RMSE
+// 0.0180 vs 0.0117 with jitter, same frame count) — edge error, not variance.
 static AutoCVarInt   g_vbufferJitter("vxpg.vbufferJitter", "Sub-pixel jitter for the shared VBuffer primaries (off = SIByL-literal pixel-center, no edge AA)", 1, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence weight: screen-xy vs world-position", 0.6f, CVarFlags::EditDrag, 0.0f, 4.0f);
 static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer", "SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
@@ -957,7 +961,7 @@ void Renderer::CreateDescriptorHeaps()
 	
 	D3D12_DESCRIPTOR_HEAP_DESC desc;
 	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 13; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center, +2 repVPL/vplPosition, +1 vbuffer, +3 cvis gathered/counter/mask
+	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 15; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center, +2 repVPL/vplPosition, +1 vbuffer, +3 cvis gathered/counter/mask, +2 fuzzy weight/index
 	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 	desc.NodeMask = 0;
 
@@ -1609,6 +1613,12 @@ void Renderer::WriteSuperpixelUavsToGlobalHeap()
 
 	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::SUPERPIXEL_CENTER_DESCRIPTOR_INDEX) * descSize;
 	m_superpixelBuildPass->WriteCenterUavTo(slot);
+
+	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::FUZZY_WEIGHT_DESCRIPTOR_INDEX) * descSize;
+	m_superpixelBuildPass->WriteFuzzyWeightUavTo(slot);
+
+	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::FUZZY_INDEX_DESCRIPTOR_INDEX) * descSize;
+	m_superpixelBuildPass->WriteFuzzyIndexUavTo(slot);
 }
 
 void Renderer::WriteClusterVisibilityUavsToGlobalHeap()

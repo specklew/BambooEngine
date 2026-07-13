@@ -7,8 +7,8 @@
 #define VERTEX_STRIDE 48 // float3 pos + float3 normal + float4 tangent + float2 uv
 
 static const float MIN_ROUGHNESS = 0.04;
-static const float RAY_TMIN = 0.01;
-static const float RAY_TMAX = 1000.0;
+static const float RAY_TMIN = 0.001;
+static const float RAY_TMAX = 100.0;
 
 // ---- Struct definitions ----
 

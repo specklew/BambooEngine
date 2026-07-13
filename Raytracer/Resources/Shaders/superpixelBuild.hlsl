@@ -24,16 +24,79 @@ cbuffer SuperpixelCB : register(b0)
 }
 
 // ShadingPoints read as UAV to avoid a per-frame UAV<->SRV transition.
-// (Fuzzy 4-nearest superpixel outputs removed — cut by ADR 0003, no consumer.)
 RWTexture2D<float4> u_input         : register(u0); // primary worldPos.xyz + octaN.w
 RWTexture2D<float4> u_center        : register(u1); // representative pos + octaN (map_size)
 RWTexture2D<int>    u_index         : register(u2); // per-pixel superpixel id
 RWTexture2D<uint>   u_spixel_counter : register(u3); // pixels per superpixel (map_size)
 RWTexture2D<int2>   u_spixel_gathered: register(u4); // gathered pixel coords (map*spixel_size)
+// Fuzzy 4-nearest blend (restored 2026-07-10, reversing the ADR 0003 cut): the
+// 4 nearest superpixel centers and their normalized 1/dist^2 weights, consumed
+// by the guided integrator's mixture top-level pdf. SIByL u_fuzzyWeight /
+// u_fuzzyIdx (find-center.slang FuzzyVec + Pack).
+RWTexture2D<float4> u_fuzzy_weight  : register(u5); // normalized weights (0 = unused slot)
+RWTexture2D<int4>   u_fuzzy_index   : register(u6); // superpixel flat ids (-1 = unused)
 
 static const float SP_INVALID_POS = 1e29; // ShadingPoints sentinel is 1e30
 
 bool IsValidPixel(float4 sp) { return sp.x < SP_INVALID_POS; }
+
+// 4-nearest tracker for the fuzzy blend. SIByL FuzzyVec (find-center.slang):
+// keeps the 4 smallest SLIC distances seen; on overflow displaces the current
+// maximum if the newcomer is closer.
+struct FuzzyNearest
+{
+    int   centers[4];
+    float dist2[4];
+    int   count;
+};
+
+void FuzzyInsert(inout FuzzyNearest v, int center, float d2)
+{
+    if (v.count < 4)
+    {
+        v.centers[v.count] = center;
+        v.dist2[v.count] = d2;
+        v.count++;
+        return;
+    }
+    int maxIdx = 0;
+    float maxDist = v.dist2[0];
+    [unroll] for (int i = 1; i < 4; ++i)
+    {
+        if (v.dist2[i] > maxDist) { maxDist = v.dist2[i]; maxIdx = i; }
+    }
+    if (d2 < v.dist2[maxIdx])
+    {
+        v.centers[maxIdx] = center;
+        v.dist2[maxIdx] = d2;
+    }
+}
+
+// Normalize to inverse-square-distance weights and write. An exact-distance-0
+// candidate takes the whole weight (SIByL Pack).
+void WriteFuzzy(FuzzyNearest v, int2 idxImg)
+{
+    float4 w = float4(0, 0, 0, 0);
+    int4 centers = int4(-1, -1, -1, -1);
+    if (v.count > 0)
+    {
+        int zeroIdx = -1;
+        for (int i = 0; i < v.count; ++i)
+        {
+            if (v.dist2[i] == 0.0) zeroIdx = i;
+            w[i] = 1.0 / v.dist2[i];
+            centers[i] = v.centers[i];
+        }
+        if (zeroIdx != -1)
+        {
+            w = float4(0, 0, 0, 0);
+            w[zeroIdx] = 1.0;
+        }
+        w /= dot(w, float4(1, 1, 1, 1));
+    }
+    u_fuzzy_weight[idxImg] = w;
+    u_fuzzy_index[idxImg]  = centers;
+}
 
 // SLIC distance: .x = normal-gated (1e6 if facing away), .y = ungated fallback.
 float2 ComputeSlicDistance(
@@ -121,6 +184,9 @@ void FindCenterAssociation(uint3 dtid : SV_DispatchThreadID, uint gid : SV_Group
     int   minidx = -1;     float dist = 999999.0;
     int   minidxF = -1;    float distF = 999999.0;
 
+    FuzzyNearest fuzzy;        fuzzy.count = 0;
+    FuzzyNearest fuzzyFallback; fuzzyFallback.count = 0;
+
     [unroll] for (int n = 0; n < 9; ++n)
     {
         int j = n % 3 - 1;
@@ -137,6 +203,8 @@ void FindCenterAssociation(uint3 dtid : SV_DispatchThreadID, uint gid : SV_Group
                 weight, max_xy_dist, max_color_dist);
             if (cd.x < dist)  { dist = cd.x;  minidx  = spId; }
             if (cd.y < distF) { distF = cd.y; minidxF = spId; }
+            FuzzyInsert(fuzzy, spId, cd.x);
+            FuzzyInsert(fuzzyFallback, spId, cd.y);
         }
     }
 
@@ -145,6 +213,18 @@ void FindCenterAssociation(uint3 dtid : SV_DispatchThreadID, uint gid : SV_Group
     bool gateValid = (minidx >= 0);
     int spixelID = gateValid ? minidx : minidxF;
     u_index[idxImg] = valid ? spixelID : -1;
+
+    // Fuzzy blend follows the same gate-then-fallback rule (SIByL find-center).
+    // Only the final association (writeGather) emits it — intermediate SLIC
+    // iterations have unconverged centers and no consumer.
+    if (writeGather != 0)
+    {
+        if (!gateValid || !valid)
+            fuzzy = fuzzyFallback;
+        if (!valid)
+            fuzzy.count = 0;
+        WriteFuzzy(fuzzy, idxImg);
+    }
 
     if (writeGather == 0) return;
 

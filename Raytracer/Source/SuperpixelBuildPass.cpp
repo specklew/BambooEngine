@@ -49,10 +49,11 @@ void SuperpixelBuildPass::Initialize(
 
 void SuperpixelBuildPass::CreateRootSignature()
 {
-    // b0 = 12 root constants (SuperpixelConstants). Table = 5 UAVs u0..u4:
-    // u0 ShadingPoints, u1 center, u2 index, u3 counter, u4 gathered.
+    // b0 = 12 root constants (SuperpixelConstants). Table = 7 UAVs u0..u6:
+    // u0 ShadingPoints, u1 center, u2 index, u3 counter, u4 gathered,
+    // u5 fuzzy weights, u6 fuzzy indices.
     CD3DX12_DESCRIPTOR_RANGE uavRange;
-    uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 5, 0);
+    uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 7, 0);
 
     CD3DX12_ROOT_PARAMETER params[2];
     params[0].InitAsConstants(12, 0);
@@ -109,13 +110,15 @@ void SuperpixelBuildPass::CreateBuffers()
     makeTex(DXGI_FORMAT_R32_SINT,           m_width,  m_height, L"Superpixel Index",   m_index);
     makeTex(DXGI_FORMAT_R32_UINT,           m_mapX,   m_mapY,   L"Superpixel Counter", m_counter);
     makeTex(DXGI_FORMAT_R32G32_SINT,        m_mapX * SP, m_mapY * SP, L"Superpixel Gathered", m_gathered);
+    makeTex(DXGI_FORMAT_R32G32B32A32_FLOAT, m_width,  m_height, L"Superpixel FuzzyWeight", m_fuzzyWeight);
+    makeTex(DXGI_FORMAT_R32G32B32A32_SINT,  m_width,  m_height, L"Superpixel FuzzyIndex",  m_fuzzyIndex);
 }
 
 void SuperpixelBuildPass::CreatePrivateHeap(ID3D12Resource* shadingPoints)
 {
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
     heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.NumDescriptors = 5;
+    heapDesc.NumDescriptors = 7;
     heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     ThrowIfFailed(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_privateHeap)));
 
@@ -137,6 +140,8 @@ void SuperpixelBuildPass::CreatePrivateHeap(ID3D12Resource* shadingPoints)
     writeUav(m_index.Get(),   DXGI_FORMAT_R32_SINT);           // u2
     writeUav(m_counter.Get(), DXGI_FORMAT_R32_UINT);           // u3
     writeUav(m_gathered.Get(),DXGI_FORMAT_R32G32_SINT);        // u4
+    writeUav(m_fuzzyWeight.Get(), DXGI_FORMAT_R32G32B32A32_FLOAT); // u5
+    writeUav(m_fuzzyIndex.Get(),  DXGI_FORMAT_R32G32B32A32_SINT);  // u6
 
     m_boundShadingPoints = shadingPoints;
 }
@@ -152,6 +157,7 @@ void SuperpixelBuildPass::OnResize(uint32_t width, uint32_t height, ID3D12Resour
     m_mapY   = (height + SP - 1) / SP;
 
     m_center.Reset(); m_index.Reset(); m_counter.Reset(); m_gathered.Reset();
+    m_fuzzyWeight.Reset(); m_fuzzyIndex.Reset();
     m_privateHeap.Reset();
 
     CreateBuffers();
@@ -174,6 +180,24 @@ void SuperpixelBuildPass::WriteCenterUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) con
     uav.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
     uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     m_device->CreateUnorderedAccessView(m_center.Get(), nullptr, &uav, dest);
+}
+
+void SuperpixelBuildPass::WriteFuzzyWeightUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const
+{
+    if (!m_fuzzyWeight) return;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+    uav.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    m_device->CreateUnorderedAccessView(m_fuzzyWeight.Get(), nullptr, &uav, dest);
+}
+
+void SuperpixelBuildPass::WriteFuzzyIndexUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const
+{
+    if (!m_fuzzyIndex) return;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+    uav.Format        = DXGI_FORMAT_R32G32B32A32_SINT;
+    uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    m_device->CreateUnorderedAccessView(m_fuzzyIndex.Get(), nullptr, &uav, dest);
 }
 
 void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float posNormalizer)
@@ -256,4 +280,6 @@ void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float
     uavBarrier(m_index.Get());
     uavBarrier(m_counter.Get());
     uavBarrier(m_gathered.Get());
+    uavBarrier(m_fuzzyWeight.Get());
+    uavBarrier(m_fuzzyIndex.Get());
 }

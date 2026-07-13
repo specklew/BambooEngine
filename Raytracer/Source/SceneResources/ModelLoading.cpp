@@ -171,6 +171,45 @@ static void ExtractIndices(const tinygltf::Model& model, const tinygltf::Primiti
     }
 }
 
+// glTF spec: primitives without a NORMAL attribute must be shaded with face
+// normals. Vertices are shared between faces, so accumulate area-weighted face
+// normals per vertex instead of duplicating vertices: flat surfaces get the
+// exact face normal, shared hard edges get the blend. The cross-product order
+// matches the swapped index winding (ExtractIndices) and the shader's
+// tri_normal (RaytracingUtils.hlsl), keeping shading and geometric normals on
+// the same side.
+static void ComputeNormals(std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+{
+    using namespace DirectX;
+
+    for (Vertex& vertex : vertices)
+        vertex.Normal = {0, 0, 0};
+
+    for (size_t i = 0; i + 2 < indices.size(); i += 3)
+    {
+        Vertex& v0 = vertices[indices[i]];
+        Vertex& v1 = vertices[indices[i + 1]];
+        Vertex& v2 = vertices[indices[i + 2]];
+
+        const XMVECTOR p0 = XMLoadFloat3(&v0.Pos);
+        const XMVECTOR faceNormal = XMVector3Cross(
+            XMVectorSubtract(XMLoadFloat3(&v2.Pos), p0),
+            XMVectorSubtract(XMLoadFloat3(&v1.Pos), p0));
+
+        for (Vertex* vertex : { &v0, &v1, &v2 })
+            XMStoreFloat3(&vertex->Normal, XMVectorAdd(XMLoadFloat3(&vertex->Normal), faceNormal));
+    }
+
+    for (Vertex& vertex : vertices)
+    {
+        const XMVECTOR accumulated = XMLoadFloat3(&vertex.Normal);
+        if (XMVectorGetX(XMVector3LengthSq(accumulated)) > 0.0f)
+            XMStoreFloat3(&vertex.Normal, XMVector3Normalize(accumulated));
+        else
+            vertex.Normal = {0, 1, 0}; // degenerate/unreferenced vertex
+    }
+}
+
 static void ComputeTangents(std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 {
     struct UserData
@@ -281,6 +320,10 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     assert(vertices.size() < INT_MAX);
     assert(indices.size() < INT_MAX);
     
+    const bool has_normal = primitive.attributes.find("NORMAL") != primitive.attributes.end();
+    if (!has_normal)
+        ComputeNormals(vertices, indices);
+
     const bool has_tangent = primitive.attributes.find("TANGENT") != primitive.attributes.end();
     if (!has_tangent)
         ComputeTangents(vertices, indices);
@@ -586,7 +629,7 @@ static void LoadLights(const tinygltf::Model& model, SceneBuilder& sceneBuilder)
         LightData lightData;
         lightData.type = Directional;
         lightData.position = {0, 0, 0};
-        lightData.direction = {-0.5f, -0.7071f, -0.7071f};
+        lightData.direction = {-0.5f, -0.7071f, -0.067f};
         lightData.color = {1, 1, 1};
         lightData.intensity = 3.0f;
         lightData.range = 0.0f;

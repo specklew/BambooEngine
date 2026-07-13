@@ -151,13 +151,29 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     spixelIndexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     spixelIndexRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::SUPERPIXEL_INDEX_DESCRIPTOR_INDEX;
 
-    D3D12_DESCRIPTOR_RANGE ranges[14] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
+    // Fuzzy 4-nearest blend (superpixel pass outputs): per-pixel weights + ids
+    // for the guided integrator's mixture top-level pdf.
+    D3D12_DESCRIPTOR_RANGE fuzzyWeightRange;
+    fuzzyWeightRange.BaseShaderRegister = 20; // u20
+    fuzzyWeightRange.NumDescriptors = 1;
+    fuzzyWeightRange.RegisterSpace = 0;
+    fuzzyWeightRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    fuzzyWeightRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::FUZZY_WEIGHT_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE fuzzyIndexRange;
+    fuzzyIndexRange.BaseShaderRegister = 21; // u21
+    fuzzyIndexRange.NumDescriptors = 1;
+    fuzzyIndexRange.RegisterSpace = 0;
+    fuzzyIndexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    fuzzyIndexRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::FUZZY_INDEX_DESCRIPTOR_INDEX;
+
+    D3D12_DESCRIPTOR_RANGE ranges[16] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
                                          texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
                                          voxelRepresentativeRange, vplPositionRange, vbufferRange, clusterMaskRange,
-                                         spixelIndexRange};
+                                         spixelIndexRange, fuzzyWeightRange, fuzzyIndexRange};
 
     CD3DX12_ROOT_PARAMETER rootParameters[20];
-    rootParameters[0].InitAsDescriptorTable(14, ranges);
+    rootParameters[0].InitAsDescriptorTable(16, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
     rootParameters[3].InitAsShaderResourceView(5, 0);  // Random buffer

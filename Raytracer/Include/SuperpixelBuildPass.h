@@ -24,6 +24,9 @@ public:
     // Debug views read these from the main heap; Renderer writes the UAVs on resize.
     void WriteIndexUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
     void WriteCenterUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
+    // Fuzzy 4-nearest blend outputs for the guided integrator's mixture pdf.
+    void WriteFuzzyWeightUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
+    void WriteFuzzyIndexUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
 
     // Raw resources for the cluster-visibility pass (per-superpixel pixel lists +
     // the per-pixel superpixel id map), which creates its own descriptors.
@@ -54,6 +57,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_index;        // screen    R32_SINT
     Microsoft::WRL::ComPtr<ID3D12Resource> m_counter;      // map_size  R32_UINT
     Microsoft::WRL::ComPtr<ID3D12Resource> m_gathered;     // map*size  RG32_SINT
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_fuzzyWeight;  // screen    RGBA32F
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_fuzzyIndex;   // screen    RGBA32_SINT
 
     ID3D12Resource* m_boundShadingPoints = nullptr; // raw: lifetime owned by injection
 

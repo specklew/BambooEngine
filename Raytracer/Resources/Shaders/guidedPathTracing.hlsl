@@ -79,6 +79,13 @@ RWStructuredBuffer<float>         gSpixelClusterImportanceHeap : register(u17);
 RWStructuredBuffer<uint4>         gVoxelLiveBoundMin : register(u18);
 RWStructuredBuffer<uint4>         gVoxelLiveBoundMax : register(u19);
 
+// Fuzzy 4-nearest superpixel blend (SIByL u_fuzzyWeight / u_fuzzyIdx, written
+// by the superpixel pass): the 4 nearest superpixel centers per pixel and
+// their normalized 1/dist^2 weights. Top-level cluster selection becomes a
+// mixture over these parents. Global-heap slots 531/532.
+RWTexture2D<float4> gFuzzyWeights : register(u20);
+RWTexture2D<int4>   gFuzzyIndices : register(u21);
+
 cbuffer VoxelGridCB : register(b4)
 {
     float3 voxGridMin;
@@ -361,19 +368,39 @@ double PdfTraverseLightTreeIntensity(int clusterRootId, int leafNodeId)
            double(gLightTreeNodes[clusterRootId].intensity);
 }
 
-// Guide pdf of a BSDF-sampled ray evaluated at its hit position: the
-// probability the guide would have picked the hit voxel from this pixel's
-// superpixel (heap leaf/total x telescoped tree leaf/root) times the cone pdf
-// toward that voxel. 0 whenever any link is missing — hit voxel unlit,
-// cluster unassigned (such leaves sort past every cluster run and sit under
-// no cluster root, so the forward walk truly cannot reach them), or heap
-// empty — which hands the BSDF sample full MIS weight.
-// (vxguiding-gi.slang strategy 5, reverse block.)
-double EvalTreeGuidePdf(int spixelFlat, float3 shadingPos, float3 hitPos)
+// Mixture probability of the fuzzy parent set picking `cluster`: sum over the
+// (renormalized) parents of weight x heapLeaf/heapRoot — SIByL strategy 7's
+// reverse formula (gi.slang:389-403), used here on BOTH the forward and the
+// reverse side. The shipped strategy 6 pairs a single-parent forward pdf with
+// this mixture reverse — an inconsistent estimator; consistent-mixture is a
+// deliberate deviation (ADR 0003).
+double FuzzyClusterMixturePdf(float4 fuzzyWeights, int4 fuzzyIndices, int cluster)
 {
-    if (spixelFlat < 0)
-        return 0.0;
+    double pdfTop = 0.0;
+    [unroll] for (int f = 0; f < 4; ++f)
+    {
+        if (fuzzyWeights[f] > 0.0 && fuzzyIndices[f] >= 0)
+        {
+            const uint heapBase = uint(fuzzyIndices[f]) * 64u;
+            const float rootImportance = gSpixelClusterImportanceHeap[heapBase + 1u];
+            const float leafImportance = gSpixelClusterImportanceHeap[heapBase + 32u + uint(cluster)];
+            if (rootImportance > 0.0f)
+                pdfTop += double(fuzzyWeights[f]) * double(leafImportance) / double(rootImportance);
+        }
+    }
+    return pdfTop;
+}
 
+// Guide pdf of a BSDF-sampled ray evaluated at its hit position: the mixture
+// probability the fuzzy parent set picks the hit voxel's cluster, times the
+// telescoped tree leaf/root, times the direction pdf toward that voxel. 0
+// whenever any link is missing — hit voxel unlit, cluster unassigned (such
+// leaves sort past every cluster run and sit under no cluster root, so the
+// forward walk truly cannot reach them), or every parent heap empty — which
+// hands the BSDF sample full MIS weight.
+// (vxguiding-gi.slang strategy 5 reverse block + strategy 7 fuzzy top pdf.)
+double EvalTreeGuidePdf(float4 fuzzyWeights, int4 fuzzyIndices, float3 shadingPos, float3 hitPos)
+{
     int3 v = int3(floor((hitPos - voxGridMin) / voxVoxelSize));
     if (any(v < 0) || any(v >= int(voxGridDim)))
         return 0.0;
@@ -387,12 +414,9 @@ double EvalTreeGuidePdf(int spixelFlat, float3 shadingPos, float3 hitPos)
     if (cluster < 0 || cluster >= 32)
         return 0.0;
 
-    const uint heapBase = uint(spixelFlat) * 64u;
-    const float topTotal = gSpixelClusterImportanceHeap[heapBase + 1u];
-    if (topTotal == 0.0f)
+    const double pdfTop = FuzzyClusterMixturePdf(fuzzyWeights, fuzzyIndices, cluster);
+    if (pdfTop == 0.0)
         return 0.0;
-    const float topLeaf = gSpixelClusterImportanceHeap[heapBase + 32u + uint(cluster)];
-    const double pdfTop = double(topLeaf) / double(topTotal);
 
     const int leafNodeId    = gCompactToLeaf[compactID];
     const int clusterRootId = gClusterRootNodes[cluster];
@@ -510,15 +534,15 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, out float3 hitP
 // false-color, 4 = guided sample acceptance green/red/blue).
 
 float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, uint debugView,
-                        int spixelFlat, inout uint seed)
+                        float4 fuzzyWeights, int4 fuzzyIndices, int spixelFlat, inout uint seed)
 {
     if (numBounces == 0)
         return CalculateDirectLightning(hit, surface);
 
     const uint litVoxelCount = LitVoxelCount();
-    // Guide-dead pixels (no lit voxels, or no superpixel) run BSDF-only at
-    // full MIS weight — no uniform fallback (faithful, see header).
-    const bool guideAlive = (litVoxelCount > 0u) && (spixelFlat >= 0);
+    // Guide-dead pixels (no lit voxels, or every fuzzy parent's heap empty) run
+    // BSDF-only at full MIS weight — no uniform fallback (faithful, see header).
+    const bool guideAlive = (litVoxelCount > 0u) && any(fuzzyWeights > 0.0);
 
     float3 radiance = (debugView >= 3u) ? float3(0, 0, 0)
                                         : CalculateDirectLightning(hit, surface);
@@ -551,7 +575,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 // voxels -> weight 1 for this sample).
                 float pdfGAtDir = 0.0;
                 if (guideAlive && didHit)
-                    pdfGAtDir = float(EvalTreeGuidePdf(spixelFlat, hit.position, hitPos));
+                    pdfGAtDir = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices, hit.position, hitPos));
                 if (isnan(pdfGAtDir)) pdfGAtDir = 0.0; // SIByL w2 guard
 
                 float weight = MisWeight(pdfB, pdfGAtDir);
@@ -565,18 +589,37 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         }
     }
 
-    // Guide strategy (forward chain: heap -> cluster root -> tree -> voxel -> cone)
+    // Guide strategy (forward chain: fuzzy parent pick -> heap -> cluster root
+    // -> tree -> voxel -> solid-angle sample)
     if (debugView != 1u && guideAlive)
     {
         float2 walkXi = Random2D(seed);
         seed = pcg_hash(seed);
         float2 quadXi = Random2D(seed);
         seed = pcg_hash(seed);
-        float faceXi = Random2D(seed).x;
+        float2 faceParentXi = Random2D(seed);
         seed = pcg_hash(seed);
+        const float faceXi = faceParentXi.x;
 
-        double pdfTop;
-        const int cluster = SampleSuperpixelClusterHeap(uint(spixelFlat), walkXi.x, pdfTop);
+        // CDF-pick one fuzzy parent (SIByL strategy 6 forward, gi.slang:301-311);
+        // a float fall-through keeps the hard SLIC assignment, like SIByL keeps
+        // its pre-initialized u_spixelIdx.
+        int selectedParent = spixelFlat;
+        float parentAccum = 0.0;
+        [unroll] for (int f = 0; f < 4; ++f)
+        {
+            parentAccum += fuzzyWeights[f];
+            if (faceParentXi.y < parentAccum)
+            {
+                selectedParent = fuzzyIndices[f];
+                break;
+            }
+        }
+        if (selectedParent < 0)
+            return radiance; // no live parent and no hard assignment
+
+        double pdfTopWalk;
+        const int cluster = SampleSuperpixelClusterHeap(uint(selectedParent), walkXi.x, pdfTopWalk);
         const int clusterRootId = (cluster >= 0) ? gClusterRootNodes[cluster] : -1;
         if (clusterRootId >= 0)
         {
@@ -604,6 +647,13 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
             float3 aabbMin, aabbMax;
             float3 dir = SampleVoxelSolidAngle(
                 hit.position, v, float3(faceXi, quadXi), pdfDir, aabbMin, aabbMax);
+            // Cluster-selection probability = the fuzzy MIXTURE (not the single
+            // walked parent's pdfTopWalk): the actual selection process is
+            // "pick parent by weight, then walk its heap", whose density for a
+            // cluster is sum_f w_f x leaf_f/root_f — the same formula the
+            // reverse query uses, keeping the pair consistent (see
+            // FuzzyClusterMixturePdf header).
+            const double pdfTop = FuzzyClusterMixturePdf(fuzzyWeights, fuzzyIndices, cluster);
             const double pdfG = pdfTop * pdfTree * double(pdfDir);
 
             if (pdfG > 0.0 && dot(dir, surface.N) > 0.0)
@@ -1087,16 +1137,32 @@ void GuidedRayGen()
     float3 F = FresnelSchlick(NdotV, surface.F0);
     float specularProb = (F.r + F.g + F.b) / 3.0;
 
-    // SLIC superpixel of this pixel — selects the importance-heap row for both
-    // MIS strategies. Read once; every spp sample shares it.
+    // SLIC superpixel of this pixel (hard assignment, kept as the fuzzy
+    // fall-through) and the fuzzy 4-nearest parent set. Weights are
+    // renormalized after dropping parents whose importance heap is empty
+    // (SIByL gi.slang:293-299); all-dropped => guide dead for this pixel.
+    // Read once; every spp sample shares them.
     const int spixelFlat = gSpixelIndexImage[launchIndex];
+    float4 fuzzyWeights = gFuzzyWeights[launchIndex];
+    const int4 fuzzyIndices = gFuzzyIndices[launchIndex];
+    [unroll] for (int f = 0; f < 4; ++f)
+    {
+        const bool parentAlive = fuzzyWeights[f] > 0.0 && fuzzyIndices[f] >= 0 &&
+            gSpixelClusterImportanceHeap[uint(fuzzyIndices[f]) * 64u + 1u] > 0.0f;
+        if (!parentAlive)
+            fuzzyWeights[f] = 0.0;
+    }
+    const float fuzzyTotal = dot(fuzzyWeights, float4(1, 1, 1, 1));
+    if (fuzzyTotal > 0.0)
+        fuzzyWeights /= fuzzyTotal;
 
     float3 accumulated = float3(0, 0, 0);
     for (uint i = 0; i < (uint)samplesPerPixel; i++)
     {
         uint seed = pcg_hash(pixelId ^ (i * 2654435761u) ^ (frameIndex * 805459861u));
         seed = pcg_hash(seed);
-        accumulated += ShadeFirstVertex(hit, surface, specularProb, debugView, spixelFlat, seed);
+        accumulated += ShadeFirstVertex(hit, surface, specularProb, debugView,
+                                        fuzzyWeights, fuzzyIndices, spixelFlat, seed);
     }
 
     gOutput[launchIndex] = min(float4(accumulated / samplesPerPixel, 1.0), 100.0f);

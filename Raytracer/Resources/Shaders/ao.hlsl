@@ -52,7 +52,7 @@ void RayGen()
     payload.bounceCount = 0;
     payload.seed        = seed;
 
-    TraceRay(SceneBVH, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, primaryRay, payload);
+    TraceRay(SceneBVH, 0, ~0, 0, 1, 0, primaryRay, payload);
 
     if (payload.bounceCount == 0)
     {
