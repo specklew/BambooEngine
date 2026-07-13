@@ -210,6 +210,12 @@
     <ClInclude Include="Include\ModelLoading.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\SceneResources\MeshProcessing.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\SceneResources\TungstenLoading.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Primitive.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -678,6 +684,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\ModelLoading.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\SceneResources\MeshProcessing.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\SceneResources\TungstenLoading.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\RaytracePass.cpp">

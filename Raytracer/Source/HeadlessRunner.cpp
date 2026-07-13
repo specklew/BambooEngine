@@ -25,7 +25,8 @@ namespace
         std::string path = scene;
         const bool looksLikePath = scene.find('/') != std::string::npos ||
                                    scene.find('\\') != std::string::npos ||
-                                   scene.find(".gl") != std::string::npos;
+                                   scene.find(".gl") != std::string::npos ||
+                                   scene.find(".json") != std::string::npos; // Tungsten scene
         if (!looksLikePath)
             path = "resources/models/" + scene + ".glb";
         return std::wstring(path.begin(), path.end());

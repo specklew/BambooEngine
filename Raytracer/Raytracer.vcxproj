@@ -152,6 +152,8 @@
     <ClInclude Include="Include\SceneResources\Material.h" />
     <ClInclude Include="Include\SceneResources\Model.h" />
     <ClInclude Include="Include\SceneResources\ModelLoading.h" />
+    <ClInclude Include="Include\SceneResources\MeshProcessing.h" />
+    <ClInclude Include="Include\SceneResources\TungstenLoading.h" />
     <ClInclude Include="Include\SceneResources\Primitive.h" />
     <ClInclude Include="Include\SceneResources\Scene.h" />
     <ClInclude Include="Include\SceneResources\SceneNode.h" />
@@ -408,6 +410,8 @@
     <ClCompile Include="Source\SceneResources\Material.cpp"/>
     <ClCompile Include="Source\SceneResources\Model.cpp"/>
     <ClCompile Include="Source\SceneResources\ModelLoading.cpp"/>
+    <ClCompile Include="Source\SceneResources\MeshProcessing.cpp"/>
+    <ClCompile Include="Source\SceneResources\TungstenLoading.cpp"/>
     <ClCompile Include="Source\SceneResources\Scene.cpp"/>
     <ClCompile Include="Source\SceneResources\SceneNode.cpp"/>
     <ClCompile Include="Source\SceneResources\Transform.cpp"/>

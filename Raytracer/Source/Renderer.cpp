@@ -83,13 +83,21 @@ using namespace Microsoft::WRL;
 
 namespace
 {
+    std::string ExtractModelName(const std::filesystem::path& p)
+    {
+        // Tungsten scenes are all named scene.json — key by the containing folder
+        // so they don't collide on "scene" and each gets its own places entry.
+        if (ToLowerAscii(p.extension().string()) == ".json")
+            return ToLowerAscii(p.parent_path().filename().string());
+        return ToLowerAscii(p.stem().string());
+    }
     std::string ExtractModelName(const std::string& path)
     {
-        return ToLowerAscii(std::filesystem::path(path).stem().string());
+        return ExtractModelName(std::filesystem::path(path));
     }
     std::string ExtractModelName(const std::wstring& path)
     {
-        return ToLowerAscii(std::filesystem::path(path).stem().string());
+        return ExtractModelName(std::filesystem::path(path));
     }
 }
 
