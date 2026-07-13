@@ -56,8 +56,6 @@
 
 #ifdef _DEBUG
 #define ENABLE_GPU_BASED_VALIDATION 1
-
-#ifdef _DEBUG
 // Routes every D3D12 debug-layer message to spdlog so validation errors/warnings
 // appear in the engine console (and the headless log), not just the attached
 // debugger's output window.
@@ -79,7 +77,6 @@ static void CALLBACK D3D12DebugMessageCallback(
 		break;
 	}
 }
-#endif
 #endif
 
 using namespace Microsoft::WRL;
@@ -1124,7 +1121,9 @@ void Renderer::CreatePipelineState()
 	desc.InputLayout = {inputLayout, _countof(inputLayout)};
 	desc.pRootSignature = m_rootSignature.Get();
 
-	desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	CD3DX12_RASTERIZER_DESC rasterDesc(D3D12_DEFAULT);
+	rasterDesc.FrontCounterClockwise = TRUE; // Loaders store canonical CCW winding; CCW is front-facing.
+	desc.RasterizerState = rasterDesc;
 	desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
 	desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 	

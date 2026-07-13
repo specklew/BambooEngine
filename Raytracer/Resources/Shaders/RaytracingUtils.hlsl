@@ -179,12 +179,27 @@ HitData LoadHitTriangle(uint triangleIndex, uint vertexOffset, uint indexOffset,
     hit_data.tri_uv1 = GetVertexFloat2Attribute(hit_data.tri_indices.y * VERTEX_STRIDE + 40);
     hit_data.tri_uv2 = GetVertexFloat2Attribute(hit_data.tri_indices.z * VERTEX_STRIDE + 40);
 
-    hit_data.tri_normal = normalize(cross(hit_data.tri_v2 - hit_data.tri_v0, hit_data.tri_v1 - hit_data.tri_v0));
+    // Canonical CCW winding (loaders store standard order): standard cross gives the outward face normal.
+    hit_data.tri_normal = normalize(cross(hit_data.tri_v1 - hit_data.tri_v0, hit_data.tri_v2 - hit_data.tri_v0));
 
     float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
     hit_data.uv = bary.x * hit_data.tri_uv0 + bary.y * hit_data.tri_uv1 + bary.z * hit_data.tri_uv2;
 
     return hit_data;
+}
+
+// Inverse-transpose (cofactor / det) normal transform: correct under non-uniform
+// scale and mirrored instances, where the plain 3x3 skews normals off the surface.
+// Dividing by det carries the sign so mirrored instances flip the normal correctly.
+float3 TransformNormalToWorld(float3x3 m, float3 objectNormal)
+{
+    float3 a = m[0], b = m[1], c = m[2];
+    float3 cof0 = cross(b, c);
+    float det = dot(a, cof0);
+    if (abs(det) < 1e-12)
+        return normalize(mul(m, objectNormal)); // degenerate instance transform: fall back
+    float3x3 normalMatrix = float3x3(cof0, cross(c, a), cross(a, b)) * (1.0 / det);
+    return normalize(mul(normalMatrix, objectNormal));
 }
 
 // Hit-shader variant: transforms via ObjectToWorld3x4(), position via ray eval.
@@ -194,7 +209,7 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
 
     float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
 
-    hit_data.normal = normalize(mul((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
+    hit_data.normal = TransformNormalToWorld((float3x3)ObjectToWorld3x4(), normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2));
 
     float3 interpTangent = normalize(bary.x * hit_data.tri_t0.xyz + bary.y * hit_data.tri_t1.xyz + bary.z * hit_data.tri_t2.xyz);
     hit_data.tangent = float4(normalize(mul((float3x3)ObjectToWorld3x4(), interpTangent)), hit_data.tri_t0.w);
@@ -212,7 +227,7 @@ HitData GetHitData(uint triangleIndex, uint vertexOffset, uint indexOffset, floa
 
     float3 bary = float3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
 
-    hit_data.normal = normalize(mul((float3x3)objectToWorld, normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2)));
+    hit_data.normal = TransformNormalToWorld((float3x3)objectToWorld, normalize(bary.x * hit_data.tri_n0 + bary.y * hit_data.tri_n1 + bary.z * hit_data.tri_n2));
 
     float3 interpTangent = normalize(bary.x * hit_data.tri_t0.xyz + bary.y * hit_data.tri_t1.xyz + bary.z * hit_data.tri_t2.xyz);
     hit_data.tangent = float4(normalize(mul((float3x3)objectToWorld, interpTangent)), hit_data.tri_t0.w);

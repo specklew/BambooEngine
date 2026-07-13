@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <filesystem>
 #include <unordered_map>
 #include <tinygltf/tiny_gltf.h>
@@ -144,8 +145,8 @@ static void ExtractIndices(const tinygltf::Model& model, const tinygltf::Primiti
             for (int i = 0; i < accessor.count; i+=3)
             {
                 outIndices.push_back(rawIndices[i]);
-                outIndices.push_back(rawIndices[i+2]);
                 outIndices.push_back(rawIndices[i+1]);
+                outIndices.push_back(rawIndices[i+2]);
             }
 
             break;
@@ -158,8 +159,8 @@ static void ExtractIndices(const tinygltf::Model& model, const tinygltf::Primiti
             for (int i = 0; i < accessor.count; i+=3)
             {
                 outIndices.push_back(rawIndices[i]);
-                outIndices.push_back(rawIndices[i+2]);
                 outIndices.push_back(rawIndices[i+1]);
+                outIndices.push_back(rawIndices[i+2]);
             }
             break;
         }
@@ -174,10 +175,10 @@ static void ExtractIndices(const tinygltf::Model& model, const tinygltf::Primiti
 // glTF spec: primitives without a NORMAL attribute must be shaded with face
 // normals. Vertices are shared between faces, so accumulate area-weighted face
 // normals per vertex instead of duplicating vertices: flat surfaces get the
-// exact face normal, shared hard edges get the blend. The cross-product order
-// matches the swapped index winding (ExtractIndices) and the shader's
-// tri_normal (RaytracingUtils.hlsl), keeping shading and geometric normals on
-// the same side.
+// exact face normal, shared hard edges get the blend. Cross-product order is the
+// standard cross(v1-v0, v2-v0) of the canonical CCW winding (ExtractIndices no
+// longer swaps) and matches the shader's tri_normal (RaytracingUtils.hlsl),
+// keeping shading and geometric normals on the same (outward) side.
 static void ComputeNormals(std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 {
     using namespace DirectX;
@@ -193,8 +194,8 @@ static void ComputeNormals(std::vector<Vertex>& vertices, const std::vector<uint
 
         const XMVECTOR p0 = XMLoadFloat3(&v0.Pos);
         const XMVECTOR faceNormal = XMVector3Cross(
-            XMVectorSubtract(XMLoadFloat3(&v2.Pos), p0),
-            XMVectorSubtract(XMLoadFloat3(&v1.Pos), p0));
+            XMVectorSubtract(XMLoadFloat3(&v1.Pos), p0),
+            XMVectorSubtract(XMLoadFloat3(&v2.Pos), p0));
 
         for (Vertex* vertex : { &v0, &v1, &v2 })
             XMStoreFloat3(&vertex->Normal, XMVectorAdd(XMLoadFloat3(&vertex->Normal), faceNormal));
@@ -263,6 +264,90 @@ static void ComputeTangents(std::vector<Vertex>& vertices, const std::vector<uin
     genTangSpaceDefault(&ctx);
 }
 
+// Load-time invariant (ADR 0005): drop only truly degenerate triangles — three
+// collinear/coincident vertices (zero cross-product area). Thin-but-flat shells
+// keep real area and are left intact. Degenerate faces otherwise poison
+// ComputeNormals/mikktspace and produce NaN attributes.
+static void DropDegenerateTriangles(const std::vector<Vertex>& vertices, std::vector<uint32_t>& indices)
+{
+    using namespace DirectX;
+
+    std::vector<uint32_t> kept;
+    kept.reserve(indices.size());
+    size_t dropped = 0;
+
+    for (size_t i = 0; i + 2 < indices.size(); i += 3)
+    {
+        const XMVECTOR p0 = XMLoadFloat3(&vertices[indices[i]].Pos);
+        const XMVECTOR cross = XMVector3Cross(
+            XMVectorSubtract(XMLoadFloat3(&vertices[indices[i + 1]].Pos), p0),
+            XMVectorSubtract(XMLoadFloat3(&vertices[indices[i + 2]].Pos), p0));
+
+        if (XMVectorGetX(XMVector3LengthSq(cross)) > 1e-20f)
+        {
+            kept.push_back(indices[i]);
+            kept.push_back(indices[i + 1]);
+            kept.push_back(indices[i + 2]);
+        }
+        else
+        {
+            ++dropped;
+        }
+    }
+
+    if (dropped > 0)
+    {
+        spdlog::warn("Dropped {} degenerate (zero-area) triangle(s) during load", dropped);
+        indices.swap(kept);
+    }
+}
+
+// Load-time invariant (ADR 0005): guarantee every vertex reaches the GPU with a
+// unit normal and an orthonormal tangent frame, so no model needs per-scene
+// repair. Non-finite positions/uvs are scrubbed; a degenerate tangent (non-finite,
+// near-zero, or parallel to the normal — the tangent-NaN blue-artifact class) is
+// rebuilt from the normal; a valid tangent is Gram-Schmidt orthogonalized.
+static void EnforceVertexInvariants(std::vector<Vertex>& vertices)
+{
+    using namespace DirectX;
+
+    for (Vertex& v : vertices)
+    {
+        if (!std::isfinite(v.Pos.x) || !std::isfinite(v.Pos.y) || !std::isfinite(v.Pos.z))
+            v.Pos = {0, 0, 0};
+        if (!std::isfinite(v.Tex0.x) || !std::isfinite(v.Tex0.y))
+            v.Tex0 = {0, 0};
+
+        XMVECTOR n = XMLoadFloat3(&v.Normal);
+        if (!(XMVectorGetX(XMVector3LengthSq(n)) > 1e-12f) || !std::isfinite(v.Normal.x) ||
+            !std::isfinite(v.Normal.y) || !std::isfinite(v.Normal.z))
+            n = XMVectorSet(0, 1, 0, 0);
+        n = XMVector3Normalize(n);
+        XMStoreFloat3(&v.Normal, n);
+
+        float w = (v.Tangent.w == 1.0f || v.Tangent.w == -1.0f) ? v.Tangent.w : 1.0f;
+        XMVECTOR t = XMVectorSet(v.Tangent.x, v.Tangent.y, v.Tangent.z, 0.0f);
+        const bool finite = std::isfinite(v.Tangent.x) && std::isfinite(v.Tangent.y) && std::isfinite(v.Tangent.z);
+        const float lenSq = XMVectorGetX(XMVector3LengthSq(t));
+        const float align = (lenSq > 1e-12f) ? std::fabs(XMVectorGetX(XMVector3Dot(XMVector3Normalize(t), n))) : 1.0f;
+
+        if (!finite || lenSq <= 1e-12f || align > 0.9999f)
+        {
+            // Rebuild: any axis not parallel to n, projected into the tangent plane.
+            const XMVECTOR axis = (std::fabs(v.Normal.y) < 0.99f) ? XMVectorSet(0, 1, 0, 0) : XMVectorSet(1, 0, 0, 0);
+            t = XMVector3Normalize(XMVector3Cross(axis, n));
+        }
+        else
+        {
+            // Gram-Schmidt: remove the normal component, renormalize.
+            t = XMVector3Normalize(XMVectorSubtract(t, XMVectorScale(n, XMVectorGetX(XMVector3Dot(t, n)))));
+        }
+
+        XMFLOAT3 tf; XMStoreFloat3(&tf, t);
+        v.Tangent = {tf.x, tf.y, tf.z, w};
+    }
+}
+
 static bool LoadTinyGLTFModel(const std::filesystem::path &path, tinygltf::Model& outModel)
 {
     tinygltf::TinyGLTF loader;
@@ -319,7 +404,9 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
 
     assert(vertices.size() < INT_MAX);
     assert(indices.size() < INT_MAX);
-    
+
+    DropDegenerateTriangles(vertices, indices);
+
     const bool has_normal = primitive.attributes.find("NORMAL") != primitive.attributes.end();
     if (!has_normal)
         ComputeNormals(vertices, indices);
@@ -327,6 +414,8 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     const bool has_tangent = primitive.attributes.find("TANGENT") != primitive.attributes.end();
     if (!has_tangent)
         ComputeTangents(vertices, indices);
+
+    EnforceVertexInvariants(vertices);
 
     std::shared_ptr<Material> material = std::make_shared<Material>();
 
