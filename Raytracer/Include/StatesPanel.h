@@ -1,11 +1,11 @@
 #pragma once
 
-class PlacesManager;
+class StatesManager;
 
-class SceneBookmarksPanel
+class StatesPanel
 {
 public:
-    void Draw(PlacesManager& mgr);
+    void Draw(StatesManager& mgr);
 
 private:
     int  m_renamingIndex      = -1;

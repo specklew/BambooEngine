@@ -225,10 +225,10 @@
     <ClInclude Include="Include\ScreenshotManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\PlacesManager.h">
+    <ClInclude Include="Include\StatesManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\SceneBookmarksPanel.h">
+    <ClInclude Include="Include\StatesPanel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\VoxelizationPass.h">
@@ -698,10 +698,10 @@
     <ClCompile Include="Source\ScreenshotManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\PlacesManager.cpp">
+    <ClCompile Include="Source\StatesManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\SceneBookmarksPanel.cpp">
+    <ClCompile Include="Source\StatesPanel.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\VoxelizationPass.cpp">

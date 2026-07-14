@@ -13,7 +13,7 @@
 #include "Camera.h"
 #include "Constants.h"
 #include "FrameAccumulationPass.h"
-#include "PlacesManager.h"
+#include "StatesManager.h"
 #include "RaytracePass.h"
 #include "SceneResources/Scene.h"
 #include "SceneResources/LightData.h"
@@ -76,8 +76,8 @@ void EditorUI::BeginFrame()
 	CVarSystem::Get()->DrawImguiEditor();
 	DrawDebugPanel();
 	DrawLightsPanel();
-	if (m_placesManager)
-		m_bookmarksPanel.Draw(*m_placesManager);
+	if (m_statesManager)
+		m_statesPanel.Draw(*m_statesManager);
 }
 
 void EditorUI::EndFrame()
@@ -113,9 +113,9 @@ void EditorUI::DrawDebugPanel()
 	ImGui::DragFloat("Capture time (s)", &m_screenshotSeconds, 0.1f, 0.00f, 60.0f, "%.2f");
 	if (ImGui::Button("Take Screenshot") && m_onScreenshotRequest)
 	{
-		std::string scene = m_placesManager ? m_placesManager->GetCurrentScene()    : std::string();
-		std::string place = m_placesManager ? m_placesManager->GetActivePlaceName() : std::string();
-		m_onScreenshotRequest(m_screenshotSeconds, std::move(scene), std::move(place));
+		std::string scene = m_statesManager ? m_statesManager->GetCurrentScene()    : std::string();
+		std::string state = m_statesManager ? m_statesManager->GetActiveStateName() : std::string();
+		m_onScreenshotRequest(m_screenshotSeconds, std::move(scene), std::move(state));
 	}
 	if (m_isScreenshotPending && m_isScreenshotPending() && m_accumulationPass)
 	{

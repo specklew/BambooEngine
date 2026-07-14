@@ -4,12 +4,12 @@
 #include <memory>
 #include <string>
 
-#include "SceneBookmarksPanel.h"
+#include "StatesPanel.h"
 
 class Camera;
 class Scene;
 class FrameAccumulationPass;
-class PlacesManager;
+class StatesManager;
 
 class EditorUI
 {
@@ -33,7 +33,7 @@ public:
 	void SetOnDifferentTechniquePicked(std::function<void(int)> callback) { m_onDifferentTechniquePicked = std::move(callback); }
 	void SetScreenshotRequestCallback(std::function<void(float, std::string, std::string)> callback) { m_onScreenshotRequest = std::move(callback); }
 	void SetScreenshotPendingGetter(std::function<bool()> getter)          { m_isScreenshotPending = std::move(getter); }
-	void SetPlacesManager(std::shared_ptr<PlacesManager> mgr) { m_placesManager = std::move(mgr); }
+	void SetStatesManager(std::shared_ptr<StatesManager> mgr) { m_statesManager = std::move(mgr); }
 	int  GetCurrentTechniqueIndex() const { return m_currentTechniqueIndex; }
 
 private:
@@ -57,6 +57,6 @@ private:
 	std::function<bool()>      m_isScreenshotPending;
 	float m_screenshotSeconds = 1.0f;
 
-	std::shared_ptr<PlacesManager> m_placesManager;
-	SceneBookmarksPanel m_bookmarksPanel;
+	std::shared_ptr<StatesManager> m_statesManager;
+	StatesPanel m_statesPanel;
 };

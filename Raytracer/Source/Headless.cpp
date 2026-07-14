@@ -42,7 +42,7 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
         const std::string flag = WideToUtf8(argv[i]);
         if (flag == "--headless")        args.headless = true;
         else if (flag == "--scene")      args.scene = valueOf(i);
-        else if (flag == "--places")     args.places = SplitCsv(valueOf(i));
+        else if (flag == "--states")     args.states = SplitCsv(valueOf(i));
         else if (flag == "--techniques") args.techniques = SplitCsv(valueOf(i));
         else if (flag == "--seconds")    args.seconds = std::stof(valueOf(i));
         else if (flag == "--out")        args.outDir = valueOf(i);

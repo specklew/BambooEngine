@@ -9,7 +9,7 @@
 #include "DDSTextureLoader/DDSTextureLoader12.h"
 #include "EditorUI.h"
 #include "FrameAccumulationPass.h"
-#include "PlacesManager.h"
+#include "StatesManager.h"
 #include "PostProcessPass.h"
 #include "Utils/CVars.h"
 #include "Utils/GpuMarker.h"
@@ -149,9 +149,16 @@ void Renderer::Initialize()
 	m_camera = std::make_shared<Camera>();
 	m_keyboardTracker = std::make_shared<DirectX::Keyboard::KeyboardStateTracker>();
 
-	m_placesManager = std::make_shared<PlacesManager>();
-	m_placesManager->Load();
-	m_placesManager->SetCamera(*m_camera);
+	m_statesManager = std::make_shared<StatesManager>();
+	m_statesManager->Load();
+	m_statesManager->SetCamera(*m_camera);
+	m_statesManager->SetLightsAccessors(
+		[this]() -> std::vector<LightData> {
+			return m_scene ? m_scene->GetLightDataCPU() : std::vector<LightData>{};
+		},
+		[this](const std::vector<LightData>& lights) {
+			SetLights(lights);   // assigns scene light list + MarkLightDataDirty
+		});
 	
 #ifdef _DEBUG
 	// Route CRT assertion failures to stderr instead of a modal dialog, so
@@ -189,7 +196,7 @@ void Renderer::Initialize()
 	CreateWorldProjCBV();
 
 	m_scene = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb"));
-	m_placesManager->OnSceneChanged(ExtractModelName(std::string("resources/models/abeautifulgame.glb")));
+	m_statesManager->OnSceneChanged(ExtractModelName(std::string("resources/models/abeautifulgame.glb")));
 
 	CreateVertexSRV();
 	CreateIndexSRV();
@@ -287,8 +294,8 @@ float speedMultiplier = 1.0f;
 void Renderer::Update(double elapsedTime, double totalTime)
 {
 	// Apply CVar edits from ImGui only when the CVar value actually changed since last frame.
-	// Applying every frame would stomp camera state set via other paths (e.g. PlacesManager::GoTo).
-	// Headless drives the camera solely through GoToPlace, so this sync is skipped there.
+	// Applying every frame would stomp camera state set via other paths (e.g. StatesManager::GoTo).
+	// Headless drives the camera solely through GoToState, so this sync is skipped there.
 	if (!m_headless)
 	{
 	    static bool s_init = false;
@@ -421,7 +428,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	}
 
 	// Camera change detection for accumulation reset. Skipped in headless: the
-	// camera only changes between captures (GoToPlace), and ArmScreenshot owns the
+	// camera only changes between captures (GoToState), and ArmScreenshot owns the
 	// reset — letting this fire would cancel the pending capture in Tick.
 	if (g_accumulationEnabled.Get() && !m_headless)
 	{
@@ -443,8 +450,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 	m_accumulationPass->Update(elapsedTime);
 
-	if (m_placesManager)
-		m_placesManager->Tick();
+	if (m_statesManager)
+		m_statesManager->Tick();
 }
 
 void Renderer::Render(double elapsedTime, double totalTime)
@@ -1343,7 +1350,7 @@ void Renderer::InitializeEditorUI()
 	m_editorUI->SetCamera(m_camera);
 	m_editorUI->SetScene(m_scene);
 	m_editorUI->SetAccumulationPass(m_accumulationPass);
-	m_editorUI->SetPlacesManager(m_placesManager);
+	m_editorUI->SetStatesManager(m_statesManager);
 	m_editorUI->SetSkyboxLoadCallback([this](const std::wstring& path) {
 		ExecuteCommandsAndReset();
 		LoadSkybox(path);
@@ -1383,8 +1390,8 @@ void Renderer::LoadScene(const std::wstring& path)
 	if (m_clusterVisibilityPass)
 		m_clusterVisibilityPass->SetScene(m_scene);
 	m_editorUI->SetScene(m_scene);
-	if (m_placesManager)
-		m_placesManager->OnSceneChanged(ExtractModelName(path));
+	if (m_statesManager)
+		m_statesManager->OnSceneChanged(ExtractModelName(path));
 	if (m_voxelizationPass)
 		m_voxelizationPass->OnSceneLoaded(*m_scene);
 }
@@ -1424,18 +1431,18 @@ std::vector<std::string> Renderer::GetTechniqueNames() const
 	return names;
 }
 
-std::vector<std::string> Renderer::GetPlaceNames() const
+std::vector<std::string> Renderer::GetStateNames() const
 {
 	std::vector<std::string> names;
-	if (m_placesManager)
-		for (const Place& place : m_placesManager->GetPlacesForCurrentScene())
-			names.push_back(place.name);
+	if (m_statesManager)
+		for (const State& state : m_statesManager->GetStatesForCurrentScene())
+			names.push_back(state.name);
 	return names;
 }
 
-bool Renderer::GoToPlace(const std::string& name)
+bool Renderer::GoToState(const std::string& name)
 {
-	return m_placesManager && m_placesManager->GoToPlaceByName(name);
+	return m_statesManager && m_statesManager->GoToStateByName(name);
 }
 
 void Renderer::ArmScreenshot(float seconds, const std::string& model, const std::string& place,

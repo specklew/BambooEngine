@@ -1,13 +1,13 @@
 #include "pch.h"
-#include "SceneBookmarksPanel.h"
+#include "StatesPanel.h"
 
-#include "PlacesManager.h"
+#include "StatesManager.h"
 
 #include "imgui.h"
 
-void SceneBookmarksPanel::Draw(PlacesManager& mgr)
+void StatesPanel::Draw(StatesManager& mgr)
 {
-    ImGui::Begin("Scene Bookmarks");
+    ImGui::Begin("States");
 
     if (mgr.HasCurrentScene())
         ImGui::Text("Scene: %s", mgr.GetCurrentScene().c_str());
@@ -16,8 +16,8 @@ void SceneBookmarksPanel::Draw(PlacesManager& mgr)
 
     ImGui::Separator();
 
-    const std::vector<Place> places = mgr.GetPlacesForCurrentScene();
-    for (size_t i = 0; i < places.size(); ++i)
+    const std::vector<State> states = mgr.GetStatesForCurrentScene();
+    for (size_t i = 0; i < states.size(); ++i)
     {
         ImGui::PushID(static_cast<int>(i));
 
@@ -42,7 +42,7 @@ void SceneBookmarksPanel::Draw(PlacesManager& mgr)
 
             if (committed || deactivatedAfterEdit)
             {
-                mgr.RenamePlace(static_cast<size_t>(m_renamingIndex), m_renameBuffer);
+                mgr.RenameState(static_cast<size_t>(m_renamingIndex), m_renameBuffer);
                 m_renamingIndex = -1;
             }
             else if (deactivatedNoEdit)
@@ -52,21 +52,26 @@ void SceneBookmarksPanel::Draw(PlacesManager& mgr)
         }
         else
         {
-            ImGui::TextUnformatted(places[i].name.c_str());
+            ImGui::TextUnformatted(states[i].name.c_str());
+            ImGui::SameLine();
+            if (states[i].hasLights)
+                ImGui::TextDisabled("(%zu lights)", states[i].lights.size());
+            else
+                ImGui::TextDisabled("(cam only)");
         }
 
         ImGui::SameLine();
         if (ImGui::Button("Go To"))
         {
             m_renamingIndex = -1;
-            mgr.GoToPlace(i);
+            mgr.GoToState(i);
         }
 
         ImGui::SameLine();
         if (ImGui::Button("Rename"))
         {
             m_renamingIndex = static_cast<int>(i);
-            strncpy_s(m_renameBuffer, places[i].name.c_str(), _TRUNCATE);
+            strncpy_s(m_renameBuffer, states[i].name.c_str(), _TRUNCATE);
             m_focusRenameNext = true;
         }
 
@@ -82,11 +87,11 @@ void SceneBookmarksPanel::Draw(PlacesManager& mgr)
     ImGui::Separator();
 
     ImGui::BeginDisabled(!mgr.HasCurrentScene());
-    if (ImGui::Button("+ New Place"))
+    if (ImGui::Button("+ New State"))
     {
-        if (mgr.AddPlaceFromCamera())
+        if (mgr.AddStateFromScene())
         {
-            const std::vector<Place> refreshed = mgr.GetPlacesForCurrentScene();
+            const std::vector<State> refreshed = mgr.GetStatesForCurrentScene();
             if (!refreshed.empty())
             {
                 m_renamingIndex = static_cast<int>(refreshed.size() - 1);
@@ -97,10 +102,10 @@ void SceneBookmarksPanel::Draw(PlacesManager& mgr)
     }
     ImGui::EndDisabled();
 
-    if (!mgr.GetActivePlaceName().empty())
+    if (!mgr.GetActiveStateName().empty())
     {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Currently at: %s", mgr.GetActivePlaceName().c_str());
+        ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.4f, 1.0f), "Currently at: %s", mgr.GetActiveStateName().c_str());
     }
 
     if (m_pendingDeleteIndex >= 0)
@@ -108,15 +113,15 @@ void SceneBookmarksPanel::Draw(PlacesManager& mgr)
 
     if (ImGui::BeginPopupModal("Confirm Delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
-        if (m_pendingDeleteIndex >= 0 && static_cast<size_t>(m_pendingDeleteIndex) < places.size())
-            ImGui::Text("Delete '%s'?", places[m_pendingDeleteIndex].name.c_str());
+        if (m_pendingDeleteIndex >= 0 && static_cast<size_t>(m_pendingDeleteIndex) < states.size())
+            ImGui::Text("Delete '%s'?", states[m_pendingDeleteIndex].name.c_str());
         else
             ImGui::Text("Delete?");
 
         if (ImGui::Button("Delete", ImVec2(120, 0)))
         {
             if (m_pendingDeleteIndex >= 0)
-                mgr.DeletePlace(static_cast<size_t>(m_pendingDeleteIndex));
+                mgr.DeleteState(static_cast<size_t>(m_pendingDeleteIndex));
             m_pendingDeleteIndex = -1;
             ImGui::CloseCurrentPopup();
         }

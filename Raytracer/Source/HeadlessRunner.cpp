@@ -102,14 +102,14 @@ void HeadlessRunner::ApplyConfiguredLights()
 
 bool HeadlessRunner::Validate() const
 {
-    if (m_args.places.empty() || m_args.techniques.empty())
+    if (m_args.states.empty() || m_args.techniques.empty())
     {
-        spdlog::error("Headless run needs at least one --places and one --techniques entry");
+        spdlog::error("Headless run needs at least one --states and one --techniques entry");
         return false;
     }
 
     const std::vector<std::string> validTechniques = m_renderer.GetTechniqueNames();
-    const std::vector<std::string> validPlaces     = m_renderer.GetPlaceNames();
+    const std::vector<std::string> validStates     = m_renderer.GetStateNames();
 
     bool ok = true;
     for (const std::string& technique : m_args.techniques)
@@ -118,17 +118,17 @@ bool HeadlessRunner::Validate() const
             spdlog::error("Unknown technique '{}'", technique);
             ok = false;
         }
-    for (const std::string& place : m_args.places)
-        if (!Contains(validPlaces, place))
+    for (const std::string& state : m_args.states)
+        if (!Contains(validStates, state))
         {
-            spdlog::error("Unknown place '{}' in this scene", place);
+            spdlog::error("Unknown state '{}' in this scene", state);
             ok = false;
         }
 
     if (!ok)
     {
         LogAvailable("techniques", validTechniques);
-        LogAvailable("places", validPlaces);
+        LogAvailable("states", validStates);
     }
     return ok;
 }
@@ -151,14 +151,14 @@ int HeadlessRunner::Run()
     const std::string model   = std::filesystem::path(m_args.scene).stem().string();
 
     spdlog::info("Headless run: {} captures into {} ({:.1f}s each)",
-                 m_args.places.size() * m_args.techniques.size(), runDir, seconds);
+                 m_args.states.size() * m_args.techniques.size(), runDir, seconds);
 
     for (const std::string& technique : m_args.techniques)
     {
         m_renderer.SetTechnique(technique);
-        for (const std::string& place : m_args.places)
+        for (const std::string& place : m_args.states)
         {
-            m_renderer.GoToPlace(place);
+            m_renderer.GoToState(place);
 
             // Warm up several frames before arming. One frame is NOT enough: a
             // slow first frame (technique switch rebuilding the VXPG passes, PSO

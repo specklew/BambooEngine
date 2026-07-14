@@ -60,7 +60,7 @@ struct HeadlessArgs
     bool headless = false;
 
     std::string              scene;       // glTF path, or a bare model name resolved under resources/models/
-    std::vector<std::string> places;      // saved place names within the scene
+    std::vector<std::string> states;      // saved state names within the scene
     std::vector<std::string> techniques;  // raytracing technique registry names
 
     float       seconds = -1.0f;          // < 0 => use config default

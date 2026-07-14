@@ -43,7 +43,7 @@ class FrameAccumulationPass;
 class PostProcessPass;
 class AccelerationStructures;
 class ScreenshotManager;
-class PlacesManager;
+class StatesManager;
 struct ScreenshotMetadata;
 class VoxelizationPass;
 
@@ -77,8 +77,8 @@ public:
 	void SetLights(const std::vector<LightData>& lights);
 
 	std::vector<std::string> GetTechniqueNames() const;
-	std::vector<std::string> GetPlaceNames() const;
-	bool GoToPlace(const std::string& name);
+	std::vector<std::string> GetStateNames() const;
+	bool GoToState(const std::string& name);
 
 	// Arm a capture writing to dir/stem (empty => default screenshots dir / auto name).
 	void ArmScreenshot(float seconds, const std::string& model, const std::string& place,
@@ -228,7 +228,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_skyboxResource;
 
 	std::shared_ptr<class EditorUI> m_editorUI;
-	std::shared_ptr<PlacesManager> m_placesManager;
+	std::shared_ptr<StatesManager> m_statesManager;
 	std::shared_ptr<VoxelizationPass> m_voxelizationPass;
 	std::shared_ptr<VoxelGuidingBuildPass> m_voxelGuidingBuildPass;
 	std::shared_ptr<VxpgFingerprintPass> m_fingerprintPass;
