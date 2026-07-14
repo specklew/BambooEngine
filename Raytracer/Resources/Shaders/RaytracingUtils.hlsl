@@ -306,8 +306,12 @@ float3 BarycentricCoordinates(float3 pt, float3 v0, float3 v1, float3 v2)
 
 float4 SampleTexture(int texIdx, float2 uv)
 {
+    // Missing texture = multiplicative identity (glTF default): callers multiply
+    // this by baseColorFactor / roughnessFactor / metallicFactor, so white leaves
+    // the scalar factors intact. Black would zero them (albedo->black, roughness->0
+    // = mirror), which only showed up on texture-less materials (Tungsten scalars).
     if (texIdx == -1)
-        return float4(0, 0, 0, 0);
+        return float4(1, 1, 1, 1);
     return g_textures[NonUniformResourceIndex(texIdx)].SampleLevel(gsamAnisotropicWrap, uv, 0);
 }
 

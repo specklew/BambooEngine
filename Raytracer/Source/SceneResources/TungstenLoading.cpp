@@ -7,10 +7,13 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <spdlog/spdlog.h>
 #include <rapidjson/document.h>
+#include <tinygltf/tiny_gltf.h>   // tinygltf::Image (reuses the glTF texture upload)
+#include <tinygltf/stb_image.h>   // stbi_load prototypes; implementation in tiny_gltf.cc
 
 #include "InputElements.h"
 #include "ResourceManager/ResourceManagerTypes.h" // AssetId
@@ -106,6 +109,175 @@ namespace
         }
         return ParseVec3(value, { 1.0f, 1.0f, 1.0f });
     }
+
+    struct Rgb { float r, g, b; };
+
+    // Approximate normal-incidence reflectance for Tungsten conductor presets
+    // (ADR 0006: the metallic base colour). Values are eyeballed sRGB tints.
+    Rgb ConductorPreset(const std::string& material)
+    {
+        if (material == "Al") return { 0.91f, 0.92f, 0.92f };
+        if (material == "Cu") return { 0.95f, 0.64f, 0.54f };
+        if (material == "Au") return { 1.00f, 0.78f, 0.34f };
+        if (material == "Ag") return { 0.98f, 0.97f, 0.95f };
+        if (material == "Fe") return { 0.56f, 0.57f, 0.58f };
+        if (material == "Cr") return { 0.55f, 0.56f, 0.55f };
+        if (material == "Ni") return { 0.66f, 0.61f, 0.53f };
+        return { 0.90f, 0.90f, 0.90f }; // generic metal
+    }
+
+    // A Tungsten colour value: number (gray), 3-array (rgb), else fallback.
+    Rgb ParseColor(const rapidjson::Value& value, const Rgb& fallback)
+    {
+        if (value.IsNumber())
+        {
+            const float v = value.GetFloat();
+            return { v, v, v };
+        }
+        if (value.IsArray() && value.Size() >= 3)
+            return { value[0].GetFloat(), value[1].GetFloat(), value[2].GetFloat() };
+        return fallback;
+    }
+
+    struct AlbedoResult
+    {
+        Rgb color{ 0.8f, 0.8f, 0.8f };
+        std::string texturePath; // relative to scene dir; empty = none
+    };
+
+    // Tungsten albedo: number | 3-array | texture-path string | procedural object
+    // (checker → average of on/off, ADR 0006).
+    AlbedoResult ParseAlbedo(const rapidjson::Value& bsdf)
+    {
+        AlbedoResult result;
+        if (!bsdf.HasMember("albedo"))
+            return result;
+
+        const rapidjson::Value& albedo = bsdf["albedo"];
+        if (albedo.IsString())
+        {
+            result.texturePath = albedo.GetString();
+            result.color = { 1.0f, 1.0f, 1.0f }; // texture supplies colour
+        }
+        else if (albedo.IsObject())
+        {
+            const Rgb on = albedo.HasMember("on_color") ? ParseColor(albedo["on_color"], { 0.8f, 0.8f, 0.8f }) : Rgb{ 0.8f, 0.8f, 0.8f };
+            const Rgb off = albedo.HasMember("off_color") ? ParseColor(albedo["off_color"], { 0.2f, 0.2f, 0.2f }) : Rgb{ 0.2f, 0.2f, 0.2f };
+            result.color = { (on.r + off.r) * 0.5f, (on.g + off.g) * 0.5f, (on.b + off.b) * 0.5f };
+            spdlog::warn("Tungsten: procedural albedo -> average constant colour");
+        }
+        else
+        {
+            result.color = ParseColor(albedo, result.color);
+        }
+        return result;
+    }
+
+    float ParseRoughness(const rapidjson::Value& bsdf, float fallback)
+    {
+        if (bsdf.HasMember("roughness") && bsdf["roughness"].IsNumber())
+            return bsdf["roughness"].GetFloat();
+        return fallback; // roughness textures not supported in v1
+    }
+
+    std::shared_ptr<Texture> LoadTextureFromFile(
+        Renderer& renderer,
+        const std::filesystem::path& path,
+        std::unordered_map<std::string, std::shared_ptr<Texture>>& cache)
+    {
+        const std::string key = path.string();
+        auto it = cache.find(key);
+        if (it != cache.end())
+            return it->second;
+
+        int width = 0, height = 0, channels = 0;
+        stbi_uc* pixels = stbi_load(key.c_str(), &width, &height, &channels, 4);
+        if (!pixels)
+        {
+            spdlog::warn("Tungsten: failed to load texture '{}'", key);
+            cache[key] = nullptr;
+            return nullptr;
+        }
+
+        tinygltf::Image image;
+        image.width = width;
+        image.height = height;
+        image.component = 4;
+        image.bits = 8;
+        image.pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+        image.image.assign(pixels, pixels + static_cast<size_t>(width) * height * 4);
+        stbi_image_free(pixels);
+
+        std::shared_ptr<Texture> texture = renderer.CreateTextureFromGLTF(image);
+        cache[key] = texture;
+        return texture;
+    }
+
+    // Map a Tungsten BSDF onto the engine's Cook-Torrance metallic-roughness
+    // material (ADR 0006). Glass is opaque-approximated; the coat is dropped.
+    std::shared_ptr<Material> MakeMaterialFromBsdf(
+        Renderer& renderer,
+        const rapidjson::Value& bsdf,
+        const std::filesystem::path& sceneDir,
+        std::unordered_map<std::string, std::shared_ptr<Texture>>& textureCache)
+    {
+        auto material = std::make_shared<Material>();
+
+        const std::string type = bsdf.HasMember("type") && bsdf["type"].IsString() ? bsdf["type"].GetString() : "";
+        const AlbedoResult albedo = ParseAlbedo(bsdf);
+
+        float metallic = 0.0f;
+        float roughness = 1.0f;
+        Rgb color = albedo.color;
+
+        if (type == "lambert" || type == "oren_nayar")
+        {
+            metallic = 0.0f; roughness = 1.0f;
+        }
+        else if (type == "rough_conductor" || type == "conductor")
+        {
+            metallic = 1.0f;
+            roughness = ParseRoughness(bsdf, 0.1f);
+            if (bsdf.HasMember("material") && bsdf["material"].IsString())
+                color = ConductorPreset(bsdf["material"].GetString());
+        }
+        else if (type == "mirror")
+        {
+            metallic = 1.0f; roughness = 0.0f;
+            if (!bsdf.HasMember("albedo")) color = { 1.0f, 1.0f, 1.0f };
+        }
+        else if (type == "rough_plastic" || type == "plastic" || type == "smooth_coat" || type == "phong")
+        {
+            metallic = 0.0f;
+            roughness = ParseRoughness(bsdf, 0.5f);
+        }
+        else if (type == "dielectric" || type == "rough_dielectric" || type == "thinsheet")
+        {
+            // No transmission in the engine: opaque, slightly glossy, tinted (LOSSY).
+            metallic = 0.0f;
+            roughness = ParseRoughness(bsdf, 0.1f);
+            if (!bsdf.HasMember("albedo")) color = { 0.9f, 0.9f, 0.9f };
+        }
+        else if (type == "null")
+        {
+            metallic = 0.0f; roughness = 1.0f; color = { 0.5f, 0.5f, 0.5f };
+        }
+        else
+        {
+            spdlog::warn("Tungsten: unmapped BSDF type '{}' -> diffuse gray", type);
+            metallic = 0.0f; roughness = 1.0f; color = { 0.8f, 0.8f, 0.8f };
+        }
+
+        material->m_data.baseColorFactor = { color.r, color.g, color.b, 1.0f };
+        material->m_data.metallicFactor = metallic;
+        material->m_data.roughnessFactor = roughness;
+
+        if (!albedo.texturePath.empty())
+            material->m_albedoTexture = LoadTextureFromFile(renderer, sceneDir / albedo.texturePath, textureCache);
+
+        material->UpdateMaterial();
+        return material;
+    }
 }
 
 std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const AssetId& assetId)
@@ -140,6 +312,15 @@ std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const Asse
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
+
+    // BSDF library: primitives reference these by name (or inline an object).
+    std::unordered_map<std::string, const rapidjson::Value*> bsdfsByName;
+    if (doc.HasMember("bsdfs") && doc["bsdfs"].IsArray())
+        for (const rapidjson::Value& bsdf : doc["bsdfs"].GetArray())
+            if (bsdf.HasMember("name") && bsdf["name"].IsString())
+                bsdfsByName[bsdf["name"].GetString()] = &bsdf;
+
+    std::unordered_map<std::string, std::shared_ptr<Texture>> textureCache;
 
     int meshCount = 0, skippedCount = 0;
 
@@ -192,12 +373,32 @@ std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const Asse
                 localMin.z = std::min(localMin.z, v.Pos.z); localMax.z = std::max(localMax.z, v.Pos.z);
             }
 
-            // v1 material: neutral diffuse. BSDF mapping + textures land in Stage 4.
-            auto material = std::make_shared<Material>();
-            material->m_data.baseColorFactor = { 0.8f, 0.8f, 0.8f, 1.0f };
-            material->m_data.metallicFactor = 0.0f;
-            material->m_data.roughnessFactor = 1.0f;
-            material->UpdateMaterial();
+            // Resolve the primitive's BSDF (named reference or inline object).
+            std::shared_ptr<Material> material;
+            if (prim.HasMember("bsdf"))
+            {
+                const rapidjson::Value& bsdfRef = prim["bsdf"];
+                if (bsdfRef.IsString())
+                {
+                    auto it = bsdfsByName.find(bsdfRef.GetString());
+                    if (it != bsdfsByName.end())
+                        material = MakeMaterialFromBsdf(renderer, *it->second, sceneDir, textureCache);
+                    else
+                        spdlog::warn("Tungsten: primitive references unknown bsdf '{}'", bsdfRef.GetString());
+                }
+                else if (bsdfRef.IsObject())
+                {
+                    material = MakeMaterialFromBsdf(renderer, bsdfRef, sceneDir, textureCache);
+                }
+            }
+            if (!material)
+            {
+                material = std::make_shared<Material>();
+                material->m_data.baseColorFactor = { 0.8f, 0.8f, 0.8f, 1.0f };
+                material->m_data.metallicFactor = 0.0f;
+                material->m_data.roughnessFactor = 1.0f;
+                material->UpdateMaterial();
+            }
 
             vertices.insert(vertices.end(), primVertices.begin(), primVertices.end());
             indices.insert(indices.end(), primIndices.begin(), primIndices.end());

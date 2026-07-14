@@ -310,7 +310,7 @@ void Hit(inout Payload payload : SV_RayPayload, in Attributes attr)
     ray.Direction = bounceDir;
     ray.TMin = RAY_TMIN;
     ray.TMax = RAY_TMAX;
-    
+
     payload.bounceCount++;
     TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
     

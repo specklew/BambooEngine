@@ -331,7 +331,7 @@ void EditorUI::DrawSceneSection()
 		OPENFILENAMEW ofn = {};
 		ofn.lStructSize = sizeof(ofn);
 		ofn.hwndOwner = Window::Get().GetHandle();
-		ofn.lpstrFilter = L"glTF (*.gltf;*.glb)\0*.gltf;*.glb\0All Files\0*.*\0";
+		ofn.lpstrFilter = L"Scenes (*.gltf;*.glb;*.json)\0*.gltf;*.glb;*.json\0All Files\0*.*\0";
 		ofn.lpstrFile = filePath;
 		ofn.nMaxFile = MAX_PATH;
 		ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
