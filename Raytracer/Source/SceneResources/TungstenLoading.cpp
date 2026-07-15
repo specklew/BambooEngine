@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -173,11 +174,16 @@ namespace
         return result;
     }
 
+    // Tungsten's microfacet "roughness" is (near) the GGX alpha, but the engine BRDF
+    // squares its roughness input to get alpha (a = roughness^2, BRDF.hlsl). So map
+    // Tungsten roughness r -> sqrt(r) to reproduce Tungsten's gloss (else 0.1 reads as
+    // alpha 0.01, a near-mirror).
     float ParseRoughness(const rapidjson::Value& bsdf, float fallback)
     {
+        float r = fallback; // roughness textures not supported in v1
         if (bsdf.HasMember("roughness") && bsdf["roughness"].IsNumber())
-            return bsdf["roughness"].GetFloat();
-        return fallback; // roughness textures not supported in v1
+            r = bsdf["roughness"].GetFloat();
+        return std::sqrt(std::clamp(r, 0.0f, 1.0f));
     }
 
     std::shared_ptr<Texture> LoadTextureFromFile(
