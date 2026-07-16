@@ -10,64 +10,40 @@
 #include "RaytraceDebugMode.h"
 #include "RaytraceDebugViews.hlsl"
 
-// ---- Ray generation ----
-
-[shader("raygeneration")]
-void RayGen()
+// Minimal hit-ID payload (ADR 0007): the closest hit reports WHAT was hit,
+// raygen reconstructs the surface and shades in the bounce loop. The shared
+// RaytracingUtils Payload stays for the AO technique.
+struct PtPayload
 {
-    uint2 launchIndex = DispatchRaysIndex().xy;
-    uint2 dims = DispatchRaysDimensions().xy;
-    uint pixelId = launchIndex.x + launchIndex.y * dims.x;
+    uint   instanceId;
+    uint   primitiveId;
+    float2 barycentrics;
+    uint   hitFlag;  // 1 = ray hit geometry
+};
 
-    float3 accumulated = float3(0, 0, 0);
-    for (uint i = 0; i < (uint)samplesPerPixel; i++)
-    {
-        // Unique seed per pixel, sample, and frame — fully independent across all three
-        uint seed = pcg_hash(pixelId ^ (i * 2654435761u) ^ (frameIndex * 805459861u));
-
-        float3 origin, direction;
-        GenerateCameraRay(launchIndex, seed, origin, direction);
-        seed = pcg_hash(seed);  // advance: camera ray and bounce 0 now use different xi
-
-        RayDesc ray;
-        ray.Origin = origin;
-        ray.Direction = direction;
-        ray.TMin = RAY_TMIN;
-        ray.TMax = RAY_TMAX;
-
-        Payload payload;
-        payload.color = float3(0, 0, 0);
-        payload.throughput = float3(1, 1, 1);
-        payload.bounceCount = 0;
-        payload.seed = seed;
-        TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
-        accumulated += payload.color;
-    }
-
-    gOutput[launchIndex] = min(float4(accumulated / samplesPerPixel, 1.0), 100.0f);
+// Sky along a ray. Primary rays (vertex 0) keep the directly-viewed sky at
+// full brightness; indirect segments apply the sky-lighting switch + firefly
+// clamp. Matches the guided integrator's raygen sky + IndirectSkyRadiance
+// pair so both techniques converge to the same target.
+float3 SkyRadianceAtVertex(float3 dir, uint vertexIndex)
+{
+    if (vertexIndex > 0u && skyLightingEnabled == 0)
+        return float3(0, 0, 0);
+    float u = atan2(dir.z, dir.x) / (2.0 * PI) + 0.5;
+    float v = -asin(clamp(dir.y, -1.0, 1.0)) / PI + 0.5;
+    float3 sky = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
+    if (vertexIndex > 0u && indirectSkyClamp > 0.0)
+        sky = min(sky, indirectSkyClamp.xxx);
+    return sky;
 }
 
 // ---- Miss ----
 
 [shader("miss")]
-void Miss(inout Payload payload : SV_RayPayload)
+void Miss(inout PtPayload payload : SV_RayPayload)
 {
-    float3 dir = normalize(WorldRayDirection());
-    float u = atan2(dir.z, dir.x) / (2.0 * PI) + 0.5;
-    float v = -asin(clamp(dir.y, -1.0, 1.0)) / PI + 0.5;
-    float3 sky = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
-    // Sky-lighting switch + firefly clamp, indirect bounce rays only
-    // (bounceCount>0); the primary ray (bounceCount 0) keeps the directly-viewed
-    // sky at full brightness. skyLightingEnabled 0 = sky is background-only,
-    // no illumination. Clamp 0 = disabled. Matches GuidedMiss.
-    if (payload.bounceCount > 0)
-    {
-        if (skyLightingEnabled == 0)
-            sky = float3(0, 0, 0);
-        else if (indirectSkyClamp > 0.0)
-            sky = min(sky, indirectSkyClamp.xxx);
-    }
-    payload.color = sky;
+    // Sky shading happens in the raygen bounce loop (SkyRadianceAtVertex).
+    payload.hitFlag = 0;
 }
 
 // ---- Closest hit ----
@@ -188,14 +164,160 @@ float3 CalculateDirectLightning(HitData hit, SurfaceData surface)
     return directLighting;
 }
 
+// ---- Ray generation ----
+
+// Flat iterative path loop (ADR 0007): replaces the recursive closest-hit
+// continuation with the same estimator — per vertex add throughput-weighted
+// direct light, sample the next bounce, stop after numBounces bounces. All
+// rays (primary, bounce, shadow) launch from raygen; the closest hit only
+// reports hit IDs and the surface is reconstructed here.
+[shader("raygeneration")]
+void RayGen()
+{
+    uint2 launchIndex = DispatchRaysIndex().xy;
+    uint2 dims = DispatchRaysDimensions().xy;
+    uint pixelId = launchIndex.x + launchIndex.y * dims.x;
+
+    float3 accumulated = float3(0, 0, 0);
+    for (uint i = 0; i < (uint)samplesPerPixel; i++)
+    {
+        // Unique seed per pixel, sample, and frame — fully independent across all three
+        uint seed = pcg_hash(pixelId ^ (i * 2654435761u) ^ (frameIndex * 805459861u));
+
+        float3 rayOrigin, rayDir;
+        GenerateCameraRay(launchIndex, seed, rayOrigin, rayDir);
+        seed = pcg_hash(seed);  // advance: camera ray and bounce 0 now use different xi
+
+        float3 radiance = float3(0, 0, 0);
+        float3 pathThroughput = float3(1, 1, 1);
+
+        // Vertex 0 = primary hit; direct light at every vertex; a bounce is
+        // sampled while vertexIndex < numBounces (numBounces+1 path segments).
+        for (uint vertexIndex = 0; vertexIndex <= (uint)numBounces; ++vertexIndex)
+        {
+            RayDesc ray;
+            ray.Origin = rayOrigin;
+            ray.Direction = rayDir;
+            ray.TMin = RAY_TMIN;
+            ray.TMax = RAY_TMAX;
+
+            PtPayload p;
+            p.instanceId = 0;
+            p.primitiveId = 0;
+            p.barycentrics = float2(0, 0);
+            p.hitFlag = 0;
+            TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, p);
+
+            if (p.hitFlag == 0u)
+            {
+                radiance += pathThroughput * SkyRadianceAtVertex(rayDir, vertexIndex);
+                break;
+            }
+
+            InstanceInfo instance = g_instanceInfo[p.instanceId];
+            GeometryInfo geometry = g_geometryInfo[instance.geometryIndex];
+            HitData hit = GetHitData(p.primitiveId, geometry.vertexOffset, geometry.indexOffset,
+                                     p.barycentrics, instance.objectToWorld);
+
+            float3 albedo = SampleTextureColor(instance, hit).rgb * instance.baseColorFactor.rgb;
+            float2 rm = SampleRoughnessMetallic(instance, hit);
+            float roughness = max(rm.x, MIN_ROUGHNESS);
+            float metallic = rm.y;
+
+            float3 N = SampleWorldSpaceNormal(instance, hit);
+            float3 V = -rayDir;
+
+            // Two-sided shading: flip the shading normal to the side the ray
+            // hit. Test with the geometric normal (object-space tri normal ->
+            // world), since the normal-mapped N can itself point backward on
+            // grazing texels.
+            float3 geometricN = normalize(mul((float3x3)instance.objectToWorld, hit.tri_normal));
+            if (dot(geometricN, V) < 0.0)
+                N = -N;
+
+            // RT debug views; paint and stop if a mode handles this hit.
+            RtDebugData rtDebug;
+            rtDebug.N = N;
+            rtDebug.position = hit.position;
+            float3 debugColor;
+            if (TryRaytraceDebugView(debugMode, rtDebug, debugColor))
+            {
+                radiance += pathThroughput * debugColor;
+                break;
+            }
+
+            SurfaceData surface;
+            surface.N         = N;
+            surface.V         = V;
+            surface.NdotV     = max(dot(N, V), 0.1);
+            surface.F0        = lerp(DIELECTRIC_F0, albedo, metallic);
+            surface.albedo    = albedo;
+            surface.roughness = roughness;
+            surface.metallic  = metallic;
+
+            radiance += pathThroughput * CalculateDirectLightning(hit, surface);
+
+            if (vertexIndex >= (uint)numBounces)
+                break;
+
+            // Continuation sample: stochastic specular/diffuse selection,
+            // pdf-cancelled throughput.
+            float3 F = FresnelSchlick(surface.NdotV, surface.F0);
+            float specularProb = (F.r + F.g + F.b) / 3.0;
+
+            float2 xi = Random2D(seed);
+            seed = pcg_hash(seed);  // advance: next bounce gets a different xi
+
+            float pathSelector = frac(xi.x * 7.13 + xi.y * 3.97);
+
+            float3 bounceDir;
+            float3 throughput;
+
+            if (pathSelector < specularProb)
+            {
+                float3 H = ImportanceSampleGGX(xi, N, roughness);
+                bounceDir = reflect(-V, H);
+                throughput = EvalSpecularBounce(surface, H, bounceDir);
+                if (all(throughput == 0))
+                    break; // invalid bounce sample — direct light at this vertex stands
+                throughput /= specularProb;
+            }
+            else
+            {
+                float3 kD = (1.0 - F) * (1.0 - metallic);
+                bounceDir = CosineSampleHemisphere(xi, N);
+                throughput = EvalDiffuseBounce(surface, kD, bounceDir);
+                if (all(throughput == 0))
+                    break; // invalid bounce sample — direct light at this vertex stands
+                throughput /= (1.0 - specularProb + EPSILON);
+            }
+
+            // BounceHealth: classify a NaN bounce direction at this hit.
+            if (debugMode == 2)
+            {
+                radiance += pathThroughput * BounceHealthColor(bounceDir, N, roughness);
+                break;
+            }
+
+            pathThroughput *= throughput;
+            rayOrigin = hit.position;
+            rayDir = bounceDir;
+        }
+
+        accumulated += radiance;
+    }
+
+    gOutput[launchIndex] = min(float4(accumulated / samplesPerPixel, 1.0), 100.0f);
+}
+
 [shader("anyhit")]
-void AnyHit(inout Payload payload : SV_RayPayload, in Attributes attr)
+void AnyHit(inout PtPayload payload : SV_RayPayload, in Attributes attr)
 {
     InstanceInfo instance = g_instanceInfo[InstanceID()];
     uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
     uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
     HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
-    
+
     float4 albedo = SampleTextureColor(hit) * instance.baseColorFactor;
     if (albedo.a < EPSILON)
     {
@@ -204,120 +326,13 @@ void AnyHit(inout Payload payload : SV_RayPayload, in Attributes attr)
 }
 
 [shader("closesthit")]
-void Hit(inout Payload payload : SV_RayPayload, in Attributes attr)
+void Hit(inout PtPayload payload : SV_RayPayload, in Attributes attr)
 {
-    InstanceInfo instance = g_instanceInfo[InstanceID()];
-    uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
-    uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
-    HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
-
-    // Material
-    float3 albedo = SampleTextureColor(hit).rgb * instance.baseColorFactor.rgb;
-    float2 rm = SampleRoughnessMetallic(hit, instance.roughnessFactor, instance.metallicFactor);
-    float roughness = max(rm.x, MIN_ROUGHNESS);
-    float metallic = rm.y;
-
-    // Shading vectors
-    float3 N = SampleWorldSpaceNormal(hit);
-    float3 V = -WorldRayDirection();
-
-    // Two-sided shading: flip the shading normal to the side the ray hit.
-    // Test with the geometric normal (object-space tri normal -> world), since the
-    // normal-mapped N can itself point backward on grazing texels.
-    float3 geometricN = normalize(mul((float3x3)ObjectToWorld3x4(), hit.tri_normal));
-    if (dot(geometricN, V) < 0.0)
-        N = -N;
-
-    float NdotV = max(dot(N, V), 0.1);
-
-    // RT debug views; paint and stop if a mode handles this hit.
-    RtDebugData rtDebug;
-    rtDebug.N = N;
-    rtDebug.position = hit.position;
-    float3 debugColor;
-    if (TryRaytraceDebugView(debugMode, rtDebug, debugColor))
-    {
-        payload.color = debugColor;
-        return;
-    }
-
-    // Build surface data
-    SurfaceData surface;
-    surface.N         = N;
-    surface.V         = V;
-    surface.NdotV     = NdotV;
-    surface.F0        = lerp(DIELECTRIC_F0, albedo, metallic);
-    surface.albedo    = albedo;
-    surface.roughness = roughness;
-    surface.metallic  = metallic;
-    
-    if (payload.bounceCount >= numBounces)
-    {
-        payload.color = CalculateDirectLightning(hit, surface);
-        return;
-    }
-
-    float3 F = FresnelSchlick(NdotV, surface.F0);
-    float specularProb = (F.r + F.g + F.b) / 3.0;
-
-    // Stochastic path selection — use payload.seed directly, then advance it
-    float2 xi = Random2D(payload.seed);
-    payload.seed = pcg_hash(payload.seed);  // advance: next bounce gets a different xi
-
-    float pathSelector = frac(xi.x * 7.13 + xi.y * 3.97);
-
-    float3 bounceDir;
-    float3 throughput;
-
-    if (pathSelector < specularProb)
-    {
-        float3 H = ImportanceSampleGGX(xi, N, roughness);
-        bounceDir = reflect(-V, H);
-        throughput = EvalSpecularBounce(surface, H, bounceDir);
-        if (all(throughput == 0))
-        {
-            // Invalid bounce sample — keep the direct light at this vertex
-            payload.color = CalculateDirectLightning(hit, surface);
-            payload.bounceCount++;
-            return;
-        }
-        throughput /= specularProb;
-    }
-    else
-    {
-        float3 kD = (1.0 - F) * (1.0 - metallic);
-        bounceDir = CosineSampleHemisphere(xi, N);
-        throughput = EvalDiffuseBounce(surface, kD, bounceDir);
-        if (all(throughput == 0))
-        {
-            // Invalid bounce sample — keep the direct light at this vertex
-            payload.color = CalculateDirectLightning(hit, surface);
-            payload.bounceCount++;
-            return;
-        }
-        throughput /= (1.0 - specularProb + EPSILON);
-    }
-
-    // BounceHealth: classify a NaN bounce direction at this hit.
-    if (debugMode == 2)
-    {
-        payload.color = BounceHealthColor(bounceDir, N, roughness);
-        return;
-    }
-
-    RayDesc ray;
-    ray.Origin = hit.position;
-    ray.Direction = bounceDir;
-    ray.TMin = RAY_TMIN;
-    ray.TMax = RAY_TMAX;
-
-    payload.bounceCount++;
-    TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, payload);
-    
-    float3 directHere = CalculateDirectLightning(hit, surface);
-    float3 incoming = payload.color;
-    payload.color = directHere + throughput * incoming;
-    payload.throughput = throughput * payload.throughput;
+    // Report-only (ADR 0007): shading happens in the raygen bounce loop.
+    payload.instanceId = InstanceID();
+    payload.primitiveId = PrimitiveIndex();
+    payload.barycentrics = attr.barycentrics;
+    payload.hitFlag = 1;
 }
 
 #endif

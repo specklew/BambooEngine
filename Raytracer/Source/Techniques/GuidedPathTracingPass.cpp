@@ -32,11 +32,11 @@ TechniqueDesc GuidedPathTracingPass::GetTechniqueDesc() const
         {L"GuidedHitGroup", L"GuidedHit", L"GuidedAnyHit"},
         {L"ShadowHitGroup", L"",          L"ShadowHit"},
     };
-    desc.maxPayloadSize    = 9 * sizeof(float); // GuidedPayload: 2x float3 + 3x uint
+    desc.maxPayloadSize    = 5 * sizeof(uint32_t); // GuidedPayload: 3x uint + float2 (ADR 0007)
     desc.maxAttributeSize  = 2 * sizeof(float);
-    // Vanilla chain depth + shadow rays at the terminal vertex; extra headroom
-    // because the first vertex spawns two sequential MIS subtrees.
-    desc.maxRecursionDepth = 10;
+    // Flat iterative integrator (ADR 0007): every TraceRay — bounce and shadow —
+    // launches from raygen; nothing traces from hit/miss shaders.
+    desc.maxRecursionDepth = 1;
     return desc;
 }
 

@@ -16,9 +16,11 @@ TechniqueDesc PathTracingPass::GetTechniqueDesc() const
         {L"PrimaryHitGroup", L"Hit", L"AnyHit"},
         {L"ShadowHitGroup",  L"",    L"ShadowHit"},
     };
-    desc.maxPayloadSize    = 8 * sizeof(float);
+    desc.maxPayloadSize    = 5 * sizeof(uint32_t); // PtPayload: 3x uint + float2 (ADR 0007)
     desc.maxAttributeSize  = 2 * sizeof(float);
-    desc.maxRecursionDepth = 8;
+    // Flat iterative integrator (ADR 0007): every TraceRay — primary, bounce,
+    // shadow — launches from raygen; nothing traces from hit/miss shaders.
+    desc.maxRecursionDepth = 1;
     return desc;
 }
 
