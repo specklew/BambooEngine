@@ -10,8 +10,8 @@
 // the cone-toward-bounding-sphere deviation was reversed 2026-07-09, ADR 0003).
 // Reverse pdf for the BSDF sample telescopes to two divisions (heap leaf/total
 // x tree leaf/root intensity) via the inverse index / cluster assignments /
-// compact->leaf maps. pdf products ride in double, faithful to SIByL
-// (DoublePrecisionFloatShaderOps hard-checked at init).
+// compact->leaf maps. pdf products ride in GuidePdf (see GUIDE_PDF_FP64 below;
+// SIByL uses double, DoublePrecisionFloatShaderOps still hard-checked at init).
 //
 // Guiding is applied at the FIRST vertex only; deeper bounces are vanilla
 // recursion (deviation: SIByL's degraded second-bounce bolt-on omitted,
@@ -25,6 +25,18 @@
 #include "VBuffer.hlsl"
 #include "LightTreeNode.hlsl"
 #include "SphericalQuad.hlsl"
+
+// Guide-pdf precision switch. SIByL carries the pdf chain in double; consumer
+// GPUs run FP64 at 1/16 (RDNA) to 1/64 (GeForce) of FP32 rate and doubles
+// double the register footprint of the raygen. Float survives the telescoped
+// chain (worst-case leaf/root ~1e-9 power-squared ~= 1e-18 vs float's ~1e-38
+// floor, ADR 0003). 1 = SIByL-faithful double, 0 = float (measured deviation).
+#define GUIDE_PDF_FP64 0
+#if GUIDE_PDF_FP64
+typedef double GuidePdf;
+#else
+typedef float GuidePdf;
+#endif
 
 // ---- VXPG guiding resources ----
 
@@ -95,12 +107,18 @@ cbuffer VoxelGridCB : register(b4)
     uint   voxInjectUseAvg;
     uint   _voxReserved0;
     float  voxHeatScale;
-    uint   _voxPad0;
+    uint   voxReuseGiVpl; // ADR 0009: 1 = this raygen's BSDF subtree writes the VPL data
 }
 
 float UnpackIrradiance(uint packed)
 {
     return float(packed) / 100.0f;
+}
+
+// Fixed-point irradiance packing (matches SIByL VXPG: scalar = 100)
+uint PackIrradiance(float unpacked)
+{
+    return uint(unpacked * 100.0f);
 }
 
 // ---- Payload (carries first-hit position for guide pdf evaluation) ----
@@ -277,7 +295,7 @@ float PdfVoxelSolidAngle(float3 shadingPos, int3 v)
 // 0 (guide dead for this superpixel). One random draw drives the whole walk:
 // after every branch the surviving interval is re-stretched to [0,1).
 // SIByL SampleTopLevelTree (vxguiding_interface.hlsli).
-int SampleSuperpixelClusterHeap(uint spixelFlat, float rnd, out double pdfTop)
+int SampleSuperpixelClusterHeap(uint spixelFlat, float rnd, out GuidePdf pdfTop)
 {
     const uint heapBase = spixelFlat * 64u;
     pdfTop = 0.0;
@@ -285,7 +303,7 @@ int SampleSuperpixelClusterHeap(uint spixelFlat, float rnd, out double pdfTop)
         return -1;
 
     uint heapIndex = 1u;
-    double walkPdf = 1.0;
+    GuidePdf walkPdf = 1.0;
     [unroll] for (uint level = 0u; level < 5u; ++level)
     {
         const uint leftIndex = heapIndex << 1;
@@ -300,13 +318,13 @@ int SampleSuperpixelClusterHeap(uint spixelFlat, float rnd, out double pdfTop)
         {
             heapIndex = leftIndex;
             rnd /= probLeft;
-            walkPdf *= double(probLeft);
+            walkPdf *= GuidePdf(probLeft);
         }
         else
         {
             heapIndex = leftIndex + 1u;
             rnd = (rnd - probLeft) / (1.0f - probLeft);
-            walkPdf *= double(1.0f - probLeft);
+            walkPdf *= GuidePdf(1.0f - probLeft);
         }
     }
     pdfTop = walkPdf;
@@ -319,7 +337,7 @@ int SampleSuperpixelClusterHeap(uint spixelFlat, float rnd, out double pdfTop)
 // the leaf NODE id (not compactID), or -1 on a dead branch — unreachable when
 // internal intensity is an exact child sum, kept faithful to SIByL
 // TraverseLightTree (tree/shared.hlsli).
-int TraverseLightTreeToLeaf(int nodeId, uint leafStartIndex, float rnd, out double pdfTree)
+int TraverseLightTreeToLeaf(int nodeId, uint leafStartIndex, float rnd, out GuidePdf pdfTree)
 {
     pdfTree = 1.0;
     [loop] while (uint(nodeId) < leafStartIndex)
@@ -349,13 +367,13 @@ int TraverseLightTreeToLeaf(int nodeId, uint leafStartIndex, float rnd, out doub
         {
             nodeId = int(leftChild);
             rnd /= probLeft;
-            pdfTree *= double(probLeft);
+            pdfTree *= GuidePdf(probLeft);
         }
         else
         {
             nodeId = int(rightChild);
             rnd = (rnd - probLeft) / (1.0f - probLeft);
-            pdfTree *= double(1.0f - probLeft);
+            pdfTree *= GuidePdf(1.0f - probLeft);
         }
     }
     return nodeId;
@@ -364,10 +382,10 @@ int TraverseLightTreeToLeaf(int nodeId, uint leafStartIndex, float rnd, out doub
 // Reverse pdf of the tree walk. Intensity-ratio branching telescopes — every
 // intermediate intensity cancels — leaving one division. SIByL
 // PdfTraverseLightTree_Intensity.
-double PdfTraverseLightTreeIntensity(int clusterRootId, int leafNodeId)
+GuidePdf PdfTraverseLightTreeIntensity(int clusterRootId, int leafNodeId)
 {
-    return double(gLightTreeNodes[leafNodeId].intensity) /
-           double(gLightTreeNodes[clusterRootId].intensity);
+    return GuidePdf(gLightTreeNodes[leafNodeId].intensity) /
+           GuidePdf(gLightTreeNodes[clusterRootId].intensity);
 }
 
 // Mixture probability of the fuzzy parent set picking `cluster`: sum over the
@@ -376,9 +394,9 @@ double PdfTraverseLightTreeIntensity(int clusterRootId, int leafNodeId)
 // reverse side. The shipped strategy 6 pairs a single-parent forward pdf with
 // this mixture reverse — an inconsistent estimator; consistent-mixture is a
 // deliberate deviation (ADR 0003).
-double FuzzyClusterMixturePdf(float4 fuzzyWeights, int4 fuzzyIndices, int cluster)
+GuidePdf FuzzyClusterMixturePdf(float4 fuzzyWeights, int4 fuzzyIndices, int cluster)
 {
-    double pdfTop = 0.0;
+    GuidePdf pdfTop = 0.0;
     [unroll] for (int f = 0; f < 4; ++f)
     {
         if (fuzzyWeights[f] > 0.0 && fuzzyIndices[f] >= 0)
@@ -387,7 +405,7 @@ double FuzzyClusterMixturePdf(float4 fuzzyWeights, int4 fuzzyIndices, int cluste
             const float rootImportance = gSpixelClusterImportanceHeap[heapBase + 1u];
             const float leafImportance = gSpixelClusterImportanceHeap[heapBase + 32u + uint(cluster)];
             if (rootImportance > 0.0f)
-                pdfTop += double(fuzzyWeights[f]) * double(leafImportance) / double(rootImportance);
+                pdfTop += GuidePdf(fuzzyWeights[f]) * GuidePdf(leafImportance) / GuidePdf(rootImportance);
         }
     }
     return pdfTop;
@@ -401,11 +419,12 @@ double FuzzyClusterMixturePdf(float4 fuzzyWeights, int4 fuzzyIndices, int cluste
 // forward walk truly cannot reach them), or every parent heap empty — which
 // hands the BSDF sample full MIS weight.
 // (vxguiding-gi.slang strategy 5 reverse block + strategy 7 fuzzy top pdf.)
-double EvalTreeGuidePdf(float4 fuzzyWeights, int4 fuzzyIndices, float3 shadingPos, float3 hitPos)
+GuidePdf EvalTreeGuidePdf(float4 fuzzyWeights, int4 fuzzyIndices, float3 shadingPos, float3 hitPos)
 {
     int3 v = int3(floor((hitPos - voxGridMin) / voxVoxelSize));
     if (any(v < 0) || any(v >= int(voxGridDim)))
         return 0.0;
+
     const uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
 
     const int compactID = gVoxInverseIndex[flatId];
@@ -416,7 +435,7 @@ double EvalTreeGuidePdf(float4 fuzzyWeights, int4 fuzzyIndices, float3 shadingPo
     if (cluster < 0 || cluster >= 32)
         return 0.0;
 
-    const double pdfTop = FuzzyClusterMixturePdf(fuzzyWeights, fuzzyIndices, cluster);
+    const GuidePdf pdfTop = FuzzyClusterMixturePdf(fuzzyWeights, fuzzyIndices, cluster);
     if (pdfTop == 0.0)
         return 0.0;
 
@@ -424,10 +443,10 @@ double EvalTreeGuidePdf(float4 fuzzyWeights, int4 fuzzyIndices, float3 shadingPo
     const int clusterRootId = gClusterRootNodes[cluster];
     if (leafNodeId < 0 || clusterRootId < 0)
         return 0.0;
-    const double pdfTree = PdfTraverseLightTreeIntensity(clusterRootId, leafNodeId);
+    const GuidePdf pdfTree = PdfTraverseLightTreeIntensity(clusterRootId, leafNodeId);
 
     const float pdfDir = PdfVoxelSolidAngle(shadingPos, v);
-    return pdfTop * pdfTree * double(pdfDir);
+    return pdfTop * pdfTree * GuidePdf(pdfDir);
 }
 
 // Decodes a compact-list flat voxel id back to grid coordinates.
@@ -503,7 +522,13 @@ float MisWeight(float wSelf, float wOther)
         wSelf  *= wSelf;
         wOther *= wOther;
     }
-    return wSelf / (wSelf + wOther + EPSILON);
+    // No epsilon in the denominator (SIByL w1/(w1+w2) verbatim): both call
+    // sites gate on pdf > 0 and isnan-guard the other strategy's pdf, so the
+    // denominator is strictly positive. An epsilon here makes the two MIS
+    // weights sum below 1 — an energy tax that concentrates exactly where
+    // squared pdfs are small (grazing/penumbra directions; measured as the
+    // 0.026-FLIP darkening on Deep Light before removal).
+    return wSelf / (wSelf + wOther);
 }
 
 // ---- Continuation trace (deeper bounces, vanilla logic) ----
@@ -524,13 +549,112 @@ float3 IndirectSkyRadiance(float3 dir)
     return sky;
 }
 
+// ---- Bounce-trace backend (pipeline TraceRay vs inline RayQuery) ----
+
+#ifdef GUIDED_TRACE_RQ
+
+// Inline-RayQuery backend (compute integrator): the GuidedAnyHit alpha test
+// replays in the candidate loop; the committed hit fills the same minimal
+// hit-ID payload the closest-hit shader reports in the pipeline path.
+GuidedPayload TraceBounceRay(RayDesc ray)
+{
+    RayQuery<RAY_FLAG_NONE> query;
+    query.TraceRayInline(SceneBVH, RAY_FLAG_NONE, ~0, ray);
+    while (query.Proceed())
+    {
+        if (query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+        {
+            InstanceInfo instance = g_instanceInfo[query.CandidateInstanceID()];
+            uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
+            uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
+            HitData hit = GetHitData(query.CandidatePrimitiveIndex(), vertexOffset, indexOffset,
+                                     query.CandidateTriangleBarycentrics(), instance.objectToWorld);
+            float4 albedo = SampleTextureColor(instance, hit) * instance.baseColorFactor;
+            if (albedo.a >= EPSILON)
+                query.CommitNonOpaqueTriangleHit();
+        }
+    }
+
+    GuidedPayload p;
+    p.instanceId = 0;
+    p.primitiveId = 0;
+    p.barycentrics = float2(0, 0);
+    p.hitFlag = 0;
+    if (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    {
+        p.instanceId = query.CommittedInstanceID();
+        p.primitiveId = query.CommittedPrimitiveIndex();
+        p.barycentrics = query.CommittedTriangleBarycentrics();
+        p.hitFlag = 1;
+    }
+    return p;
+}
+
+#else
+
+GuidedPayload TraceBounceRay(RayDesc ray)
+{
+    GuidedPayload p;
+    p.instanceId = 0;
+    p.primitiveId = 0;
+    p.barycentrics = float2(0, 0);
+    p.hitFlag = 0;
+    TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, p);
+    return p;
+}
+
+#endif // GUIDED_TRACE_RQ
+
+// Launch coordinates shared by both entry points (raygen intrinsics do not
+// exist in compute; a per-thread static avoids threading them through every
+// helper).
+static uint2 gLaunchIndex;
+static uint2 gLaunchDims;
+
+// VPL injection from the BSDF subtree's first bounce vertex (ADR 0009): the
+// same writes the dedicated injection trace performs — per-pixel VPL position,
+// per-voxel representative (last-writer-wins), and the packed-irradiance
+// atomics. Position/normal write on any hit; irradiance only when the vertex
+// receives direct light (mirrors lightInjection.hlsl exactly).
+void InjectVplFromBounce(float3 position, float3 shadingNormal, float3 directLight)
+{
+    const float packedNormal = asfloat(UnitVectorToUnorm32Octahedron(shadingNormal));
+    gVplPosition[gLaunchIndex] = float4(position, packedNormal);
+
+    int3 voxelIdx = int3(floor((position - voxGridMin) / voxVoxelSize));
+    if (any(voxelIdx < 0) || any(voxelIdx >= int(voxGridDim)))
+        return;
+
+    gVoxelRepresentative[voxelIdx] = float4(position, packedNormal);
+
+    float irradiance = max(directLight.r, max(directLight.g, directLight.b));
+    if (irradiance <= 0.0)
+        return;
+
+    uint packedIrr = PackIrradiance(irradiance);
+    if (voxInjectUseAvg != 0)
+    {
+        uint old;
+        InterlockedAdd(gVoxIrradiance[voxelIdx], packedIrr, old);
+        InterlockedAdd(gVoxVplCount[voxelIdx], 1u, old);
+    }
+    else
+    {
+        uint old;
+        InterlockedMax(gVoxIrradiance[voxelIdx], packedIrr, old);
+        gVoxVplCount[voxelIdx] = 1u;
+    }
+}
+
 // Flat iterative bounce loop (ADR 0007): replaces the recursive closest-hit
 // continuation with the same estimator — per vertex add throughput-weighted
 // direct light, sample the next bounce, stop at numBounces. All rays (bounce +
 // shadow) launch from raygen; the closest hit only reports hit IDs and the
 // surface is reconstructed here through the same instance-parameterized path
 // the VBuffer first vertex uses.
-float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, out float3 hitPos, out bool didHit)
+// writeVpl: only the BSDF MIS subtree passes true (ADR 0009) — fitting the
+// guide from guided samples would be a self-reinforcing feedback loop.
+float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, out float3 hitPos, out bool didHit)
 {
     float3 radiance = float3(0, 0, 0);
     float3 pathThroughput = float3(1, 1, 1);
@@ -547,12 +671,7 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, out float3 hitP
         ray.TMin = RAY_TMIN;
         ray.TMax = RAY_TMAX;
 
-        GuidedPayload p;
-        p.instanceId = 0;
-        p.primitiveId = 0;
-        p.barycentrics = float2(0, 0);
-        p.hitFlag = 0;
-        TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, p);
+        GuidedPayload p = TraceBounceRay(ray);
 
         if (p.hitFlag == 0u)
         {
@@ -592,7 +711,13 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, out float3 hitP
         surface.roughness = roughness;
         surface.metallic  = metallic;
 
-        radiance += pathThroughput * CalculateDirectLightning(hit, surface);
+        const float3 directLight = CalculateDirectLightning(hit, surface);
+        radiance += pathThroughput * directLight;
+
+        // ADR 0009: the first bounce vertex of the BSDF subtree doubles as
+        // next frame's injection sample.
+        if (bounce == 1u && writeVpl && voxReuseGiVpl != 0u)
+            InjectVplFromBounce(hit.position, N, directLight);
 
         if (bounce >= (uint)numBounces)
             break;
@@ -680,7 +805,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
             {
                 float3 hitPos;
                 bool didHit;
-                float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit);
+                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit);
 
                 // Guide pdf at the BSDF sample, evaluated through the reverse
                 // chain at the ray's hit voxel (0 for misses / unreachable
@@ -730,14 +855,14 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         if (selectedParent < 0)
             return radiance; // no live parent and no hard assignment
 
-        double pdfTopWalk;
+        GuidePdf pdfTopWalk;
         const int cluster = SampleSuperpixelClusterHeap(uint(selectedParent), walkXi.x, pdfTopWalk);
         const int clusterRootId = (cluster >= 0) ? gClusterRootNodes[cluster] : -1;
         if (clusterRootId < 0)
             guideOutcome = 3u;
         else
         {
-            double pdfTree;
+            GuidePdf pdfTree;
             const int leafNodeId = TraverseLightTreeToLeaf(
                 clusterRootId, litVoxelCount - 1u, walkXi.y, pdfTree);
             if (leafNodeId < 0)
@@ -767,8 +892,8 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
             // cluster is sum_f w_f x leaf_f/root_f — the same formula the
             // reverse query uses, keeping the pair consistent (see
             // FuzzyClusterMixturePdf header).
-            const double pdfTop = FuzzyClusterMixturePdf(fuzzyWeights, fuzzyIndices, cluster);
-            const double pdfG = pdfTop * pdfTree * double(pdfDir);
+            const GuidePdf pdfTop = FuzzyClusterMixturePdf(fuzzyWeights, fuzzyIndices, cluster);
+            const GuidePdf pdfG = pdfTop * pdfTree * GuidePdf(pdfDir);
 
             if (pdfG <= 0.0)
                 guideOutcome = 5u;
@@ -783,7 +908,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 {
                     float3 hitPos;
                     bool didHit;
-                    float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit);
+                    float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ false, hitPos, didHit);
 
                     // Semi-NEE gate: the claimed pdf belongs to the chosen
                     // voxel, so only count hits inside its AABB.
@@ -829,11 +954,12 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
 
 // ---- Ray generation ----
 
-[shader("raygeneration")]
-void GuidedRayGen()
+// Shared integrator body; entered from the pipeline raygen or the compute
+// (inline-RayQuery) wrapper below with gLaunchIndex/gLaunchDims already set.
+void GuidedIntegratorMain()
 {
-    uint2 launchIndex = DispatchRaysIndex().xy;
-    uint2 dims = DispatchRaysDimensions().xy;
+    uint2 launchIndex = gLaunchIndex;
+    uint2 dims = gLaunchDims;
     uint pixelId = launchIndex.x + launchIndex.y * dims.x;
 
     // View 7: per-pixel VPL buffer — decode its octahedral normal directly,
@@ -848,6 +974,13 @@ void GuidedRayGen()
         return;
     }
 
+    // ADR 0009: this raygen owns the per-pixel VPL slot — zero it up front so
+    // pixels whose BSDF bounce misses (or never traces: sky, guide debug
+    // views) stay empty for next frame's cvis, exactly like the dedicated
+    // injection pass's per-pixel clear.
+    if (voxReuseGiVpl != 0u)
+        gVplPosition[launchIndex] = float4(0, 0, 0, 0);
+
     // First path vertex from the shared VBuffer (ADR 0004): reconstruct the
     // hit once; every spp sample shares it and diverges at the bounce.
     VBufferData vb = UnpackVBufferData(gVBuffer[launchIndex]);
@@ -857,7 +990,7 @@ void GuidedRayGen()
         // direction the VBuffer pass traced.
         float3 origin, direction;
         float2 jitter = VBufferPixelJitter(launchIndex, frameIndex, vbufferJitterEnabled);
-        GenerateCameraRayJittered(launchIndex, jitter, origin, direction);
+        GenerateCameraRayJittered(launchIndex, jitter, float2(gLaunchDims), origin, direction);
         float u = atan2(direction.z, direction.x) / (2.0 * PI) + 0.5;
         float v = -asin(clamp(direction.y, -1.0, 1.0)) / PI + 0.5;
         float3 sky = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
@@ -954,7 +1087,7 @@ void GuidedRayGen()
     // the compacted count (corruption). dark blue = unlit voxel / sky.
     if (debugView == 8u)
     {
-        uint2 dims = DispatchRaysDimensions().xy;
+        uint2 dims = gLaunchDims;
         uint randSeed = pcg_hash(frameIndex);
         float2 cellSize = float2(dims) / float2(16.0, 8.0);
         [loop] for (uint c = 0; c < 128u; ++c)
@@ -1121,7 +1254,7 @@ void GuidedRayGen()
     // lit cluster / sky). Blocky at 32px superpixel granularity (expected).
     if (debugView == 12u)
     {
-        uint2 dims = DispatchRaysDimensions().xy;
+        uint2 dims = gLaunchDims;
         uint mapX = (dims.x + 31u) / 32u; // SUPERPIXEL_SIZE
         uint2 spixel = launchIndex / 32u;
         uint base = (spixel.y * mapX + spixel.x) * 64u;
@@ -1169,7 +1302,7 @@ void GuidedRayGen()
         {
             uint seed = pcg_hash(pixelId ^ (frameIndex * 805459861u));
             float2 xi = Random2D(seed);
-            double pdfTop;
+            GuidePdf pdfTop;
             const int cluster = SampleSuperpixelClusterHeap(uint(spixelFlat), xi.x, pdfTop);
             if (cluster >= 0)
             {
@@ -1180,7 +1313,7 @@ void GuidedRayGen()
                 }
                 else
                 {
-                    double pdfTree;
+                    GuidePdf pdfTree;
                     const int leafNodeId = TraverseLightTreeToLeaf(
                         clusterRootId, litVoxelCount - 1u, xi.y, pdfTree);
                     if (leafNodeId < 0)
@@ -1195,12 +1328,12 @@ void GuidedRayGen()
                         const uint heapBase = uint(spixelFlat) * 64u;
                         const float topTotal = gSpixelClusterImportanceHeap[heapBase + 1u];
                         const float topLeaf  = gSpixelClusterImportanceHeap[heapBase + 32u + uint(cluster)];
-                        const double pdfTopReverse = (topTotal == 0.0f) ? 0.0
-                            : double(topLeaf) / double(topTotal);
+                        const GuidePdf pdfTopReverse = (topTotal == 0.0f) ? 0.0
+                            : GuidePdf(topLeaf) / GuidePdf(topTotal);
                         const int leafBack    = gCompactToLeaf[compactID];
                         const int clusterBack = (compactID < litVoxelCount)
                             ? gVoxelClusterAssignments[compactID] : -1;
-                        const double pdfTreeReverse = (leafBack >= 0)
+                        const GuidePdf pdfTreeReverse = (leafBack >= 0)
                             ? PdfTraverseLightTreeIntensity(clusterRootId, leafBack) : 0.0;
 
                         const float forward = float(pdfTop * pdfTree);
@@ -1233,7 +1366,7 @@ void GuidedRayGen()
         if (LitVoxelCount() > 0u && spixelFlat >= 0)
         {
             uint seed = pcg_hash(pixelId ^ (frameIndex * 805459861u));
-            double pdfTop;
+            GuidePdf pdfTop;
             const int cluster = SampleSuperpixelClusterHeap(
                 uint(spixelFlat), Random2D(seed).x, pdfTop);
             if (cluster >= 0)
@@ -1290,6 +1423,39 @@ void GuidedRayGen()
     gOutput[launchIndex] = min(float4(accumulated / samplesPerPixel, 1.0), 100.0f);
 }
 
+// ---- Entry points ----
+
+#ifdef GUIDED_TRACE_RQ
+
+// Compute wrapper (inline-RayQuery integrator, ADR 0011). One thread per
+// pixel, same body as the pipeline raygen.
+[numthreads(8, 8, 1)]
+// Wave size left to the driver: measured 840 (default) vs 827 (wave32) vs 799 (wave64) frames/3s on RDNA, Deep Light b1.
+void GuidedRqMain(uint3 dtid : SV_DispatchThreadID)
+{
+    uint width, height;
+    gOutput.GetDimensions(width, height);
+    if (dtid.x >= width || dtid.y >= height)
+        return;
+    gLaunchIndex = dtid.xy;
+    gLaunchDims = uint2(width, height);
+    GuidedIntegratorMain();
+}
+
+#else
+
+[shader("raygeneration")]
+void GuidedRayGen()
+{
+    gLaunchIndex = DispatchRaysIndex().xy;
+    gLaunchDims = DispatchRaysDimensions().xy;
+    GuidedIntegratorMain();
+}
+
+#endif // GUIDED_TRACE_RQ
+
+#ifndef GUIDED_TRACE_RQ // pipeline-only hit/miss shaders
+
 // ---- Miss ----
 
 [shader("miss")]
@@ -1327,5 +1493,7 @@ void GuidedHit(inout GuidedPayload payload : SV_RayPayload, in Attributes attr)
     payload.barycentrics = attr.barycentrics;
     payload.hitFlag = 1;
 }
+
+#endif // GUIDED_TRACE_RQ (pipeline-only hit/miss shaders)
 
 #endif // GUIDED_PATH_TRACING_HLSL

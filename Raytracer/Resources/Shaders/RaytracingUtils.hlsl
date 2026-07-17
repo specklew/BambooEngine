@@ -253,16 +253,23 @@ inline float2 VBufferPixelJitter(uint2 pixel, uint frameIndex, uint enabled)
 }
 
 // Deterministic sub-pixel offset (VBuffer pass and its consumers must agree
-// on the exact primary direction, so no RNG here).
-inline void GenerateCameraRayJittered(uint2 index, float2 jitter, out float3 origin, out float3 direction)
+// on the exact primary direction, so no RNG here). Dims-parameterized core is
+// compute-callable (DispatchRaysDimensions does not exist in cs targets).
+inline void GenerateCameraRayJittered(uint2 index, float2 jitter, float2 dims, out float3 origin, out float3 direction)
 {
-    float2 dims = float2(DispatchRaysDimensions().xy);
     float2 d = (((index + 0.5f + jitter) / dims) * 2.f - 1.f);
 
     origin = mul(viewI, float4(0, 0, 0, 1)).xyz;
     float4 target = mul(projectionI, float4(d.x, -d.y, 1, 1));
     direction = normalize(mul(viewI, float4(target.xyz, 0)).xyz);
 }
+
+#ifndef GUIDED_TRACE_RQ
+inline void GenerateCameraRayJittered(uint2 index, float2 jitter, out float3 origin, out float3 direction)
+{
+    GenerateCameraRayJittered(index, jitter, float2(DispatchRaysDimensions().xy), origin, direction);
+}
+#endif
 
 inline void GenerateCameraRay(uint2 index, uint seed, out float3 origin, out float3 direction)
 {

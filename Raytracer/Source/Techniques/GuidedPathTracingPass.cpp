@@ -4,6 +4,9 @@
 #include "AccelerationStructures.h"
 #include "Constants.h"
 #include "Renderer.h"
+#include "ResourceManager/ResourceManager.h"
+#include "Shader.h"
+#include "Utils/CVars.h"
 #include "VoxelizationPass.h"
 #include "VoxelGuidingBuildPass.h"
 #include "VxpgFingerprintPass.h"
@@ -14,6 +17,64 @@
 #include "Resources/StructuredBuffer.h"
 #include "SceneResources/Scene.h"
 #include "Utils/PassConstants.h"
+
+// -1 = auto (inline RayQuery on AMD RDNA, RT pipeline elsewhere — RDNA's
+// shader-based traversal skips the pipeline/SBT machinery nearly for free,
+// while NVIDIA schedules the RT pipeline well and SER, when Ada+ hardware is
+// present, only exists in the pipeline model). 0/1 force. ADR 0011.
+static AutoCVarInt g_inlineRayQuery("vxpg.integrator.inlineRq",
+    "Guided integrator backend: -1 auto by GPU vendor, 0 RT pipeline, 1 inline RayQuery compute",
+    -1, CVarFlags::EditDrag);
+
+namespace
+{
+bool IsAmdDevice(ID3D12Device* device)
+{
+    static int cached = -1;
+    if (cached < 0)
+    {
+        cached = 0;
+        Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+        if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) &&
+            SUCCEEDED(factory->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter))))
+        {
+            DXGI_ADAPTER_DESC1 desc;
+            adapter->GetDesc1(&desc);
+            cached = (desc.VendorId == 0x1002) ? 1 : 0; // AMD
+        }
+    }
+    return cached == 1;
+}
+} // namespace
+
+bool GuidedPathTracingPass::UseInlineRayQuery()
+{
+    const int mode = g_inlineRayQuery.Get();
+    if (mode == 0) return false;
+    if (mode > 0) return true;
+    // Auto = pipeline on every vendor: measured dead heat on RDNA (ADR 0011,
+    // 824 vs 827 frames/3s), and the pipeline path is the SER-ready one for
+    // future Ada+ hardware. The RQ backend stays as an opt-in cross-check.
+    return false;
+}
+
+void GuidedPathTracingPass::EnsureInlineRayQueryPso()
+{
+    if (m_inlineRqPso)
+        return;
+
+    auto& rm = ResourceManager::Get();
+    auto handle = rm.GetOrLoadShader(AssetId("resources/shaders/guidedPathTracing.rq.shader"));
+    auto blob = rm.shaders.GetResource(handle).bytecode;
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
+    desc.pRootSignature = m_globalRootSignature.Get();
+    desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
+    ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&m_inlineRqPso)));
+    m_inlineRqPso->SetName(L"GuidedPathTracing InlineRQ PSO");
+    spdlog::info("GuidedPathTracingPass: inline-RayQuery compute PSO created");
+}
 
 TechniqueDesc GuidedPathTracingPass::GetTechniqueDesc() const
 {
@@ -252,24 +313,37 @@ void GuidedPathTracingPass::Render()
         m_commandList->ResourceBarrier(1, &transition);
     }
 
-    D3D12_DISPATCH_RAYS_DESC desc = {};
-    desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();
-    desc.RayGenerationShaderRecord.SizeInBytes  = m_shaderBindingTable->GetRayGenSectionSize();
+    if (UseInlineRayQuery())
+    {
+        // Compute build (ADR 0011): identical bindings/root signature, one
+        // thread per pixel, no SBT.
+        EnsureInlineRayQueryPso();
+        m_commandList->SetPipelineState(m_inlineRqPso.Get());
+        const uint32_t width  = Window::Get().GetWidth();
+        const uint32_t height = Window::Get().GetHeight();
+        m_commandList->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
+    }
+    else
+    {
+        D3D12_DISPATCH_RAYS_DESC desc = {};
+        desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();
+        desc.RayGenerationShaderRecord.SizeInBytes  = m_shaderBindingTable->GetRayGenSectionSize();
 
-    desc.MissShaderTable.StartAddress  = desc.RayGenerationShaderRecord.StartAddress + desc.RayGenerationShaderRecord.SizeInBytes;
-    desc.MissShaderTable.StrideInBytes = m_shaderBindingTable->GetMissEntrySize();
-    desc.MissShaderTable.SizeInBytes   = m_shaderBindingTable->GetMissSectionSize();
+        desc.MissShaderTable.StartAddress  = desc.RayGenerationShaderRecord.StartAddress + desc.RayGenerationShaderRecord.SizeInBytes;
+        desc.MissShaderTable.StrideInBytes = m_shaderBindingTable->GetMissEntrySize();
+        desc.MissShaderTable.SizeInBytes   = m_shaderBindingTable->GetMissSectionSize();
 
-    desc.HitGroupTable.StartAddress  = desc.MissShaderTable.StartAddress + desc.MissShaderTable.SizeInBytes;
-    desc.HitGroupTable.StrideInBytes = m_shaderBindingTable->GetHitEntrySize();
-    desc.HitGroupTable.SizeInBytes   = m_shaderBindingTable->GetHitSectionSize();
+        desc.HitGroupTable.StartAddress  = desc.MissShaderTable.StartAddress + desc.MissShaderTable.SizeInBytes;
+        desc.HitGroupTable.StrideInBytes = m_shaderBindingTable->GetHitEntrySize();
+        desc.HitGroupTable.SizeInBytes   = m_shaderBindingTable->GetHitSectionSize();
 
-    desc.Width  = Window::Get().GetWidth();
-    desc.Height = Window::Get().GetHeight();
-    desc.Depth  = 1;
+        desc.Width  = Window::Get().GetWidth();
+        desc.Height = Window::Get().GetHeight();
+        desc.Depth  = 1;
 
-    m_commandList->SetPipelineState1(m_rtStateObject.Get());
-    m_commandList->DispatchRays(&desc);
+        m_commandList->SetPipelineState1(m_rtStateObject.Get());
+        m_commandList->DispatchRays(&desc);
+    }
 
     {
         CD3DX12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_outputResource.Get());

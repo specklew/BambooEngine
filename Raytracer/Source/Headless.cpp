@@ -23,8 +23,13 @@ namespace
         std::stringstream ss(value);
         std::string item;
         while (std::getline(ss, item, ','))
+        {
+            // Underscores stand in for spaces so state/technique names survive
+            // launchers that cannot forward quoted arguments (pixtool).
+            std::replace(item.begin(), item.end(), '_', ' ');
             if (!item.empty())
                 out.push_back(item);
+        }
         return out;
     }
 }

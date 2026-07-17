@@ -97,6 +97,13 @@ public:
 	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_device;
 	inline static int g_textureIndex = 0;
 
+	// Headless (benchmark) runs disable the D3D12 debug layer: its per-submit
+	// validation of a fat-root-signature compute Dispatch costs ~100 ms/frame
+	// (measured 2026-07-16, inline-RQ integrator) and taxes DispatchRays and
+	// Dispatch unevenly, skewing equal-time comparisons. Must be set before
+	// Initialize(). Interactive Debug builds keep the layer.
+	inline static bool g_enableDebugLayer = true;
+
 	static std::array<const CD3DX12_STATIC_SAMPLER_DESC, Constants::Graphics::STATIC_SAMPLERS_COUNT> GetStaticSamplers();
 	
 private:

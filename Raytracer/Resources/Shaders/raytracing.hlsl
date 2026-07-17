@@ -39,12 +39,18 @@ float3 SkyRadianceAtVertex(float3 dir, uint vertexIndex)
 
 // ---- Miss ----
 
+// The PT entry points and their TraceRay calls are pipeline-only; a compute
+// (inline-RayQuery) compilation of an including file must not see them.
+#ifndef GUIDED_TRACE_RQ
+
 [shader("miss")]
 void Miss(inout PtPayload payload : SV_RayPayload)
 {
     // Sky shading happens in the raygen bounce loop (SkyRadianceAtVertex).
     payload.hitFlag = 0;
 }
+
+#endif // GUIDED_TRACE_RQ (shared shading helpers below stay visible)
 
 // ---- Closest hit ----
 
@@ -165,6 +171,8 @@ float3 CalculateDirectLightning(HitData hit, SurfaceData surface)
 }
 
 // ---- Ray generation ----
+
+#ifndef GUIDED_TRACE_RQ // pipeline-only from here to EOF (TraceRay + entry points)
 
 // Flat iterative path loop (ADR 0007): replaces the recursive closest-hit
 // continuation with the same estimator — per vertex add throughput-weighted
@@ -334,5 +342,7 @@ void Hit(inout PtPayload payload : SV_RayPayload, in Attributes attr)
     payload.barycentrics = attr.barycentrics;
     payload.hitFlag = 1;
 }
+
+#endif // GUIDED_TRACE_RQ
 
 #endif

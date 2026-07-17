@@ -353,10 +353,14 @@ namespace RenderingUtils
 
     	commandList->CopyTextureRegion(&defaultCopyLocation, 0, 0, 0, &uploadCopyLocation, nullptr);
 
+    	// PIXEL | NON_PIXEL (matches the skybox): scene textures are sampled by
+    	// the raster PS, the RT passes AND compute kernels (inline-RayQuery
+    	// integrator); a pixel-only state faults compute Dispatches under
+    	// GPU-based validation (ADR 0003 cvis note — lifted by this widening).
     	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
 		    defaultTexture.Get(),
 		    D3D12_RESOURCE_STATE_COPY_DEST,
-		    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
 		commandList->ResourceBarrier(1, &barrier);
     	

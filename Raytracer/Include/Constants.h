@@ -57,7 +57,10 @@ namespace Constants
         // VXPG V2 Stage B superpixels (SLIC over the ShadingPoints G-buffer).
         // map_size = ceil(screen / SUPERPIXEL_SIZE); gather cap = SUPERPIXEL_SIZE^2.
         constexpr int SUPERPIXEL_SIZE = 32;
-        constexpr int SUPERPIXEL_ITERATIONS = 5;
+        // 1 = the paper's shipped config ("only execute the pixel assignment
+        // stage once", supplemental 1.3); 5 iterations with live center updates
+        // cost ~1.3 ms/frame at 1080p for no measured guiding benefit.
+        constexpr int SUPERPIXEL_ITERATIONS = 1;
         constexpr int SUPERPIXEL_GATHER_CAP = SUPERPIXEL_SIZE * SUPERPIXEL_SIZE; // 1024
     }
 }

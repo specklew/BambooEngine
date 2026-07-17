@@ -39,7 +39,7 @@ cbuffer VoxelGridCB : register(b4)
     uint   voxInjectUseAvg;
     uint   _voxReserved0;
     float  voxHeatScale;
-    uint   _voxPad0;
+    uint   voxReuseGiVpl; // ADR 0009: 1 = GI's BSDF subtree writes the VPL data
 }
 
 // Fixed-point irradiance packing (matches SIByL VXPG: scalar = 100)
@@ -148,9 +148,15 @@ void InjectRayGen()
     uint2 dims = DispatchRaysDimensions().xy;
     uint pixelId = launchIndex.x + launchIndex.y * dims.x;
 
+    // Reuse config (ADR 0009): the guided GI's BSDF subtree owns every VPL
+    // write (including the per-pixel clear); this pass only emits the
+    // ShadingPoints G-buffer below. Faithful config clears + traces here.
+    const bool reuseGiVpl = (voxReuseGiVpl != 0u);
+
     // Clear this pixel's VPL position; the bounce-1 closest hit overwrites it on
     // a hit, so pixels whose bounce misses stay zero (cvis treats zero as empty).
-    gVplPosition[launchIndex] = float4(0, 0, 0, 0);
+    if (!reuseGiVpl)
+        gVplPosition[launchIndex] = float4(0, 0, 0, 0);
 
     // Primary hit from the shared VBuffer (ADR 0004) — reconstruct instead of
     // tracing. All VBuffer consumers see the exact same hit.
@@ -177,6 +183,9 @@ void InjectRayGen()
     // Persist the primary shading point for superpixel clustering; valid
     // regardless of whether the VPL bounce below succeeds.
     gShadingPoints[launchIndex] = float4(hit.position, asfloat(UnitVectorToUnorm32Octahedron(N)));
+
+    if (reuseGiVpl)
+        return; // VPL trace + injection happen in the guided GI raygen (ADR 0009)
 
     // Sample one BSDF direction for the VPL ray (same stochastic
     // specular/diffuse selection as the path tracer)

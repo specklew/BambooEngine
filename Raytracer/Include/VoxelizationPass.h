@@ -13,7 +13,7 @@ struct VoxelGridConstants
     uint32_t          injectUseAvg;
     uint32_t          supervoxelFactor; // SUPERVOXEL_GRID_FACTOR; supervoxel = voxelCoord / factor
     float             heatScale;
-    uint32_t          _pad0;
+    uint32_t          reuseGiVpl; // 1 = VPL fitting samples come from last frame's guided-GI BSDF subtree (ADR 0009)
 };
 
 // Geometry bake + per-frame injection-accumulator clear (ADR 0004). The scene
@@ -37,7 +37,13 @@ public:
     bool DidResize() const { return m_didResize; }
 
     // Runtime knobs propagated to the shared grid constant buffer each frame
-    void SetRuntimeParams(bool injectUseAvg, float heatScale);
+    void SetRuntimeParams(bool injectUseAvg, float heatScale, bool reuseGiVpl);
+
+    // Zeroes the per-frame injection accumulators (irradiance + VPL count).
+    // Called by the renderer: before injection in the faithful config, or
+    // after the guiding build when VPL data is reused from last frame's GI
+    // (ADR 0009) — the build passes must read before the wipe.
+    void DispatchFrameClear();
 
     Microsoft::WRL::ComPtr<ID3D12Resource> GetOccupancyTexture() const { return m_occupancyTex; }
     Microsoft::WRL::ComPtr<ID3D12Resource> GetIrradianceTexture() const { return m_irradianceTex; }
@@ -62,7 +68,6 @@ private:
     void CreateDescriptorHeap();
     void WriteGridConstantsCB();
     void WriteUintTex3DUav(ID3D12Resource* resource, D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
-    void DispatchFrameClear();
     void DispatchBakeClear();
     void DispatchBake(const Scene& scene);
     void RecreateForNewDim(uint32_t newDim);

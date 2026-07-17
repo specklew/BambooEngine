@@ -36,6 +36,10 @@ int Application::Run()
 
 	Window::Create(m_hInstance, windowRect, this, headlessArgs.headless);
 
+	// Benchmarks must not pay the debug layer's uneven per-submit validation
+	// tax (see Renderer::g_enableDebugLayer).
+	Renderer::g_enableDebugLayer = !headlessArgs.headless;
+
 	m_renderer->Initialize();
 	m_ready = true;
 

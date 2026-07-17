@@ -134,6 +134,12 @@ static AutoCVarInt   g_vbufferJitter("vxpg.vbufferJitter", "Sub-pixel jitter for
 static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence weight: screen-xy vs world-position", 0.6f, CVarFlags::EditDrag, 0.0f, 4.0f);
 static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer", "SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
+// ADR 0009: 1 = the guided GI's BSDF MIS subtree writes the VPL fitting data
+// (last-frame reuse, supplemental 2's own pattern) and the injection pass
+// shrinks to a ShadingPoints writer; 0 = SIByL-shipped dedicated injection trace.
+static AutoCVarInt g_injectionReuseGi("vxpg.injection.reuseGiSamples",
+	"Fit the guide from last frame's GI BSDF samples instead of a dedicated injection trace",
+	1, CVarFlags::EditCheckbox);
 // Default = power: the ported integrator (vxguiding-gi strategy 5) hardcodes
 // power-heuristic squaring; balance stays available as a variance experiment.
 static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 1, CVarFlags::EditCheckbox);
@@ -606,12 +612,12 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	}
 	
 	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
-	
+
 	ThrowIfFailed(m_d3d12CommandList->Close());
-	
+
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
 	UINT presentFlags = m_tearingSupport ? DXGI_PRESENT_ALLOW_TEARING : 0; // TODO: do not check every time
-	
+
 	ThrowIfFailed(m_dxgiSwapChain->Present(0, presentFlags));
 
 	FlushCommandQueue();
@@ -763,7 +769,8 @@ void Renderer::SetupDeviceAndDebug()
 #ifdef _DEBUG
 	ComPtr<ID3D12Debug> debugController;
 	D3D12GetDebugInterface(IID_PPV_ARGS(&debugController));
-	debugController->EnableDebugLayer();
+	if (g_enableDebugLayer)
+		debugController->EnableDebugLayer();
 
 	// DRED: on device-removed, ThrowIfFailed dumps auto-breadcrumbs (which
 	// command in which command list hung/faulted) + page-fault allocation info.
@@ -784,10 +791,12 @@ void Renderer::SetupDeviceAndDebug()
 	ThrowIfFailed(::CreateDXGIFactory2(createFactoryFlags, IID_PPV_ARGS(&m_dxgiFactory)));
 
 #ifdef _DEBUG
+	if (g_enableDebugLayer) {
 	ComPtr<ID3D12Debug1> debugController1;
 	ThrowIfFailed(debugController.As(&debugController1));
 
 	debugController1->SetEnableGPUBasedValidation(ENABLE_GPU_BASED_VALIDATION);
+	}
 #endif
 
 	if (ComPtr<IDXGIAdapter4> dxgiAdapter = GetHardwareAdapter())
@@ -1498,9 +1507,15 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 
 	// Stage 1: geometry bake (rebakes only when invalidated) + per-frame
 	// injection-accumulator clear.
+	// Debug views suppress the BSDF subtree whose bounce writes the VPL data,
+	// which would starve the guide within two frames — fall back to the
+	// dedicated injection trace whenever one is active.
+	const bool reuseGiVpl = g_injectionReuseGi.Get() != 0 &&
+		g_guidingDebugView.Get() == GuidingDebugView::None;
 	m_voxelizationPass->SetRuntimeParams(
 		g_voxelInjectUseAvg.Get() != 0,
-		g_voxelHeatScale.Get());
+		g_voxelHeatScale.Get(),
+		reuseGiVpl);
 
 	// A grid resize destroys grid-sized resources that in-flight frames may
 	// still reference — wait for the GPU before recreating anything. Clamp the
@@ -1515,6 +1530,12 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Voxelize/BakeClear");
 		m_voxelizationPass->RunFrame(*m_scene, requestedGridDim,
 			g_voxelBakeUseCompact.Get() != 0, g_voxelBakeClipping.Get() != 0);
+		// Faithful config: wipe the injection accumulators up front, the
+		// injection trace refills them this frame. Reuse config wipes after
+		// the guiding build instead (below) — the build passes consume last
+		// frame's GI-written VPL data first (ADR 0009).
+		if (!reuseGiVpl)
+			m_voxelizationPass->DispatchFrameClear();
 	}
 	if (m_voxelizationPass->DidResize())
 	{
@@ -1591,6 +1612,14 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	{
 		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightTree");
 		m_lightTreePass->Run();
+	}
+
+	// Reuse config (ADR 0009): the build above consumed last frame's VPL data;
+	// wipe the accumulators now so the guided GI raygen refills them fresh.
+	if (reuseGiVpl)
+	{
+		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG InjectionClear");
+		m_voxelizationPass->DispatchFrameClear();
 	}
 }
 
@@ -1891,6 +1920,7 @@ ComPtr<ID3D12Device5> Renderer::GetDeviceForAdapter(ComPtr<IDXGIAdapter1> adapte
 	ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)));
 
 #ifdef _DEBUG
+	if (g_enableDebugLayer) { // InfoQueue interfaces only exist with the debug layer
 	ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&m_infoQueue)));
 	// Only break into the debugger on genuine memory corruption; errors and
 	// warnings are logged (below) so headless runs surface them instead of
@@ -1909,6 +1939,7 @@ ComPtr<ID3D12Device5> Renderer::GetDeviceForAdapter(ComPtr<IDXGIAdapter1> adapte
 	else
 	{
 		spdlog::warn("ID3D12InfoQueue1 unavailable; D3D12 messages will only reach the debugger output.");
+	}
 	}
 #endif
 

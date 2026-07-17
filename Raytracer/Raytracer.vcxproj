@@ -363,6 +363,7 @@
     <None Include="Resources\Shaders\vxpgBitonicSort.hlsl" />
     <None Include="Resources\Shaders\vxpgLightTree.hlsl" />
     <None Include="Resources\Shaders\guidedPathTracing.hlsl" />
+    <None Include="Resources\Shaders\guidedPathTracingRq.hlsl" />
     <None Include="Resources\Shaders\voxelGuidingBuild.hlsl" />
     <None Include="Resources\Shaders\superpixelBuild.hlsl" />
     <None Include="Resources\Shaders\ao.hlsl" />
@@ -504,6 +505,7 @@
     <Content Include="Resources\Shaders\guidedPathTracing.rg.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.ms.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.ah.shader" />
+    <Content Include="Resources\Shaders\guidedPathTracing.rq.shader" />
     <Content Include="Resources\Shaders\bakeClear.cs.shader" />
     <Content Include="Resources\Shaders\voxelGuidingBuild.clear.shader" />
     <Content Include="Resources\Shaders\voxelGuidingBuild.reload.shader" />

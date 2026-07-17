@@ -43,6 +43,12 @@ protected:
     void CreateGlobalRootSignature() override;
 
 private:
+    // Inline-RayQuery compute build of the integrator (ADR 0011), created
+    // lazily on first use; shares the global root signature and bindings.
+    bool UseInlineRayQuery();
+    void EnsureInlineRayQueryPso();
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_inlineRqPso;
+
     std::shared_ptr<VoxelizationPass>      m_voxelPass;
     std::shared_ptr<VoxelGuidingBuildPass> m_buildPass;
     std::shared_ptr<VxpgFingerprintPass>   m_fingerprintPass;

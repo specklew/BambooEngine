@@ -30,6 +30,40 @@ float GetShadowRayTMax(float3 shadingPoint, LightData light)
     return RAY_TMAX; // Directional — infinite
 }
 
+#ifdef GUIDED_TRACE_RQ
+
+// Inline-RayQuery backend (compute integrator, ADR 0011): same estimator as
+// the pipeline path — ACCEPT_FIRST_HIT occlusion with the ShadowHit anyhit's
+// alpha test replayed in the candidate loop.
+float TraceShadow(float3 shadingPoint, LightData light)
+{
+    RayDesc shadowRay;
+    shadowRay.Origin = shadingPoint;
+    shadowRay.Direction = GetShadowRayDirection(shadingPoint, light);
+    shadowRay.TMin = RAY_TMIN;
+    shadowRay.TMax = GetShadowRayTMax(shadingPoint, light);
+
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+    query.TraceRayInline(SceneBVH, RAY_FLAG_NONE, ~0, shadowRay);
+    while (query.Proceed())
+    {
+        if (query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+        {
+            InstanceInfo instance = g_instanceInfo[query.CandidateInstanceID()];
+            uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
+            uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
+            HitData hit = GetHitData(query.CandidatePrimitiveIndex(), vertexOffset, indexOffset,
+                                     query.CandidateTriangleBarycentrics(), instance.objectToWorld);
+            float4 albedo = SampleTextureColor(instance, hit) * instance.baseColorFactor;
+            if (albedo.a >= EPSILON)
+                query.CommitNonOpaqueTriangleHit();
+        }
+    }
+    return (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
+}
+
+#else // pipeline backend
+
 float TraceShadow(float3 shadingPoint, LightData light)
 {
     RayDesc shadowRay;
@@ -51,13 +85,13 @@ void ShadowHit(inout ShadowPayload payload : SV_RayPayload, Attributes attr)
     uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
     uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
     HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
-    
+
     float4 albedo = SampleTextureColor(hit) * instance.baseColorFactor;
     if (albedo.a < EPSILON)
     {
         IgnoreHit();
     }
-    
+
     payload.visibility = 0.0;
     AcceptHitAndEndSearch();
 }
@@ -67,5 +101,7 @@ void ShadowMiss(inout ShadowPayload payload : SV_RayPayload)
 {
     payload.visibility = 1.0;
 }
+
+#endif // GUIDED_TRACE_RQ
 
 #endif // RAYTRACER_SHADOW_HLSL
