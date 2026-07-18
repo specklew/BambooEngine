@@ -18,4 +18,11 @@ float2 Random2D(uint seed)
     );
 }
 
+// Returns float in [0, 1). Used for lobe selection, which must draw from a
+// stream independent of the direction sample to keep the estimator unbiased.
+float Random1D(uint seed)
+{
+    return float(pcg_hash(seed)) * (1.0 / 4294967296.0);
+}
+
 #endif // RANDOM_HLSL

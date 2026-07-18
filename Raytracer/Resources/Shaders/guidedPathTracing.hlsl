@@ -185,9 +185,10 @@ float3 EvalBsdfBounce(SurfaceData s, float3 dir)
     return specular + diffuse;
 }
 
-float3 SampleBsdfDir(SurfaceData s, float specularProb, float2 xi, out float pdf)
+// selector must come from a stream independent of xi; reusing a hash of xi
+// conditions the direction on the lobe choice and biases the mixture sample.
+float3 SampleBsdfDir(SurfaceData s, float specularProb, float2 xi, float selector, out float pdf)
 {
-    float selector = frac(xi.x * 7.13 + xi.y * 3.97);
     float3 dir;
     if (selector < specularProb)
     {
@@ -705,7 +706,7 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, 
         SurfaceData surface;
         surface.N         = N;
         surface.V         = V;
-        surface.NdotV     = max(dot(N, V), 0.1);
+        surface.NdotV     = max(dot(N, V), 1e-4);  // div-by-zero guard only; 0.1 floored grazing specular
         surface.F0        = lerp(DIELECTRIC_F0, albedo, metallic);
         surface.albedo    = albedo;
         surface.roughness = roughness;
@@ -730,7 +731,9 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, 
         float2 xi = Random2D(seed);
         seed = pcg_hash(seed);
 
-        float pathSelector = frac(xi.x * 7.13 + xi.y * 3.97);
+        // Independent lobe selector (see SampleBsdfDir): xi-hash reuse biases.
+        float pathSelector = Random1D(seed);
+        seed = pcg_hash(seed);
 
         float3 bounceDir;
         float3 throughput;
@@ -751,7 +754,7 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, 
             throughput = EvalDiffuseBounce(surface, kD, bounceDir);
             if (all(throughput == 0))
                 break; // invalid bounce sample — direct light at this vertex stands
-            throughput /= (1.0 - specularProb + EPSILON);
+            throughput /= (1.0 - specularProb);  // branch guarantees pathSelector>=specularProb => 1-specularProb>0
         }
 
         pathThroughput *= throughput;
@@ -795,9 +798,11 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     {
         float2 xi = Random2D(seed);
         seed = pcg_hash(seed);
+        float selector = Random1D(seed);
+        seed = pcg_hash(seed);
 
         float pdfB;
-        float3 dir = SampleBsdfDir(surface, specularProb, xi, pdfB);
+        float3 dir = SampleBsdfDir(surface, specularProb, xi, selector, pdfB);
         if (pdfB > EPSILON && dot(dir, surface.N) > 0.0)
         {
             float3 f = EvalBsdfBounce(surface, dir);
@@ -1015,7 +1020,7 @@ void GuidedIntegratorMain()
     if (dot(geometricN, V) < 0.0)
         N = -N;
 
-    float NdotV = max(dot(N, V), 0.1);
+    float NdotV = max(dot(N, V), 1e-4);  // div-by-zero guard only; 0.1 floored grazing specular
 
     SurfaceData surface;
     surface.N         = N;
@@ -1420,7 +1425,7 @@ void GuidedIntegratorMain()
                                         fuzzyWeights, fuzzyIndices, spixelFlat, seed);
     }
 
-    gOutput[launchIndex] = min(float4(accumulated / samplesPerPixel, 1.0), 100.0f);
+    gOutput[launchIndex] = float4(accumulated / samplesPerPixel, 1.0);
 }
 
 // ---- Entry points ----

@@ -257,7 +257,7 @@ void RayGen()
             SurfaceData surface;
             surface.N         = N;
             surface.V         = V;
-            surface.NdotV     = max(dot(N, V), 0.1);
+            surface.NdotV     = max(dot(N, V), 1e-4);  // div-by-zero guard only; 0.1 floored grazing specular (energy loss)
             surface.F0        = lerp(DIELECTRIC_F0, albedo, metallic);
             surface.albedo    = albedo;
             surface.roughness = roughness;
@@ -276,7 +276,10 @@ void RayGen()
             float2 xi = Random2D(seed);
             seed = pcg_hash(seed);  // advance: next bounce gets a different xi
 
-            float pathSelector = frac(xi.x * 7.13 + xi.y * 3.97);
+            // Lobe selector must be independent of xi. Reusing a hash of xi
+            // conditions the direction sample on the choice -> biased split.
+            float pathSelector = Random1D(seed);
+            seed = pcg_hash(seed);
 
             float3 bounceDir;
             float3 throughput;
@@ -297,7 +300,7 @@ void RayGen()
                 throughput = EvalDiffuseBounce(surface, kD, bounceDir);
                 if (all(throughput == 0))
                     break; // invalid bounce sample — direct light at this vertex stands
-                throughput /= (1.0 - specularProb + EPSILON);
+                throughput /= (1.0 - specularProb);  // branch guarantees pathSelector>=specularProb => 1-specularProb>0
             }
 
             // BounceHealth: classify a NaN bounce direction at this hit.
@@ -315,7 +318,7 @@ void RayGen()
         accumulated += radiance;
     }
 
-    gOutput[launchIndex] = min(float4(accumulated / samplesPerPixel, 1.0), 100.0f);
+    gOutput[launchIndex] = float4(accumulated / samplesPerPixel, 1.0);
 }
 
 [shader("anyhit")]
