@@ -46,6 +46,14 @@ struct HeadlessConfig
     // false-color, 4 = guided-sample acceptance.
     uint32_t guidingDebugView = 0;
 
+    // Bottom light-tree branch weighting (vxpg.tree.weightMode). 0 = intensity-
+    // only (default); 1 = geometry + avg-minmax distance (the paper's SLC term).
+    uint32_t treeWeightMode = 0;
+
+    // Second-bounce guiding (vxpg.secondBounce, SIByL second=true). Guides the
+    // 2nd vertex too; a 2-bounce guided estimator. Default off; needs bounces>=2.
+    bool secondBounce = false;
+
     float       defaultSeconds = 5.0f;
     std::string outputDir      = "SavedUserData/Screenshots";
 

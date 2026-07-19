@@ -332,37 +332,178 @@ int SampleSuperpixelClusterHeap(uint spixelFlat, float rnd, out GuidePdf pdfTop)
     return int(heapIndex - 32u);
 }
 
-// Descends the bottom light tree from a cluster root to a leaf, branching by
-// child intensity ratio (intensity-only: ApproxBSDFWeight / SLC distance cut,
-// ADR 0003). Node ids >= leafStartIndex (= leafCount - 1) are leaves. Returns
-// the leaf NODE id (not compactID), or -1 on a dead branch — unreachable when
-// internal intensity is an exact child sum, kept faithful to SIByL
-// TraverseLightTree (tree/shared.hlsli).
-int TraverseLightTreeToLeaf(int nodeId, uint leafStartIndex, float rnd, out GuidePdf pdfTree)
+// ---- SLC geometry/distance tree weighting (SIByL slc_common.hlsli) ----------
+// Enabled by vxpg.tree.weightMode (guidingFlags bits 5-6, decoded per pixel as
+// treeWeightMode): 0 = intensity-only, 1 = geometry bound + avg-minmax distance
+// (the paper's distanceType==2). All pure functions over a child AABB and the
+// shading point — direct ports; f16-unpacked node bounds are far coarser than
+// the geometry error here so the half precision is harmless.
+
+// Max signed distance from p to the AABB projected on dir (SIByL MaxDistAlong).
+float MaxDistAlong(float3 p, float3 dir, float3 bmin, float3 bmax)
+{
+    const float3 dirP = dir * p;
+    const float3 lo = dir * bmin - dirP;
+    const float3 hi = dir * bmax - dirP;
+    return max(lo.x, hi.x) + max(lo.y, hi.y) + max(lo.z, hi.z);
+}
+
+// Any orthonormal tangent frame of v1 (SIByL CoordinateSystem_).
+void BuildTangentFrame(float3 v1, out float3 v2, out float3 v3)
+{
+    if (abs(v1.x) > abs(v1.y)) v2 = float3(-v1.z, 0, v1.x) * rsqrt(v1.x * v1.x + v1.z * v1.z);
+    else                       v2 = float3(0, v1.z, -v1.y) * rsqrt(v1.y * v1.y + v1.z * v1.z);
+    v3 = normalize(cross(v1, v2));
+}
+
+// Min |signed distance| from p to the AABB along dir; 0 if the box straddles p
+// on dir (SIByL AbsMinDistAlong).
+float AbsMinDistAlong(float3 p, float3 dir, float3 bmin, float3 bmax)
+{
+    const float a = dot(dir, float3(bmin.x, bmin.y, bmin.z) - p);
+    const float b = dot(dir, float3(bmin.x, bmin.y, bmax.z) - p);
+    const float c = dot(dir, float3(bmin.x, bmax.y, bmin.z) - p);
+    const float d = dot(dir, float3(bmin.x, bmax.y, bmax.z) - p);
+    const float e = dot(dir, float3(bmax.x, bmin.y, bmin.z) - p);
+    const float f = dot(dir, float3(bmax.x, bmin.y, bmax.z) - p);
+    const float g = dot(dir, float3(bmax.x, bmax.y, bmin.z) - p);
+    const float h = dot(dir, float3(bmax.x, bmax.y, bmax.z) - p);
+    const bool hasPositive = a > 0 || b > 0 || c > 0 || d > 0 || e > 0 || f > 0 || g > 0 || h > 0;
+    const bool hasNegative = a < 0 || b < 0 || c < 0 || d < 0 || e < 0 || f < 0 || g < 0 || h < 0;
+    if (hasPositive && hasNegative) return 0.0f;
+    return min(min(min(abs(a), abs(b)), min(abs(c), abs(d))),
+               min(min(abs(e), abs(f)), min(abs(g), abs(h))));
+}
+
+// Upper bound on the cosine-weighted solid angle of the AABB at (p, n) — the
+// SLC "geometry term" (SIByL GeomTermBound). 0 when the box is fully below the
+// horizon of n.
+float GeomTermBound(float3 p, float3 n, float3 bmin, float3 bmax)
+{
+    const float nrmMax = MaxDistAlong(p, n, bmin, bmax);
+    if (nrmMax <= 0.0f) return 0.0f;
+    float3 t, b;
+    BuildTangentFrame(n, t, b);
+    const float yMin = AbsMinDistAlong(p, t, bmin, bmax);
+    const float zMin = AbsMinDistAlong(p, b, bmin, bmax);
+    const float hyp2 = yMin * yMin + zMin * zMin + nrmMax * nrmMax;
+    return nrmMax * rsqrt(hyp2);
+}
+
+// Cheap variant (SIByL GeomTermBoundApproximate): drops the tangent frame and the
+// two 8-corner AbsMinDistAlong passes, using the single closest-point tangential
+// offset instead. ~1/5 the per-node cost of GeomTermBound; for voxel-sized boxes
+// far from p the bound is nearly identical. Used by treeWeightMode == 2.
+float GeomTermBoundApproximate(float3 p, float3 n, float3 bmin, float3 bmax)
+{
+    const float nrmMax = MaxDistAlong(p, n, bmin, bmax);
+    if (nrmMax <= 0.0f) return 0.0f;
+    const float3 d = min(max(p, bmin), bmax) - p; // p -> closest point on the AABB
+    const float3 tng = d - dot(d, n) * n;         // tangential component vs n
+    const float hyp2 = dot(tng, tng) + nrmMax * nrmMax;
+    return nrmMax * rsqrt(hyp2);
+}
+
+float SquaredDistToClosest(float3 p, float3 bmin, float3 bmax)
+{
+    const float3 d = min(max(p, bmin), bmax) - p;
+    return dot(d, d);
+}
+
+float SquaredDistToFarthest(float3 p, float3 bmin, float3 bmax)
+{
+    const float3 d = max(abs(bmin - p), abs(bmax - p));
+    return dot(d, d);
+}
+
+// SIByL normalizedWeights: the l2 terms are SWAPPED so a nearer child (smaller
+// l2) gets the larger share. Guarded against a 0/0 (both intensGeom 0).
+float NormalizedWeights(float l2_0, float l2_1, float ig0, float ig1)
+{
+    const float ww0 = l2_1 * ig0;
+    const float ww1 = l2_0 * ig1;
+    const float denom = ww0 + ww1;
+    return (denom > 0.0f) ? ww0 / denom : 0.5f;
+}
+
+// Probability of descending to the LEFT child. Returns false only on a fully
+// dead branch (both children unreachable) — the caller drops the guided sample.
+// treeWeightMode 0 = intensity ratio (telescopes on the reverse side);
+// 1 = SLC geometry (exact GeomTermBound) + avg-minmax distance (paper);
+// 2 = same but the CHEAP GeomTermBoundApproximate (lower per-node cost).
+// SIByL EvaluateFirstChildWeight.
+bool FirstChildProb(LightTreeNode c0, LightTreeNode c1, float3 p, float3 n,
+                    uint treeWeightMode, out float prob0)
+{
+    prob0 = 0.0f;
+    const float i0 = c0.intensity;
+    const float i1 = c1.intensity;
+
+    if (treeWeightMode == 0u)
+    {
+        if (i0 == 0.0f) { if (i1 == 0.0f) return false; prob0 = 0.0f; return true; }
+        if (i1 == 0.0f) { prob0 = 1.0f; return true; }
+        prob0 = i0 / (i0 + i1);
+        return true;
+    }
+
+    const float3 c0Min = UnpackFloat3(c0.aabbMin);
+    const float3 c0Max = UnpackFloat3(c0.aabbMax);
+    const float3 c1Min = UnpackFloat3(c1.aabbMin);
+    const float3 c1Max = UnpackFloat3(c1.aabbMax);
+
+    float geom0, geom1;
+    if (treeWeightMode == 2u)
+    {
+        geom0 = GeomTermBoundApproximate(p, n, c0Min, c0Max);
+        geom1 = GeomTermBoundApproximate(p, n, c1Min, c1Max);
+    }
+    else
+    {
+        geom0 = GeomTermBound(p, n, c0Min, c0Max);
+        geom1 = GeomTermBound(p, n, c1Min, c1Max);
+    }
+
+    if (geom0 + geom1 == 0.0f) return false;
+    if (geom0 == 0.0f) { prob0 = 0.0f; return true; }
+    if (geom1 == 0.0f) { prob0 = 1.0f; return true; }
+
+    const float ig0 = i0 * geom0;
+    const float ig1 = i1 * geom1;
+
+    const float l2min0 = SquaredDistToClosest(p, c0Min, c0Max);
+    const float l2min1 = SquaredDistToClosest(p, c1Min, c1Max);
+    const float l2max0 = SquaredDistToFarthest(p, c0Min, c0Max);
+    const float l2max1 = SquaredDistToFarthest(p, c1Min, c1Max);
+
+    // avg of the closest-point and farthest-point weightings (paper).
+    const float igSum = ig0 + ig1;
+    const float wMax0 = (l2min0 == 0.0f && l2min1 == 0.0f)
+        ? ((igSum > 0.0f) ? ig0 / igSum : 0.5f)
+        : NormalizedWeights(l2min0, l2min1, ig0, ig1);
+    const float wMin0 = NormalizedWeights(l2max0, l2max1, ig0, ig1);
+    prob0 = 0.5f * (wMax0 + wMin0);
+    return true;
+}
+
+// Descends the bottom light tree from a cluster root to a leaf. Node ids >=
+// leafStartIndex (= leafCount - 1) are leaves. Returns the leaf NODE id (not
+// compactID), or -1 on a dead branch (both children unreachable at this shading
+// point — more common under geometry weighting; the guided sample is then
+// dropped and BSDF MIS carries full weight). SIByL TraverseLightTree.
+int TraverseLightTreeToLeaf(int nodeId, uint leafStartIndex, float rnd,
+                            float3 p, float3 n, uint treeWeightMode, out GuidePdf pdfTree)
 {
     pdfTree = 1.0;
     [loop] while (uint(nodeId) < leafStartIndex)
     {
         const uint leftChild  = uint(gLightTreeNodes[nodeId].leftIndex);
         const uint rightChild = uint(gLightTreeNodes[nodeId].rightIndex);
-        const float leftIntensity  = gLightTreeNodes[leftChild].intensity;
-        const float rightIntensity = gLightTreeNodes[rightChild].intensity;
 
         float probLeft;
-        if (leftIntensity == 0.0f)
-        {
-            if (rightIntensity == 0.0f)
-                return -1; // dead branch: invalid sample
-            probLeft = 0.0f;
-        }
-        else if (rightIntensity == 0.0f)
-        {
-            probLeft = 1.0f;
-        }
-        else
-        {
-            probLeft = leftIntensity / (leftIntensity + rightIntensity);
-        }
+        if (!FirstChildProb(gLightTreeNodes[leftChild], gLightTreeNodes[rightChild],
+                            p, n, treeWeightMode, probLeft))
+            return -1; // dead branch: invalid sample
 
         if (rnd < probLeft)
         {
@@ -387,6 +528,44 @@ GuidePdf PdfTraverseLightTreeIntensity(int clusterRootId, int leafNodeId)
 {
     return GuidePdf(gLightTreeNodes[leafNodeId].intensity) /
            GuidePdf(gLightTreeNodes[clusterRootId].intensity);
+}
+
+// Reverse pdf, general: geometry weighting does NOT telescope, so re-evaluate
+// the split probability at every parent from the leaf up to the cluster root,
+// multiplying the branch the path actually took. Re-uses FirstChildProb so the
+// value matches the forward walk's pdfTree exactly (consistent estimator).
+// SIByL PdfTraverseLightTree.
+GuidePdf PdfTraverseLightTree(int clusterRootId, int leafNodeId, float3 p, float3 n, uint treeWeightMode)
+{
+    if (treeWeightMode == 0u)
+        return PdfTraverseLightTreeIntensity(clusterRootId, leafNodeId);
+
+    GuidePdf pdf = 1.0;
+    int nodeId = leafNodeId;
+    if (nodeId == clusterRootId)
+        return pdf;
+
+    [loop] while (true)
+    {
+        const uint parentId = uint(gLightTreeNodes[nodeId].parentIndex);
+        if (parentId == 0xFFFFu)
+            break; // reached the whole tree's root
+        const uint leftChild  = uint(gLightTreeNodes[parentId].leftIndex);
+        const uint rightChild = uint(gLightTreeNodes[parentId].rightIndex);
+
+        float probLeft;
+        // Ignore the dead-branch bool: on a path the forward walk reached this
+        // cannot fire, and if it did FirstChildProb leaves probLeft = 0, which
+        // zeroes the pdf (BSDF MIS then takes full weight) — SIByL's behavior.
+        FirstChildProb(gLightTreeNodes[leftChild], gLightTreeNodes[rightChild],
+                       p, n, treeWeightMode, probLeft);
+        pdf *= (uint(nodeId) == leftChild) ? GuidePdf(probLeft) : GuidePdf(1.0 - probLeft);
+
+        nodeId = int(parentId);
+        if (nodeId == clusterRootId)
+            break;
+    }
+    return pdf;
 }
 
 // Mixture probability of the fuzzy parent set picking `cluster`: sum over the
@@ -420,7 +599,8 @@ GuidePdf FuzzyClusterMixturePdf(float4 fuzzyWeights, int4 fuzzyIndices, int clus
 // forward walk truly cannot reach them), or every parent heap empty — which
 // hands the BSDF sample full MIS weight.
 // (vxguiding-gi.slang strategy 5 reverse block + strategy 7 fuzzy top pdf.)
-GuidePdf EvalTreeGuidePdf(float4 fuzzyWeights, int4 fuzzyIndices, float3 shadingPos, float3 hitPos)
+GuidePdf EvalTreeGuidePdf(float4 fuzzyWeights, int4 fuzzyIndices, float3 shadingPos,
+                          float3 shadingNormal, float3 hitPos, uint treeWeightMode)
 {
     int3 v = int3(floor((hitPos - voxGridMin) / voxVoxelSize));
     if (any(v < 0) || any(v >= int(voxGridDim)))
@@ -444,7 +624,7 @@ GuidePdf EvalTreeGuidePdf(float4 fuzzyWeights, int4 fuzzyIndices, float3 shading
     const int clusterRootId = gClusterRootNodes[cluster];
     if (leafNodeId < 0 || clusterRootId < 0)
         return 0.0;
-    const GuidePdf pdfTree = PdfTraverseLightTreeIntensity(clusterRootId, leafNodeId);
+    const GuidePdf pdfTree = PdfTraverseLightTree(clusterRootId, leafNodeId, shadingPos, shadingNormal, treeWeightMode);
 
     const float pdfDir = PdfVoxelSolidAngle(shadingPos, v);
     return pdfTop * pdfTree * GuidePdf(pdfDir);
@@ -765,6 +945,217 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, 
     return radiance;
 }
 
+// ---- Second-bounce guiding (SIByL strategy-6 `second=true`) -----------------
+// SIByL guides the SECOND path vertex too, via the GLOBAL irradiance guide
+// (VG_Irradiance: traverse the light tree from the root node 0 by intensity, no
+// superpixel/cluster/fuzzy top level). Enabled by vxpg.secondBounce
+// (guidingFlags bit 7). This turns the estimator into a 2-bounce guided path
+// (vertex1 MIS -> NEE at vertex2 -> vertex2 MIS -> NEE at vertex3), so run the
+// A/B at bounces == 2. Deviation from Bamboo's flat N-bounce tail (ADR 0007),
+// gated off by default.
+
+// One indirect segment: trace a ray, return terminal NEE at the hit (SIByL
+// EvaluateIndirectLight) or the sky. hitPos/didHit feed the guide semi-NEE gate
+// and the reverse pdf.
+float3 TraceOneBounceNEE(float3 origin, float3 dir, inout uint seed, out float3 hitPos, out bool didHit)
+{
+    hitPos = float3(0, 0, 0);
+    didHit = false;
+
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = dir;
+    ray.TMin = RAY_TMIN;
+    ray.TMax = RAY_TMAX;
+
+    GuidedPayload p = TraceBounceRay(ray);
+    if (p.hitFlag == 0u)
+        return IndirectSkyRadiance(dir);
+
+    InstanceInfo instance = g_instanceInfo[p.instanceId];
+    GeometryInfo geometry = g_geometryInfo[instance.geometryIndex];
+    HitData hit = GetHitData(p.primitiveId, geometry.vertexOffset, geometry.indexOffset,
+                             p.barycentrics, instance.objectToWorld);
+
+    float3 albedo = SampleTextureColor(instance, hit).rgb * instance.baseColorFactor.rgb;
+    float2 rm = SampleRoughnessMetallic(instance, hit);
+    float roughness = max(rm.x, MIN_ROUGHNESS);
+    float metallic = rm.y;
+
+    float3 N = SampleWorldSpaceNormal(instance, hit);
+    float3 V = -dir;
+    float3 geometricN = normalize(mul((float3x3)instance.objectToWorld, hit.tri_normal));
+    if (dot(geometricN, V) < 0.0)
+        N = -N;
+
+    SurfaceData surface;
+    surface.N         = N;
+    surface.V         = V;
+    surface.NdotV     = max(dot(N, V), 1e-4);
+    surface.F0        = lerp(DIELECTRIC_F0, albedo, metallic);
+    surface.albedo    = albedo;
+    surface.roughness = roughness;
+    surface.metallic  = metallic;
+
+    hitPos = hit.position;
+    didHit = true;
+    return CalculateDirectLightning(hit, surface);
+}
+
+// Reverse pdf of the GLOBAL irradiance guide at a BSDF sample's hit voxel:
+// P(select the hit voxel from tree root 0, intensity-only) x P(dir | voxel).
+// 0 for sky / unlit / out-of-tree hits -> BSDF sample takes full MIS weight.
+GuidePdf EvalGlobalGuidePdf(float3 shadingPos, float3 shadingNormal, float3 hitPos)
+{
+    int3 v = int3(floor((hitPos - voxGridMin) / voxVoxelSize));
+    if (any(v < 0) || any(v >= int(voxGridDim)))
+        return 0.0;
+    const uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
+    const int compactID = gVoxInverseIndex[flatId];
+    if (compactID < 0 || uint(compactID) >= LitVoxelCount())
+        return 0.0;
+    const int leafNodeId = gCompactToLeaf[compactID];
+    if (leafNodeId < 0)
+        return 0.0;
+    const GuidePdf pdfTree = PdfTraverseLightTreeIntensity(0, leafNodeId);
+    const float pdfDir = PdfVoxelSolidAngle(shadingPos, v);
+    return pdfTree * GuidePdf(pdfDir);
+}
+
+// Two-sample MIS (BSDF + global irradiance guide) at the SECOND vertex; returns
+// the terminal indirect radiance from that vertex (NEE at the third vertex).
+// Mirrors ShadeFirstVertex but with the global guide and a single terminal
+// segment (SIByL secondbounce block, gi.slang:445-503).
+float3 ShadeSecondVertex(HitData hit2, SurfaceData surf2, float specularProb, inout uint seed)
+{
+    const uint litVoxelCount = LitVoxelCount();
+    float3 radiance = float3(0, 0, 0);
+
+    // BSDF strategy
+    {
+        float2 xi = Random2D(seed); seed = pcg_hash(seed);
+        float selector = Random1D(seed); seed = pcg_hash(seed);
+        float pdfB;
+        float3 dir = SampleBsdfDir(surf2, specularProb, xi, selector, pdfB);
+        if (pdfB > EPSILON && dot(dir, surf2.N) > 0.0)
+        {
+            float3 f = EvalBsdfBounce(surf2, dir);
+            if (any(f > 0))
+            {
+                float3 hp; bool dh;
+                float3 incoming = TraceOneBounceNEE(hit2.position, dir, seed, hp, dh);
+                float pdfG = (litVoxelCount > 0u && dh)
+                    ? float(EvalGlobalGuidePdf(hit2.position, surf2.N, hp)) : 0.0;
+                if (isnan(pdfG)) pdfG = 0.0;
+                float weight = MisWeight(pdfB, pdfG);
+                radiance += f * dot(surf2.N, dir) * incoming * weight / pdfB;
+            }
+        }
+    }
+
+    // Guide strategy (global irradiance tree, root node 0, intensity-only)
+    if (litVoxelCount > 0u)
+    {
+        float2 walkXi = Random2D(seed); seed = pcg_hash(seed);
+        float2 quadXi = Random2D(seed); seed = pcg_hash(seed);
+        float2 faceXi = Random2D(seed); seed = pcg_hash(seed);
+
+        GuidePdf pdfTree;
+        const int leafNodeId = TraverseLightTreeToLeaf(0, litVoxelCount - 1u, walkXi.x,
+                                                       hit2.position, surf2.N, 0u, pdfTree);
+        if (leafNodeId >= 0)
+        {
+            const uint compactID = uint(gLightTreeNodes[leafNodeId].voxelIndex);
+            const int3 v = VoxelCoordFromFlatId(gVoxCompactIds[compactID]);
+            const int3 currVox = int3(floor((hit2.position - voxGridMin) / voxVoxelSize));
+            // Skip a degenerate self-voxel pick (SIByL SampleVoxelGuiding guard).
+            if (!all(v == currVox))
+            {
+                float pdfDir; float3 aabbMin, aabbMax;
+                float3 dir = SampleVoxelSolidAngle(hit2.position, v, float3(faceXi.x, quadXi),
+                                                   pdfDir, aabbMin, aabbMax);
+                const GuidePdf pdfG = pdfTree * GuidePdf(pdfDir);
+                if (pdfG > 0.0 && dot(dir, surf2.N) > 0.0)
+                {
+                    float3 f = EvalBsdfBounce(surf2, dir);
+                    if (any(f > 0))
+                    {
+                        float3 hp; bool dh;
+                        float3 incoming = TraceOneBounceNEE(hit2.position, dir, seed, hp, dh);
+                        bool accepted = dh && all(hp >= aabbMin) && all(hp <= aabbMax);
+                        if (accepted)
+                        {
+                            float pdfBAtDir = PdfBsdf(surf2, specularProb, dir);
+                            if (isnan(pdfBAtDir)) pdfBAtDir = 0.0;
+                            float weight = MisWeight(float(pdfG), pdfBAtDir);
+                            radiance += f * dot(surf2.N, dir) * incoming * weight / float(pdfG);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return radiance;
+}
+
+// BSDF-branch continuation of vertex 1 WITH second-bounce guiding: trace to
+// vertex 2, add its NEE, then the guided second-vertex MIS (terminal). Replaces
+// TraceIndirect for that branch when vxpg.secondBounce is on. hitPos/didHit are
+// vertex 2 (the vertex-1 guide semi-NEE gate + reverse pdf still key on it).
+float3 TraceIndirectSecondGuide(float3 origin, float3 dir, inout uint seed, bool writeVpl,
+                                out float3 hitPos, out bool didHit)
+{
+    hitPos = float3(0, 0, 0);
+    didHit = false;
+
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = dir;
+    ray.TMin = RAY_TMIN;
+    ray.TMax = RAY_TMAX;
+
+    GuidedPayload p = TraceBounceRay(ray);
+    if (p.hitFlag == 0u)
+        return IndirectSkyRadiance(dir);
+
+    InstanceInfo instance = g_instanceInfo[p.instanceId];
+    GeometryInfo geometry = g_geometryInfo[instance.geometryIndex];
+    HitData hit = GetHitData(p.primitiveId, geometry.vertexOffset, geometry.indexOffset,
+                             p.barycentrics, instance.objectToWorld);
+
+    float3 albedo = SampleTextureColor(instance, hit).rgb * instance.baseColorFactor.rgb;
+    float2 rm = SampleRoughnessMetallic(instance, hit);
+    float roughness = max(rm.x, MIN_ROUGHNESS);
+    float metallic = rm.y;
+    float3 N = SampleWorldSpaceNormal(instance, hit);
+    float3 V = -dir;
+    float3 geometricN = normalize(mul((float3x3)instance.objectToWorld, hit.tri_normal));
+    if (dot(geometricN, V) < 0.0)
+        N = -N;
+
+    SurfaceData surface;
+    surface.N         = N;
+    surface.V         = V;
+    surface.NdotV     = max(dot(N, V), 1e-4);
+    surface.F0        = lerp(DIELECTRIC_F0, albedo, metallic);
+    surface.albedo    = albedo;
+    surface.roughness = roughness;
+    surface.metallic  = metallic;
+
+    hitPos = hit.position;
+    didHit = true;
+
+    const float3 directLight = CalculateDirectLightning(hit, surface);
+    if (writeVpl && voxReuseGiVpl != 0u)
+        InjectVplFromBounce(hit.position, N, directLight);
+
+    float3 F = FresnelSchlick(surface.NdotV, surface.F0);
+    float specularProb = (F.r + F.g + F.b) / 3.0;
+
+    return directLight + ShadeSecondVertex(hit, surface, specularProb, seed);
+}
+
 // ---- First path vertex: two-sample MIS between BSDF and the tree guide ----
 // Runs in raygen on the VBuffer-reconstructed hit (ADR 0004); deeper bounces
 // continue through the closest hit. debugView = guidingFlags bits 1-4
@@ -781,6 +1172,14 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     // Guide-dead pixels (no lit voxels, or every fuzzy parent's heap empty) run
     // BSDF-only at full MIS weight — no uniform fallback (faithful, see header).
     const bool guideAlive = (litVoxelCount > 0u) && any(fuzzyWeights > 0.0);
+
+    // Bottom light-tree branch weighting (vxpg.tree.weightMode, guidingFlags
+    // bits 5-6): 0 = intensity-only, 1 = geometry + avg-minmax distance (paper).
+    const uint treeWeightMode = (guidingFlags >> 5) & 3u;
+    // Second-bounce guiding (vxpg.secondBounce, bit 7): also MIS-guide the second
+    // vertex (SIByL `second=true`). Turns the BSDF branch into a 2-bounce guided
+    // path — meaningful only at bounces >= 2.
+    const bool guideSecondBounce = ((guidingFlags >> 7) & 1u) != 0u && numBounces >= 2u;
 
     float3 radiance = (debugView >= 3u) ? float3(0, 0, 0)
                                         : CalculateDirectLightning(hit, surface);
@@ -810,14 +1209,16 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
             {
                 float3 hitPos;
                 bool didHit;
-                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit);
+                float3 incoming = guideSecondBounce
+                    ? TraceIndirectSecondGuide(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit)
+                    : TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit);
 
                 // Guide pdf at the BSDF sample, evaluated through the reverse
                 // chain at the ray's hit voxel (0 for misses / unreachable
                 // voxels -> weight 1 for this sample).
                 float pdfGAtDir = 0.0;
                 if (guideAlive && didHit)
-                    pdfGAtDir = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices, hit.position, hitPos));
+                    pdfGAtDir = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices, hit.position, surface.N, hitPos, treeWeightMode));
                 if (isnan(pdfGAtDir)) pdfGAtDir = 0.0; // SIByL w2 guard
 
                 float weight = MisWeight(pdfB, pdfGAtDir);
@@ -869,7 +1270,8 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         {
             GuidePdf pdfTree;
             const int leafNodeId = TraverseLightTreeToLeaf(
-                clusterRootId, litVoxelCount - 1u, walkXi.y, pdfTree);
+                clusterRootId, litVoxelCount - 1u, walkXi.y,
+                hit.position, surface.N, treeWeightMode, pdfTree);
             if (leafNodeId < 0)
             {
                 // SIByL strategy 5 wipes the STRATEGY contributions on a dead
@@ -1032,6 +1434,7 @@ void GuidedIntegratorMain()
     surface.metallic  = metallic;
 
     uint debugView = (guidingFlags >> 1) & 15u;
+    const uint treeWeightMode = (guidingFlags >> 5) & 3u;
 
     // View 5: inverse-index round-trip. For the primary hit's voxel, look up
     // gInverseIndex -> compactID and confirm gCompactIds maps back to the same
@@ -1320,7 +1723,8 @@ void GuidedIntegratorMain()
                 {
                     GuidePdf pdfTree;
                     const int leafNodeId = TraverseLightTreeToLeaf(
-                        clusterRootId, litVoxelCount - 1u, xi.y, pdfTree);
+                        clusterRootId, litVoxelCount - 1u, xi.y,
+                        hit.position, N, treeWeightMode, pdfTree);
                     if (leafNodeId < 0)
                     {
                         col = float3(1, 0, 1); // dead branch under a live root
@@ -1339,7 +1743,7 @@ void GuidedIntegratorMain()
                         const int clusterBack = (compactID < litVoxelCount)
                             ? gVoxelClusterAssignments[compactID] : -1;
                         const GuidePdf pdfTreeReverse = (leafBack >= 0)
-                            ? PdfTraverseLightTreeIntensity(clusterRootId, leafBack) : 0.0;
+                            ? PdfTraverseLightTree(clusterRootId, leafBack, hit.position, N, treeWeightMode) : 0.0;
 
                         const float forward = float(pdfTop * pdfTree);
                         const float reverse = float(pdfTopReverse * pdfTreeReverse);
