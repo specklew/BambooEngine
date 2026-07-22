@@ -111,6 +111,10 @@ static AutoCVarEnum g_raytraceDebugMode("renderer.raytraceDebugMode", "Raytracin
                                         CVarFlags::None, FormatDebugViewDocs<RaytraceDebugMode>(kRaytraceDebugModeDocs));
 static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world position", {0.0f, 0.0f, -10.0f});
 static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
+// Opt-in stripped raygen (debug-view code compiled out). Measured SLOWER on
+// the current AMD RDNA driver (see the variant-sync block in Update); kept for
+// A/Bs on other vendors/drivers where the dead-code footprint may win.
+static AutoCVarInt g_raygenCleanVariant("renderer.raygenCleanVariant", "1 = compile raygen without debug-view code (measured slower on RDNA)", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);
@@ -380,6 +384,25 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	if (key_state.F2)
 	{
 		OnShaderReload();
+	}
+
+	// Debug-view shader variant sync. Default keeps the view code compiled in:
+	// measured FASTER on the current AMD RDNA driver (interleaved A/B veach-ajar
+	// Deep Light 3s: views-in PT 3884/3874/3823, VXPG 833/826/832 vs stripped
+	// PT 3653/3656/3588/3556, VXPG 762/764/763/760 — stripping costs 6-8%,
+	// suspected driver wave-size heuristic flip, cf. ADR 0011 wave64 -5%).
+	// renderer.raygenCleanVariant=1 opts into the stripped raygen for vendor
+	// A/Bs; an active debug-view CVar always forces the view code in. A
+	// transition swaps the sidecar (GetTechniqueDesc) and goes through the full
+	// OnShaderReload path (flush + pipeline/SBT rebuild), same as F2 — rare.
+	if (!m_rasterize)
+	{
+		const bool viewActive = m_raytracePass->RequiredVxpgStage() != VxpgStage::None
+			? g_guidingDebugView.Get() != GuidingDebugView::None
+			: g_raytraceDebugMode.Get() != RaytraceDebugMode::None;
+		const bool wantsDebugViews = viewActive || g_raygenCleanVariant.Get() == 0;
+		if (m_raytracePass->SetDebugViewsCompiled(wantsDebugViews))
+			OnShaderReload();
 	}
 
 	// Sync camera state back to CVars (camera → CVar)
@@ -790,11 +813,16 @@ void Renderer::SetupDeviceAndDebug()
 
 	// DRED: on device-removed, ThrowIfFailed dumps auto-breadcrumbs (which
 	// command in which command list hung/faulted) + page-fault allocation info.
-	ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dredSettings;
-	if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dredSettings))))
+	// Breadcrumbs inject per-command marker writes driver-side, so gate on the
+	// same switch as the debug layer — headless benchmark runs stay untaxed.
+	if (g_enableDebugLayer)
 	{
-		dredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-		dredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+		ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dredSettings;
+		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dredSettings))))
+		{
+			dredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+			dredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+		}
 	}
 #endif
 	

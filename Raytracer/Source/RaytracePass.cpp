@@ -79,6 +79,14 @@ void RaytracePass::OnShaderReload()
     CreateShaderBindingTable();
 }
 
+bool RaytracePass::SetDebugViewsCompiled(bool enabled)
+{
+    if (m_compileDebugViews == enabled)
+        return false;
+    m_compileDebugViews = enabled;
+    return true;
+}
+
 void RaytracePass::OnSceneChange(std::shared_ptr<Scene> scene)
 {
     spdlog::debug("Scene change for Ray Tracing...");
