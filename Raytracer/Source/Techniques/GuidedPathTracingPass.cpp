@@ -236,7 +236,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
                                          voxelRepresentativeRange, vplPositionRange, vbufferRange, clusterMaskRange,
                                          spixelIndexRange, fuzzyWeightRange, fuzzyIndexRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[20];
+    CD3DX12_ROOT_PARAMETER rootParameters[22];
     rootParameters[0].InitAsDescriptorTable(16, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
@@ -257,8 +257,10 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     rootParameters[17].InitAsUnorderedAccessView(17, 0); // Top-level importance heap (sampling + view 12)
     rootParameters[18].InitAsUnorderedAccessView(18, 0); // Live voxel bound min (compact-bound guide sampling)
     rootParameters[19].InitAsUnorderedAccessView(19, 0); // Live voxel bound max (compact-bound guide sampling)
+    rootParameters[20].InitAsUnorderedAccessView(22, 0); // Per-tile adaptive guide q (one-sample MIS, ADR 0015)
+    rootParameters[21].InitAsUnorderedAccessView(23, 0); // Per-tile strategy stats (one-sample MIS, ADR 0015)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(20, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(22, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -269,6 +271,46 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     ThrowIfFailed(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
     ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_globalRootSignature)));
     m_globalRootSignature->SetName(L"GuidedPathTracing GlobalRootSig");
+
+    // Compute PSOs are validated against the root signature they were created
+    // with; a rebuilt signature (variant reload) must invalidate them or a
+    // later dispatch pairs a stale-layout PSO with the new signature.
+    m_inlineRqPso.Reset();
+    m_adaptiveQUpdatePso.Reset();
+}
+
+void GuidedPathTracingPass::EnsureAdaptiveQResources(uint32_t width, uint32_t height)
+{
+    const uint32_t tilesPerRow    = (width + 15) / 16;
+    const uint32_t tilesPerColumn = (height + 15) / 16;
+    if (m_tileGuideQ && tilesPerRow == m_tileGridWidth && tilesPerColumn == m_tileGridHeight)
+        return;
+    m_tileGridWidth  = tilesPerRow;
+    m_tileGridHeight = tilesPerColumn;
+    const size_t tileCount = size_t(tilesPerRow) * tilesPerColumn;
+    m_tileGuideQ = std::make_unique<RWStructuredBuffer<float>>(
+        m_device, tileCount, L"GuidedPT TileGuideQ");
+    m_tileStrategyStats = std::make_unique<RWStructuredBuffer<uint32_t>>(
+        m_device, tileCount * 2, L"GuidedPT TileStrategyStats");
+    // Fresh buffers hold undefined data: both shaders treat out-of-range q as
+    // 0.5 and the update kernel clears stats after every read, so one frame
+    // self-heals — no CPU-side init pass needed.
+}
+
+void GuidedPathTracingPass::EnsureAdaptiveQUpdatePso()
+{
+    if (m_adaptiveQUpdatePso)
+        return;
+
+    auto& rm = ResourceManager::Get();
+    auto handle = rm.GetOrLoadShader(AssetId("resources/shaders/vxpgAdaptiveQ.update.shader"));
+    auto blob = rm.shaders.GetResource(handle).bytecode;
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
+    desc.pRootSignature = m_globalRootSignature.Get();
+    desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
+    ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&m_adaptiveQUpdatePso)));
+    m_adaptiveQUpdatePso->SetName(L"GuidedPT AdaptiveQ Update PSO");
 }
 
 void GuidedPathTracingPass::Render()
@@ -307,6 +349,9 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootUnorderedAccessView(17, m_lightTreePass->GetSuperpixelClusterHeapBufferVA());
     m_commandList->SetComputeRootUnorderedAccessView(18, m_buildPass->GetLiveBoundMinBuffer()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(19, m_buildPass->GetLiveBoundMaxBuffer()->GetGPUVirtualAddress());
+    EnsureAdaptiveQResources(Window::Get().GetWidth(), Window::Get().GetHeight());
+    m_commandList->SetComputeRootUnorderedAccessView(20, m_tileGuideQ->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(21, m_tileStrategyStats->GetGPUVirtualAddress());
 
     {
         CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -346,6 +391,20 @@ void GuidedPathTracingPass::Render()
 
         m_commandList->SetPipelineState1(m_rtStateObject.Get());
         m_commandList->DispatchRays(&desc);
+    }
+
+    // Adaptive-q update (ADR 0015): fold this frame's per-tile strategy stats
+    // into the guide-selection probability the NEXT frame's coin reads, then
+    // clear the stats. Root bindings persist from the dispatch above (same
+    // compute root signature).
+    if (m_compileOneSampleMis)
+    {
+        EnsureAdaptiveQUpdatePso();
+        m_tileStrategyStats->UavBarrier(m_commandList.Get());
+        m_commandList->SetPipelineState(m_adaptiveQUpdatePso.Get());
+        const uint32_t tileCount = m_tileGridWidth * m_tileGridHeight;
+        m_commandList->Dispatch((tileCount + 63) / 64, 1, 1);
+        m_tileGuideQ->UavBarrier(m_commandList.Get());
     }
 
     {

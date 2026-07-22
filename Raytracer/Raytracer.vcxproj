@@ -506,6 +506,8 @@
     <Content Include="Resources\Shaders\guidedPathTracing.rg.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.rg.clean.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.rg.onesample.shader" />
+    <Content Include="Resources\Shaders\vxpgAdaptiveQ.hlsl" />
+    <Content Include="Resources\Shaders\vxpgAdaptiveQ.update.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.ms.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.ah.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.rq.shader" />

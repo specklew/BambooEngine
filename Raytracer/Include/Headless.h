@@ -59,6 +59,14 @@ struct HeadlessConfig
     // SIByL-faithful).
     bool oneSampleMis = false;
 
+    // Adaptive per-tile selection probability for one-sample MIS
+    // (vxpg.oneSample.adaptiveQ). Only meaningful with oneSampleMis true.
+    bool oneSampleAdaptiveQ = true;
+
+    // Injection reuse from GI BSDF samples (vxpg.injection.reuseGiSamples,
+    // ADR 0009). false = dedicated injection pass every frame.
+    bool injectionReuse = true;
+
     float       defaultSeconds = 5.0f;
     std::string outputDir      = "SavedUserData/Screenshots";
 
