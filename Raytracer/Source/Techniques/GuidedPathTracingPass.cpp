@@ -80,7 +80,9 @@ TechniqueDesc GuidedPathTracingPass::GetTechniqueDesc() const
 {
     TechniqueDesc desc;
     desc.shaders = {
-            {"resources/shaders/guidedPathTracing.rg.shader",   L"GuidedRayGen", ShaderRole::RayGen},
+            {m_compileDebugViews ? "resources/shaders/guidedPathTracing.rg.shader"
+                                 : "resources/shaders/guidedPathTracing.rg.clean.shader",
+                                                                L"GuidedRayGen", ShaderRole::RayGen},
             {"resources/shaders/guidedPathTracing.ms.shader",   L"GuidedMiss",   ShaderRole::Miss},
             {"resources/shaders/raytracing.shadowmiss.shader",  L"ShadowMiss",   ShaderRole::Miss},
             {"resources/shaders/guidedPathTracing.ch.shader",   L"GuidedHit",    ShaderRole::ClosestHit},

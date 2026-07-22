@@ -10,6 +10,14 @@
 #include "RaytraceDebugMode.h"
 #include "RaytraceDebugViews.hlsl"
 
+// 1 = debug-view branches compiled in (default; interactive debug variant),
+// 0 = clean benchmark variant (raytracing.rg.clean.shader). The CVar-driven
+// branches are wave-uniform and cheap at runtime; compiling them out removes
+// the dead code's register/I-cache footprint from the hot raygen.
+#ifndef RT_DEBUG_VIEWS
+#define RT_DEBUG_VIEWS 1
+#endif
+
 // Minimal hit-ID payload (ADR 0007): the closest hit reports WHAT was hit,
 // raygen reconstructs the surface and shades in the bounce loop. The shared
 // RaytracingUtils Payload stays for the AO technique.
@@ -243,6 +251,7 @@ void RayGen()
             if (dot(geometricN, V) < 0.0)
                 N = -N;
 
+#if RT_DEBUG_VIEWS
             // RT debug views; paint and stop if a mode handles this hit.
             RtDebugData rtDebug;
             rtDebug.N = N;
@@ -253,6 +262,7 @@ void RayGen()
                 radiance += pathThroughput * debugColor;
                 break;
             }
+#endif
 
             SurfaceData surface;
             surface.N         = N;
@@ -303,12 +313,14 @@ void RayGen()
                 throughput /= (1.0 - specularProb);  // branch guarantees pathSelector>=specularProb => 1-specularProb>0
             }
 
+#if RT_DEBUG_VIEWS
             // BounceHealth: classify a NaN bounce direction at this hit.
             if (debugMode == 2)
             {
                 radiance += pathThroughput * BounceHealthColor(bounceDir, N, roughness);
                 break;
             }
+#endif
 
             pathThroughput *= throughput;
             rayOrigin = hit.position;

@@ -33,6 +33,12 @@ public:
     void OnShaderReload();
     void OnSceneChange(std::shared_ptr<Scene> scene);
 
+    // Debug-view shader variant switch: true compiles the raygen with the
+    // debug-view branches, false picks the clean benchmark variant. Returns
+    // true when the value changed — caller then owes a pipeline rebuild
+    // (Renderer::OnShaderReload; GPU must be idle before the state object swap).
+    bool SetDebugViewsCompiled(bool enabled);
+
     const Microsoft::WRL::ComPtr<ID3D12Resource>& GetOutputResource() const { return m_outputResource; }
 
     // Technique registry — populated via REGISTER_RAYTRACE_TECHNIQUE macro
@@ -89,6 +95,12 @@ protected:
 
     std::shared_ptr<ShaderBindingTable> m_shaderBindingTable;
     std::shared_ptr<Scene>              m_currentScene;
+
+    // Default true = views-in raygen, matching renderer.raygenCleanVariant's
+    // default 0 so startup skips a rebuild. Views-in measured FASTER on the
+    // current RDNA driver (Renderer variant-sync block has the numbers);
+    // GetTechniqueDesc overrides pick the rg sidecar off this flag.
+    bool m_compileDebugViews = true;
 
     D3D12_CPU_DESCRIPTOR_HANDLE m_geometryInfoHandle = {};
 

@@ -5,7 +5,9 @@ TechniqueDesc PathTracingPass::GetTechniqueDesc() const
 {
     TechniqueDesc desc;
     desc.shaders = {
-            {"resources/shaders/raytracing.rg.shader",          L"RayGen",     ShaderRole::RayGen},
+            {m_compileDebugViews ? "resources/shaders/raytracing.rg.shader"
+                                 : "resources/shaders/raytracing.rg.clean.shader",
+                                                                L"RayGen",     ShaderRole::RayGen},
             {"resources/shaders/raytracing.ms.shader",          L"Miss",       ShaderRole::Miss},
             {"resources/shaders/raytracing.ch.shader",          L"Hit",        ShaderRole::ClosestHit},
             {"resources/shaders/raytracing.ah.shader",          L"AnyHit",     ShaderRole::AnyHit},

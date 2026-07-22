@@ -26,6 +26,14 @@
 #include "LightTreeNode.hlsl"
 #include "SphericalQuad.hlsl"
 
+// 1 = guiding debug views 1-14 compiled in (default; interactive debug
+// variant), 0 = clean benchmark variant (guidedPathTracing.rg.clean.shader):
+// debugView folds to constant 0, so every view branch and the view-5..14
+// blocks drop out of the raygen entirely.
+#ifndef GUIDING_DEBUG_VIEWS
+#define GUIDING_DEBUG_VIEWS 1
+#endif
+
 // Guide-pdf precision switch. SIByL carries the pdf chain in double; consumer
 // GPUs run FP64 at 1/16 (RDNA) to 1/64 (GeForce) of FP32 rate and doubles
 // double the register footprint of the raygen. Float survives the telescoped
@@ -1369,6 +1377,7 @@ void GuidedIntegratorMain()
     uint2 dims = gLaunchDims;
     uint pixelId = launchIndex.x + launchIndex.y * dims.x;
 
+#if GUIDING_DEBUG_VIEWS
     // View 7: per-pixel VPL buffer — decode its octahedral normal directly,
     // no rays needed. Black where the injection bounce missed (buffer zero).
     if (((guidingFlags >> 1) & 15u) == 7u)
@@ -1380,6 +1389,7 @@ void GuidedIntegratorMain()
         gOutput[launchIndex] = float4(col, 1.0);
         return;
     }
+#endif
 
     // ADR 0009: this raygen owns the per-pixel VPL slot — zero it up front so
     // pixels whose BSDF bounce misses (or never traces: sky, guide debug
@@ -1433,9 +1443,14 @@ void GuidedIntegratorMain()
     surface.roughness = roughness;
     surface.metallic  = metallic;
 
+#if GUIDING_DEBUG_VIEWS
     uint debugView = (guidingFlags >> 1) & 15u;
+#else
+    const uint debugView = 0u; // folds every view branch out of the hot path
+#endif
     const uint treeWeightMode = (guidingFlags >> 5) & 3u;
 
+#if GUIDING_DEBUG_VIEWS
     // View 5: inverse-index round-trip. For the primary hit's voxel, look up
     // gInverseIndex -> compactID and confirm gCompactIds maps back to the same
     // voxel. green = consistent, red = mismatch (bug), black = inactive voxel.
@@ -1797,6 +1812,7 @@ void GuidedIntegratorMain()
         gOutput[launchIndex] = float4(col, 1.0);
         return;
     }
+#endif // GUIDING_DEBUG_VIEWS
 
     float3 F = FresnelSchlick(NdotV, surface.F0);
     float specularProb = (F.r + F.g + F.b) / 3.0;

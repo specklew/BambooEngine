@@ -2,6 +2,7 @@
 #include "ShaderCompilation.h"
 
 #include <filesystem>
+#include <sstream>
 
 #include "Constants.h"
 #include "Utils/Utils.h"
@@ -39,9 +40,22 @@ ComPtr<IDxcBlob> CompileShader(const ShaderMetadata& meta)
 	const std::unique_ptr<wchar_t> path = std::unique_ptr<wchar_t>(ConvertToWideString(fullPath));
 	const std::unique_ptr<wchar_t> entrypoint = std::unique_ptr<wchar_t>(ConvertToWideString(meta.szEntrypoint));
 	const std::unique_ptr<wchar_t> target = std::unique_ptr<wchar_t>(ConvertToWideString(meta.szTarget));
-	const std::unique_ptr<wchar_t> userDefines = meta.szDefines? std::unique_ptr<wchar_t>(ConvertToWideString(meta.szDefines)) : nullptr;
+	// szDefines holds space-separated DXC tokens ("-D MyDefine=1 -D another=2").
+	// Each must reach Compile() as its own argument — a single string with
+	// internal spaces is one malformed option DXC silently mis-parses. Tokens
+	// are collected fully before args takes c_str() pointers (vector growth
+	// moves the strings).
+	std::vector<std::wstring> userDefineTokens;
+	if (meta.szDefines[0] != '\0')
+	{
+		const std::unique_ptr<wchar_t> defines(ConvertToWideString(meta.szDefines));
+		std::wistringstream stream(defines.get());
+		std::wstring token;
+		while (stream >> token)
+			userDefineTokens.push_back(token);
+	}
 	wchar_t standardDefines[64]{};
-	const int charsWritten = swprintf(standardDefines, _countof(standardDefines), L"-D NUM_TEXTURES=%d", Constants::Graphics::MAX_TEXTURES);
+	const int charsWritten = swprintf(standardDefines, _countof(standardDefines), L"-DNUM_TEXTURES=%d", Constants::Graphics::MAX_TEXTURES);
 	assert(charsWritten > 0);
 
 	std::vector<LPCWSTR> args = {
@@ -67,9 +81,9 @@ ComPtr<IDxcBlob> CompileShader(const ShaderMetadata& meta)
 		}
 	}
 
-	if (userDefines)
+	for (const std::wstring& token : userDefineTokens)
 	{
-		args.push_back(userDefines.get());
+		args.push_back(token.c_str());
 	}
 
 	// Open source file.
