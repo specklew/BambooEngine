@@ -87,6 +87,14 @@ bool RaytracePass::SetDebugViewsCompiled(bool enabled)
     return true;
 }
 
+bool RaytracePass::SetOneSampleMisCompiled(bool enabled)
+{
+    if (m_compileOneSampleMis == enabled)
+        return false;
+    m_compileOneSampleMis = enabled;
+    return true;
+}
+
 void RaytracePass::OnSceneChange(std::shared_ptr<Scene> scene)
 {
     spdlog::debug("Scene change for Ray Tracing...");

@@ -161,6 +161,12 @@ static AutoCVarInt   g_guidingTreeWeightMode("vxpg.tree.weightMode", "Bottom lig
 // irradiance guide, turning the BSDF branch into a 2-bounce guided path.
 // Meaningful only at bounces >= 2; default off. Rides guidingFlags bit 7.
 static AutoCVarInt   g_guidingSecondBounce("vxpg.secondBounce", "Also MIS-guide the second path vertex (SIByL second=true); needs bounces >= 2", 0, CVarFlags::EditCheckbox);
+// One-sample MIS at the first vertex (ADR 0015, deviation from SIByL's
+// two-sample MIS): a fair coin picks EITHER the BSDF or the guide strategy
+// per sample and only that branch traces — halves the GI raygen's trace work
+// at higher per-sample variance. Debug views keep the two-sample estimator.
+// Rides guidingFlags bit 8.
+static AutoCVarInt   g_guidingOneSampleMis("vxpg.oneSampleMis", "One-sample MIS: trace one stochastically-picked strategy per sample instead of both", 0, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp", "Clamp indirect-bounce skybox radiance to suppress HDR-sun fireflies for benchmark convergence. 0 = disabled (unbiased)", 0.0f, CVarFlags::EditDrag, 0.0f, 1000.0f);
 static AutoCVarInt   g_skyLighting("pathtracing.skyLighting", "Skybox radiance lights surfaces via indirect rays; 0 = sky is background-only (benchmark isolation: the VXPG guide only targets direct-lit surfaces)", 1, CVarFlags::EditCheckbox);
 static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization", GuidingDebugView::None,
@@ -401,7 +407,9 @@ void Renderer::Update(double elapsedTime, double totalTime)
 			? g_guidingDebugView.Get() != GuidingDebugView::None
 			: g_raytraceDebugMode.Get() != RaytraceDebugMode::None;
 		const bool wantsDebugViews = viewActive || g_raygenCleanVariant.Get() == 0;
-		if (m_raytracePass->SetDebugViewsCompiled(wantsDebugViews))
+		bool needsReload = m_raytracePass->SetDebugViewsCompiled(wantsDebugViews);
+		needsReload |= m_raytracePass->SetOneSampleMisCompiled(g_guidingOneSampleMis.Get() != 0);
+		if (needsReload)
 			OnShaderReload();
 	}
 
@@ -454,7 +462,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
 		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 15u) << 1) |
 		((static_cast<uint32_t>(g_guidingTreeWeightMode.Get()) & 3u) << 5) |
-		((g_guidingSecondBounce.Get() != 0 ? 1u : 0u) << 7);
+		((g_guidingSecondBounce.Get() != 0 ? 1u : 0u) << 7) |
+		((g_guidingOneSampleMis.Get() != 0 ? 1u : 0u) << 8);
 	static_assert(static_cast<int>(GuidingDebugView::SelectedClusterView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
@@ -1524,6 +1533,7 @@ void Renderer::ApplyRenderConfig(const HeadlessConfig& config)
 	g_guidingDebugView.Set(static_cast<GuidingDebugView>(config.guidingDebugView));
 	g_guidingTreeWeightMode.Set(static_cast<int32_t>(config.treeWeightMode));
 	g_guidingSecondBounce.Set(config.secondBounce ? 1 : 0);
+	g_guidingOneSampleMis.Set(config.oneSampleMis ? 1 : 0);
 	// Headless timed capture integrates over the armed window, so temporal
 	// accumulation MUST be on — otherwise every capture is a single frame and
 	// --seconds only burns wall-time (the camera is static, so nothing resets it).

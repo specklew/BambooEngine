@@ -505,6 +505,7 @@
     <Content Include="Resources\Shaders\guidedPathTracing.ch.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.rg.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.rg.clean.shader" />
+    <Content Include="Resources\Shaders\guidedPathTracing.rg.onesample.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.ms.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.ah.shader" />
     <Content Include="Resources\Shaders\guidedPathTracing.rq.shader" />
