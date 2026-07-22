@@ -39,6 +39,13 @@ public:
     // (Renderer::OnShaderReload; GPU must be idle before the state object swap).
     bool SetDebugViewsCompiled(bool enabled);
 
+    // One-sample MIS raygen variant (ADR 0015): compiled only while
+    // vxpg.oneSampleMis is on — the estimator code must not ride in (and
+    // codegen-tax) the faithful two-sample build. Same rebuild contract as
+    // SetDebugViewsCompiled. Only the guided technique's GetTechniqueDesc
+    // reads the flag.
+    bool SetOneSampleMisCompiled(bool enabled);
+
     const Microsoft::WRL::ComPtr<ID3D12Resource>& GetOutputResource() const { return m_outputResource; }
 
     // Technique registry — populated via REGISTER_RAYTRACE_TECHNIQUE macro
@@ -101,6 +108,7 @@ protected:
     // current RDNA driver (Renderer variant-sync block has the numbers);
     // GetTechniqueDesc overrides pick the rg sidecar off this flag.
     bool m_compileDebugViews = true;
+    bool m_compileOneSampleMis = false; // matches vxpg.oneSampleMis default 0
 
     D3D12_CPU_DESCRIPTOR_HANDLE m_geometryInfoHandle = {};
 

@@ -54,6 +54,11 @@ struct HeadlessConfig
     // 2nd vertex too; a 2-bounce guided estimator. Default off; needs bounces>=2.
     bool secondBounce = false;
 
+    // One-sample MIS (vxpg.oneSampleMis, ADR 0015): trace one stochastically-
+    // picked strategy per sample instead of both. Default off (two-sample,
+    // SIByL-faithful).
+    bool oneSampleMis = false;
+
     float       defaultSeconds = 5.0f;
     std::string outputDir      = "SavedUserData/Screenshots";
 

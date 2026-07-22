@@ -96,6 +96,7 @@ HeadlessConfig LoadHeadlessConfig(const std::string& path)
     readUint ("guidingDebugView", config.guidingDebugView);
     readUint ("treeWeightMode", config.treeWeightMode);
     readBool ("secondBounce", config.secondBounce);
+    readBool ("oneSampleMis", config.oneSampleMis);
     readFloat("defaultSeconds", config.defaultSeconds);
     if (doc.HasMember("outputDir") && doc["outputDir"].IsString())
         config.outputDir = doc["outputDir"].GetString();
