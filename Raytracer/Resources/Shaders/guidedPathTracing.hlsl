@@ -1262,25 +1262,54 @@ int SampleGuideDirection(float3 shadingPos, float3 shadingNormal, float4 fuzzyWe
 
 // ---- One-sample MIS (ADR 0015, deviation from SIByL's two-sample MIS) ------
 #if ONE_SAMPLE_MIS
+
+// Per-16x16-tile guide-selection probability, learned from the previous
+// frame's per-strategy contribution shares (adaptive q, guidingFlags bit 9;
+// updated + cleared by vxpgAdaptiveQ.hlsl after every guided dispatch).
+RWStructuredBuffer<float> gTileGuideQ        : register(u22);
+// [tile*2] = guide-attributed luminance (fixed point), [tile*2+1] = total
+// strategy luminance. Both are sums of actual sample contributions, whose
+// 1/(q x pdf) scaling makes them estimates of int(w_G f) and int(f) — the
+// ratio is the variance-aware target for q.
+RWStructuredBuffer<uint>  gTileStrategyStats : register(u23);
+
+// Keep in sync with vxpgAdaptiveQ.hlsl. MAX capped at 1/2 (defensive): the
+// semi-NEE gate leaves a large slice of transport BSDF-exclusive, and a
+// guide-majority tile amplifies exactly that energy by 1/((1-q) pB) —
+// measured FLIP 0.049 with cap 0.95.
+#define ADAPTIVE_Q_MIN 0.05
+#define ADAPTIVE_Q_MAX 0.5
+
 // Contribution scale for the selected strategy: MIS weight over
 // (selection probability x pdf), computed in one expression so a tiny
 // selected pdf never rides through value/pdf first (inf x 0 NaN hazard).
-// Balance: 1 / (q x (pdfS + pdfO)); power (guidingFlags bit 0, squared like
-// MisWeight): pdfS / (q x (pdfS^2 + pdfO^2)). Callers gate pdfS > 0.
-float OneSampleMisScale(float pdfSelected, float pdfOther, float selectProb)
+// Weights use the q-weighted mixture (one-sample balance telescopes to
+// 1/(qS pS + qO pO); power, guidingFlags bit 0, to qS pS/((qS pS)^2+(qO pO)^2))
+// so any q in (0,1) — including the adaptive per-tile value — stays unbiased
+// and continuous down to a single-strategy estimator as the other q -> 0.
+// Reduces exactly to the fixed formulas at q = 1/2. Callers gate pdfS > 0.
+float OneSampleMisScale(float pdfSelected, float probSelected, float pdfOther, float probOther)
 {
-    float numerator, denominator;
+    const float selected = probSelected * pdfSelected;
+    const float other    = probOther * pdfOther;
     if ((guidingFlags & 1u) != 0u)
-    {
-        numerator = pdfSelected;
-        denominator = pdfSelected * pdfSelected + pdfOther * pdfOther;
-    }
-    else
-    {
-        numerator = 1.0;
-        denominator = pdfSelected + pdfOther;
-    }
-    return numerator / (selectProb * denominator);
+        return selected / (selected * selected + other * other);
+    return 1.0 / (selected + other);
+}
+
+// Fixed-point (x256) luminance accumulation for the adaptive-q share. The
+// per-sample clamp keeps 256 tile pixels x spp within 32 bits; a control
+// signal tolerates the distortion (both buckets clamp identically).
+void AccumulateTileStrategyStats(uint tileId, bool guideSelected, float3 contribution)
+{
+    const float lum = dot(contribution, float3(0.2126, 0.7152, 0.0722));
+    const uint fx = uint(min(lum, 4096.0) * 256.0 + 0.5);
+    if (fx == 0u)
+        return;
+    uint previous;
+    if (guideSelected)
+        InterlockedAdd(gTileStrategyStats[tileId * 2u + 0u], fx, previous);
+    InterlockedAdd(gTileStrategyStats[tileId * 2u + 1u], fx, previous);
 }
 
 // One-sample estimator for the first path vertex: a fair coin picks EITHER the
@@ -1301,17 +1330,34 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
 {
     float3 radiance = directLight;
 
-    // Wave-coherent strategy coin: one draw per 16x16 pixel tile per frame.
-    // A per-pixel coin diverges within every wave, which executes BOTH
-    // branches and saves nothing (measured: frame time identical to
-    // two-sample, variance still doubled). Tile granularity keeps whole
-    // waves on one branch; the hash decorrelates tiles and frames, and the
-    // selection stays independent of the integrand (unbiased).
-    uint tileSeed = pcg_hash(((gLaunchIndex.x >> 4) * 7919u)
-                           ^ ((gLaunchIndex.y >> 4) * 104729u)
-                           ^ (frameIndex * 805459861u));
-    const bool chooseGuide = guideAlive && Random1D(tileSeed) < 0.5;
-    const float selectProb = guideAlive ? 0.5 : 1.0;
+    // Everything one-sample works at 16x16-tile granularity: the selection
+    // coin (wave coherence), the adaptive q, and the strategy stats.
+    const uint tilesPerRow = (gLaunchDims.x + 15u) >> 4;
+    const uint tileId = (gLaunchIndex.x >> 4) + (gLaunchIndex.y >> 4) * tilesPerRow;
+    const bool adaptiveQ = ((guidingFlags >> 9) & 1u) != 0u;
+
+    // Guide-selection probability: fixed fair coin, or the per-tile value
+    // learned from the previous frame's strategy shares. Prior-frame data is
+    // independent of this sample's randomness, so any q keeps the estimator
+    // unbiased. Out-of-range/NaN reads (fresh or garbage buffer) fall back
+    // to 0.5 — one frame self-heals, no CPU init needed.
+    float qGuide = 0.5;
+    if (adaptiveQ)
+    {
+        const float learned = gTileGuideQ[tileId];
+        qGuide = (learned >= ADAPTIVE_Q_MIN && learned <= ADAPTIVE_Q_MAX) ? learned : 0.5;
+    }
+
+    // Wave-coherent strategy coin: one draw per tile per frame. A per-pixel
+    // coin diverges within every wave, which executes BOTH branches and saves
+    // nothing (measured: frame time identical to two-sample, variance still
+    // doubled). Tile granularity keeps whole waves on one branch; the hash
+    // decorrelates tiles and frames, and the selection stays independent of
+    // the integrand (unbiased).
+    uint tileSeed = pcg_hash((tileId * 7919u) ^ (frameIndex * 805459861u));
+    const bool chooseGuide = guideAlive && Random1D(tileSeed) < qGuide;
+    const float probGuide = guideAlive ? qGuide : 0.0;
+    const float probBsdf  = guideAlive ? (1.0 - qGuide) : 1.0;
 
     if (!chooseGuide)
     {
@@ -1339,9 +1385,22 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
                     pdfGAtDir = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices, hit.position, surface.N, hitPos, treeWeightMode));
                 if (isnan(pdfGAtDir)) pdfGAtDir = 0.0; // SIByL w2 guard
 
-                float scale = OneSampleMisScale(pdfB, pdfGAtDir, selectProb);
+                float scale = OneSampleMisScale(pdfB, probBsdf, pdfGAtDir, probGuide);
                 if (!isnan(scale) && !isinf(scale))
-                    radiance += f * max(dot(surface.N, dir), 0.0) * incoming * scale;
+                {
+                    const float3 strategyRadiance = f * max(dot(surface.N, dir), 0.0) * incoming;
+                    radiance += strategyRadiance * scale;
+                    if (adaptiveQ && guideAlive)
+                    {
+                        // Control-signal share uses q-FREE balance weights:
+                        // weighting by the live mixture (which contains q)
+                        // feeds q into its own target and spirals it to the
+                        // clamp floor (measured: FLIP 0.051 vs 0.032 fixed).
+                        const float shareWeight = pdfB / (pdfB + pdfGAtDir);
+                        AccumulateTileStrategyStats(tileId, /*guideSelected*/ false,
+                            strategyRadiance * (shareWeight / (probBsdf * pdfB)));
+                    }
+                }
             }
         }
     }
@@ -1371,9 +1430,19 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
                 {
                     float pdfBAtDir = PdfBsdf(surface, specularProb, dir);
                     if (isnan(pdfBAtDir)) pdfBAtDir = 0.0; // SIByL w1 guard
-                    float scale = OneSampleMisScale(float(pdfG), pdfBAtDir, selectProb);
+                    float scale = OneSampleMisScale(float(pdfG), probGuide, pdfBAtDir, probBsdf);
                     if (!isnan(scale) && !isinf(scale))
-                        radiance += f * max(dot(surface.N, dir), 0.0) * incoming * scale;
+                    {
+                        const float3 strategyRadiance = f * max(dot(surface.N, dir), 0.0) * incoming;
+                        radiance += strategyRadiance * scale;
+                        if (adaptiveQ)
+                        {
+                            // q-free balance share — see the BSDF site's comment.
+                            const float shareWeight = float(pdfG) / (float(pdfG) + pdfBAtDir);
+                            AccumulateTileStrategyStats(tileId, /*guideSelected*/ true,
+                                strategyRadiance * (shareWeight / (probGuide * float(pdfG))));
+                        }
+                    }
                 }
             }
         }

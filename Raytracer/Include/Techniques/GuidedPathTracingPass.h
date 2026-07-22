@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RaytracePass.h"
+#include "Resources/RWStructuredBuffer.h"
 
 class VoxelizationPass;
 class VoxelGuidingBuildPass;
@@ -48,6 +49,17 @@ private:
     bool UseInlineRayQuery();
     void EnsureInlineRayQueryPso();
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_inlineRqPso;
+
+    // One-sample MIS adaptive q (ADR 0015): per-16x16-tile guide-selection
+    // probability + this frame's per-strategy luminance stats, folded into q
+    // by a small compute update after every guided dispatch.
+    void EnsureAdaptiveQResources(uint32_t width, uint32_t height);
+    void EnsureAdaptiveQUpdatePso();
+    std::unique_ptr<RWStructuredBuffer<float>>    m_tileGuideQ;
+    std::unique_ptr<RWStructuredBuffer<uint32_t>> m_tileStrategyStats;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState>   m_adaptiveQUpdatePso;
+    uint32_t m_tileGridWidth  = 0;
+    uint32_t m_tileGridHeight = 0;
 
     std::shared_ptr<VoxelizationPass>      m_voxelPass;
     std::shared_ptr<VoxelGuidingBuildPass> m_buildPass;
