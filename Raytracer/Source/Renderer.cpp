@@ -455,6 +455,16 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 	m_raytracePass->Update(elapsedTime, totalTime);
 
+	// Must run before the PassConstants fill below: it reads the pool's fresh
+	// count/total-power off m_scene, and the analytic tail rebuild changes them
+	// when light data is dirty (headless overrides, EditorUI edits).
+	if (m_scene->IsLightDataDirty())
+	{
+		m_scene->SetLightDataBuffer(CreateStructuredBuffer(m_scene->GetLightDataCPU()));
+		m_scene->RebuildLightPoolAnalyticTail(*this);
+		m_scene->ClearLightDataDirty();
+	}
+
 	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
 	m_passConstants->data.uvCoordY = g_uvCoordY.Get();
 	m_passConstants->data.debugMode = m_rasterize
@@ -470,7 +480,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		((g_guidingSecondBounce.Get() != 0 ? 1u : 0u) << 7) |
 		((g_guidingOneSampleMis.Get() != 0 ? 1u : 0u) << 8) |
 		((g_guidingOneSampleAdaptiveQ.Get() != 0 ? 1u : 0u) << 9);
-	static_assert(static_cast<int>(GuidingDebugView::SelectedClusterView) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
+	static_assert(static_cast<int>(GuidingDebugView::SymmetricBsdfBaseline) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
 	m_passConstants->data.numLights = m_scene->GetLightDataBuffer()->GetElementsCount();
@@ -479,13 +489,9 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.vbufferJitterEnabled = (g_vbufferJitter.Get() != 0) ? 1u : 0u;
 	m_passConstants->data.indirectSkyClamp = g_indirectSkyClamp.Get();
 	m_passConstants->data.skyLightingEnabled = (g_skyLighting.Get() != 0) ? 1u : 0u;
+	m_passConstants->data.lightPoolCount = m_scene->GetLightPoolCount();
+	m_passConstants->data.lightPoolTotalPower = m_scene->GetLightPoolTotalPower();
 	m_passConstants->Map();
-
-	if (m_scene->IsLightDataDirty())
-	{
-		m_scene->SetLightDataBuffer(CreateStructuredBuffer(m_scene->GetLightDataCPU()));
-		m_scene->ClearLightDataDirty();
-	}
 
 	// Camera change detection for accumulation reset. Skipped in headless: the
 	// camera only changes between captures (GoToState), and ArmScreenshot owns the
@@ -1573,9 +1579,12 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	// injection-accumulator clear.
 	// Debug views suppress the BSDF subtree whose bounce writes the VPL data,
 	// which would starve the guide within two frames — fall back to the
-	// dedicated injection trace whenever one is active.
+	// dedicated injection trace whenever one is active. The symmetric baseline
+	// (view 15) is exempt: its BSDF sample always traces and writes VPLs, so
+	// reuse stays on and its frame cost matches the full integrator's.
 	const bool reuseGiVpl = g_injectionReuseGi.Get() != 0 &&
-		g_guidingDebugView.Get() == GuidingDebugView::None;
+		(g_guidingDebugView.Get() == GuidingDebugView::None ||
+		 g_guidingDebugView.Get() == GuidingDebugView::SymmetricBsdfBaseline);
 	m_voxelizationPass->SetRuntimeParams(
 		g_voxelInjectUseAvg.Get() != 0,
 		g_voxelHeatScale.Get(),

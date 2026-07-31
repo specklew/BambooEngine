@@ -150,28 +150,11 @@ struct GuidedPayload
     uint   hitFlag;  // 1 = ray hit geometry
 };
 
-// ---- BSDF pdf evaluation (mixture of GGX + cosine, matches sampling) ----
-
-float PdfGGX(SurfaceData s, float3 dir)
-{
-    float3 H = normalize(s.V + dir);
-    float NdotH = max(dot(s.N, H), EPSILON);
-    float VdotH = max(dot(s.V, H), EPSILON);
-    float D = DistributionGGX(NdotH, s.roughness);
-    return D * NdotH / (4.0 * VdotH);
-}
-
-float PdfCosine(SurfaceData s, float3 dir)
-{
-    return max(dot(s.N, dir), 0.0) / PI;
-}
-
-float PdfBsdf(SurfaceData s, float specularProb, float3 dir)
-{
-    if (dot(dir, s.N) <= 0.0)
-        return 0.0;
-    return specularProb * PdfGGX(s, dir) + (1.0 - specularProb) * PdfCosine(s, dir);
-}
+// ---- BSDF pdf evaluation ----
+// The guided-local PdfBsdf/PdfGGX/PdfCosine were bit-identical to the shared
+// PdfBsdfMixture in raytracing.hlsl (verified Task 5) and were removed here
+// (Task 7) so forward sampling and the reverse MIS query share one formula.
+// Callers use PdfBsdfMixture(surface, specularProb, dir) directly.
 
 // Full BRDF eval consistent with the vanilla bounce estimator: GGX specular
 // with the path-tracing Smith G (k = a^2/2, NOT the direct-lighting remap)
@@ -215,7 +198,7 @@ float3 SampleBsdfDir(SurfaceData s, float specularProb, float2 xi, float selecto
     {
         dir = CosineSampleHemisphere(xi, s.N);
     }
-    pdf = PdfBsdf(s, specularProb, dir);
+    pdf = PdfBsdfMixture(s, specularProb, dir);
     return dir;
 }
 
@@ -851,7 +834,15 @@ void InjectVplFromBounce(float3 position, float3 shadingNormal, float3 directLig
 // the VBuffer first vertex uses.
 // writeVpl: only the BSDF MIS subtree passes true (ADR 0009) — fitting the
 // guide from guided samples would be a self-reinforcing feedback loop.
-float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, out float3 hitPos, out bool didHit)
+// firstEmitterLe/firstEmitterNeePdf: the FIRST segment's emissive hit (if any,
+// front face) is NOT added here — its Le is 3-way MIS'd (this segment's two
+// first-vertex strategies + NEE-at-v0), and only the caller knows the OTHER
+// strategy's pdf at this hit. It is returned instead so the caller applies the
+// 3-way weight with the same f*NdotL/pdf throughput factor. Deeper segments'
+// emission is 2-way MIS'd (PT-style) inline, everything known here.
+float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl,
+                     out float3 hitPos, out bool didHit,
+                     out float3 firstEmitterLe, out float firstEmitterNeePdf)
 {
     float3 radiance = float3(0, 0, 0);
     float3 pathThroughput = float3(1, 1, 1);
@@ -859,6 +850,13 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, 
     float3 rayDir = dir;
     hitPos = float3(0, 0, 0);
     didHit = false;
+    firstEmitterLe = float3(0, 0, 0);
+    firstEmitterNeePdf = 0.0;
+
+    // Deeper-segment emissive MIS (PT-style, 2-way): the previous vertex's BSDF
+    // continuation pdf and position.
+    float3 previousVertexPosition = origin;
+    float prevBouncePdf = 0.0;
 
     for (uint bounce = 1; bounce <= (uint)numBounces; ++bounce)
     {
@@ -908,7 +906,25 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, 
         surface.roughness = roughness;
         surface.metallic  = metallic;
 
-        const float3 directLight = CalculateDirectLightning(hit, surface);
+        // Emissive emission at this vertex (front face only).
+        if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0) &&
+            dot(geometricN, V) > 0.0)
+        {
+            if (bounce == 1u)
+            {
+                // Deferred to the caller for the 3-way (BSDF/guide + NEE) weight.
+                firstEmitterLe = instance.emissiveRadiance;
+                firstEmitterNeePdf = PdfNeeTowardHit(origin, instance, p.primitiveId, hit.position);
+            }
+            else
+            {
+                float pdfNee = PdfNeeTowardHit(previousVertexPosition, instance, p.primitiveId, hit.position);
+                float weight = BalanceWeight(prevBouncePdf, pdfNee, 0.0);
+                radiance += pathThroughput * instance.emissiveRadiance * weight;
+            }
+        }
+
+        const float3 directLight = SampleDirectLight(hit, surface, seed);
         radiance += pathThroughput * directLight;
 
         // ADR 0009: the first bounce vertex of the BSDF subtree doubles as
@@ -922,7 +938,7 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, 
         // Continuation sample: verbatim port of the old closest-hit logic
         // (specular/diffuse selection, pdf-cancelled throughput).
         float3 F = FresnelSchlick(surface.NdotV, surface.F0);
-        float specularProb = (F.r + F.g + F.b) / 3.0;
+        float specularProb = SurfaceSpecularProb(surface);
 
         float2 xi = Random2D(seed);
         seed = pcg_hash(seed);
@@ -953,6 +969,9 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, 
             throughput /= (1.0 - specularProb);  // branch guarantees pathSelector>=specularProb => 1-specularProb>0
         }
 
+        prevBouncePdf = PdfBsdfMixture(surface, specularProb, bounceDir);
+        previousVertexPosition = hit.position;
+
         pathThroughput *= throughput;
         rayOrigin = hit.position;
         rayDir = bounceDir;
@@ -972,11 +991,17 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl, 
 
 // One indirect segment: trace a ray, return terminal NEE at the hit (SIByL
 // EvaluateIndirectLight) or the sky. hitPos/didHit feed the guide semi-NEE gate
-// and the reverse pdf.
-float3 TraceOneBounceNEE(float3 origin, float3 dir, inout uint seed, out float3 hitPos, out bool didHit)
+// and the reverse pdf. hitEmitterLe/hitEmitterNeePdf: the hit's emissive
+// emission is 3-way MIS'd by the caller (this vertex's BSDF + global guide, plus
+// NEE-at-origin), so it is returned rather than added to the terminal NEE.
+float3 TraceOneBounceNEE(float3 origin, float3 dir, inout uint seed,
+                         out float3 hitPos, out bool didHit,
+                         out float3 hitEmitterLe, out float hitEmitterNeePdf)
 {
     hitPos = float3(0, 0, 0);
     didHit = false;
+    hitEmitterLe = float3(0, 0, 0);
+    hitEmitterNeePdf = 0.0;
 
     RayDesc ray;
     ray.Origin = origin;
@@ -1015,7 +1040,15 @@ float3 TraceOneBounceNEE(float3 origin, float3 dir, inout uint seed, out float3 
 
     hitPos = hit.position;
     didHit = true;
-    return CalculateDirectLightning(hit, surface);
+
+    if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0) &&
+        dot(geometricN, V) > 0.0)
+    {
+        hitEmitterLe = instance.emissiveRadiance;
+        hitEmitterNeePdf = PdfNeeTowardHit(origin, instance, p.primitiveId, hit.position);
+    }
+
+    return SampleDirectLight(hit, surface, seed);
 }
 
 // Reverse pdf of the GLOBAL irradiance guide at a BSDF sample's hit voxel:
@@ -1059,12 +1092,19 @@ float3 ShadeSecondVertex(HitData hit2, SurfaceData surf2, float specularProb, in
             if (any(f > 0))
             {
                 float3 hp; bool dh;
-                float3 incoming = TraceOneBounceNEE(hit2.position, dir, seed, hp, dh);
+                float3 v2Le; float v2NeePdf;
+                float3 incoming = TraceOneBounceNEE(hit2.position, dir, seed, hp, dh, v2Le, v2NeePdf);
                 float pdfG = (litVoxelCount > 0u && dh)
                     ? float(EvalGlobalGuidePdf(hit2.position, surf2.N, hp)) : 0.0;
                 if (isnan(pdfG)) pdfG = 0.0;
                 float weight = MisWeight(pdfB, pdfG);
                 radiance += f * dot(surf2.N, dir) * incoming * weight / pdfB;
+                // v2 emissive hit: 3-way (this vertex's BSDF + global guide + NEE-at-v1).
+                if (any(v2Le > 0.0))
+                {
+                    float wLe = BalanceWeight(pdfB, pdfG + v2NeePdf, 0.0);
+                    radiance += f * dot(surf2.N, dir) * v2Le * wLe / pdfB;
+                }
             }
         }
     }
@@ -1097,14 +1137,21 @@ float3 ShadeSecondVertex(HitData hit2, SurfaceData surf2, float specularProb, in
                     if (any(f > 0))
                     {
                         float3 hp; bool dh;
-                        float3 incoming = TraceOneBounceNEE(hit2.position, dir, seed, hp, dh);
+                        float3 v2Le; float v2NeePdf;
+                        float3 incoming = TraceOneBounceNEE(hit2.position, dir, seed, hp, dh, v2Le, v2NeePdf);
                         bool accepted = dh && all(hp >= aabbMin) && all(hp <= aabbMax);
                         if (accepted)
                         {
-                            float pdfBAtDir = PdfBsdf(surf2, specularProb, dir);
+                            float pdfBAtDir = PdfBsdfMixture(surf2, specularProb, dir);
                             if (isnan(pdfBAtDir)) pdfBAtDir = 0.0;
                             float weight = MisWeight(float(pdfG), pdfBAtDir);
                             radiance += f * dot(surf2.N, dir) * incoming * weight / float(pdfG);
+                            // v2 emissive hit: 3-way (this vertex's global guide + BSDF + NEE-at-v1).
+                            if (any(v2Le > 0.0))
+                            {
+                                float wLe = BalanceWeight(float(pdfG), pdfBAtDir + v2NeePdf, 0.0);
+                                radiance += f * dot(surf2.N, dir) * v2Le * wLe / float(pdfG);
+                            }
                         }
                     }
                 }
@@ -1120,10 +1167,13 @@ float3 ShadeSecondVertex(HitData hit2, SurfaceData surf2, float specularProb, in
 // TraceIndirect for that branch when vxpg.secondBounce is on. hitPos/didHit are
 // vertex 2 (the vertex-1 guide semi-NEE gate + reverse pdf still key on it).
 float3 TraceIndirectSecondGuide(float3 origin, float3 dir, inout uint seed, bool writeVpl,
-                                out float3 hitPos, out bool didHit)
+                                out float3 hitPos, out bool didHit,
+                                out float3 firstEmitterLe, out float firstEmitterNeePdf)
 {
     hitPos = float3(0, 0, 0);
     didHit = false;
+    firstEmitterLe = float3(0, 0, 0);
+    firstEmitterNeePdf = 0.0;
 
     RayDesc ray;
     ray.Origin = origin;
@@ -1162,12 +1212,40 @@ float3 TraceIndirectSecondGuide(float3 origin, float3 dir, inout uint seed, bool
     hitPos = hit.position;
     didHit = true;
 
-    const float3 directLight = CalculateDirectLightning(hit, surface);
+    // v1 emissive hit: deferred to the caller for the 3-way weight at v0.
+    if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0) &&
+        dot(geometricN, V) > 0.0)
+    {
+        firstEmitterLe = instance.emissiveRadiance;
+        firstEmitterNeePdf = PdfNeeTowardHit(origin, instance, p.primitiveId, hit.position);
+    }
+
+    // NEE@v1 (A1, second-bounce path): NEE here competes with BSDF@v1 AND the
+    // global irradiance guide@v1 that ShadeSecondVertex samples, so weight it
+    // 3-way — sums to 1 with that vertex's v2-emitter Le weights. The guide
+    // strategy runs only when litVoxelCount > 0; gate pG the same way. Uses the
+    // global guide's reverse pdf (EvalGlobalGuidePdf), the helper that branch
+    // already uses for its reverse queries.
+    float3 directLight;
+    {
+        uint neeKind; float3 neeLightPoint;
+        float pdfNee, pdfBsdf; float3 neeUnweighted;
+        SampleDirectLightComponents(hit, surface, seed, neeKind, neeLightPoint,
+                                    pdfNee, pdfBsdf, neeUnweighted);
+        if (neeKind == 2u)
+        {
+            float pG = (LitVoxelCount() > 0u)
+                ? float(EvalGlobalGuidePdf(hit.position, N, neeLightPoint)) : 0.0;
+            if (isnan(pG)) pG = 0.0;
+            directLight = neeUnweighted * BalanceWeight(pdfNee, pdfBsdf + pG, 0.0);
+        }
+        else
+            directLight = neeUnweighted; // delta (weight 1) or early-out zero
+    }
     if (writeVpl && voxReuseGiVpl != 0u)
         InjectVplFromBounce(hit.position, N, directLight);
 
-    float3 F = FresnelSchlick(surface.NdotV, surface.F0);
-    float specularProb = (F.r + F.g + F.b) / 3.0;
+    float specularProb = SurfaceSpecularProb(surface);
 
     return directLight + ShadeSecondVertex(hit, surface, specularProb, seed);
 }
@@ -1297,6 +1375,19 @@ float OneSampleMisScale(float pdfSelected, float probSelected, float pdfOther, f
     return 1.0 / (selected + other);
 }
 
+// First-segment emissive-hit scale for the one-sample estimator: the coin group
+// {BSDF, guide} has effective density probSel*pdfSel + probOther*pdfOther, and
+// NEE-at-v0 is an always-on partner with density pdfNee. The balance-heuristic
+// weight of the selected coin strategy is (probSel*pdfSel)/D over the total
+// D = probSel*pdfSel + probOther*pdfOther + pdfNee; dividing by (probSel*pdfSel)
+// telescopes to 1/D. Always balance (the power-heuristic combination of a
+// stochastic coin group with a deterministic NEE partner is not well-defined,
+// and the emissive integrand is weighted independently of the reflected one).
+float OneSampleMisScaleLe(float pdfSelected, float probSelected, float pdfOther, float probOther, float pdfNee)
+{
+    return 1.0 / (probSelected * pdfSelected + probOther * pdfOther + pdfNee);
+}
+
 // Fixed-point (x256) luminance accumulation for the adaptive-q share. The
 // per-sample clamp keeps 256 tile pixels x spp within 32 bits; a control
 // signal tolerates the distortion (both buckets clamp identically).
@@ -1326,10 +1417,10 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
                                  float4 fuzzyWeights, int4 fuzzyIndices, int spixelFlat,
                                  uint treeWeightMode, bool guideSecondBounce,
                                  uint litVoxelCount, bool guideAlive,
-                                 float3 directLight, inout uint seed)
+                                 float3 primaryEmission, uint neeKind, float3 neeUnweighted,
+                                 float neePdfNee, float neePdfBsdf, float neePdfGuide,
+                                 inout uint seed)
 {
-    float3 radiance = directLight;
-
     // Everything one-sample works at 16x16-tile granularity: the selection
     // coin (wave coherence), the adaptive q, and the strategy stats.
     const uint tilesPerRow = (gLaunchDims.x + 15u) >> 4;
@@ -1359,6 +1450,19 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
     const float probGuide = guideAlive ? qGuide : 0.0;
     const float probBsdf  = guideAlive ? (1.0 - qGuide) : 1.0;
 
+    // Base radiance: weight-1 primary emission (A4, outside the coin) + the
+    // exact one-sample NEE (A1). NEE competes with the stochastic coin group
+    // {BSDF, guide}, whose selection-weighted mixture density toward the NEE
+    // light point is probBsdf*neePdfBsdf + probGuide*neePdfGuide, so its balance
+    // weight uses that denominator — sums to exactly 1 with OneSampleMisScaleLe's
+    // coin-group Le weights. Delta lights carry weight 1; early-outs are zero.
+    float3 radiance = primaryEmission;
+    if (neeKind == 2u)
+        radiance += neeUnweighted * BalanceWeight(neePdfNee,
+                        probBsdf * neePdfBsdf + probGuide * neePdfGuide, 0.0);
+    else
+        radiance += neeUnweighted;
+
     if (!chooseGuide)
     {
         // BSDF strategy — same chain as the two-sample branch.
@@ -1376,9 +1480,12 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
             {
                 float3 hitPos;
                 bool didHit;
-                float3 incoming = guideSecondBounce
-                    ? TraceIndirectSecondGuide(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit)
-                    : TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit);
+                float3 firstLe; float firstNeePdf;
+                float3 incoming;
+                if (guideSecondBounce)
+                    incoming = TraceIndirectSecondGuide(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
+                else
+                    incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
 
                 float pdfGAtDir = 0.0;
                 if (guideAlive && didHit)
@@ -1401,6 +1508,13 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
                             strategyRadiance * (shareWeight / (probBsdf * pdfB)));
                     }
                 }
+                // First-segment emissive hit: 3-way (BSDF + guide coin, + NEE-at-v0).
+                if (any(firstLe > 0.0))
+                {
+                    float scaleLe = OneSampleMisScaleLe(pdfB, probBsdf, pdfGAtDir, probGuide, firstNeePdf);
+                    if (!isnan(scaleLe) && !isinf(scaleLe))
+                        radiance += f * max(dot(surface.N, dir), 0.0) * firstLe * scaleLe;
+                }
             }
         }
     }
@@ -1421,14 +1535,15 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
             {
                 float3 hitPos;
                 bool didHit;
-                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ false, hitPos, didHit);
+                float3 firstLe; float firstNeePdf;
+                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ false, hitPos, didHit, firstLe, firstNeePdf);
 
                 // Semi-NEE gate: the claimed pdf belongs to the chosen voxel,
                 // so only count hits inside its AABB.
                 bool accepted = didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax);
                 if (accepted)
                 {
-                    float pdfBAtDir = PdfBsdf(surface, specularProb, dir);
+                    float pdfBAtDir = PdfBsdfMixture(surface, specularProb, dir);
                     if (isnan(pdfBAtDir)) pdfBAtDir = 0.0; // SIByL w1 guard
                     float scale = OneSampleMisScale(float(pdfG), probGuide, pdfBAtDir, probBsdf);
                     if (!isnan(scale) && !isinf(scale))
@@ -1442,6 +1557,13 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
                             AccumulateTileStrategyStats(tileId, /*guideSelected*/ true,
                                 strategyRadiance * (shareWeight / (probGuide * float(pdfG))));
                         }
+                    }
+                    // First-segment emissive hit: 3-way (guide + BSDF coin, + NEE-at-v0).
+                    if (any(firstLe > 0.0))
+                    {
+                        float scaleLe = OneSampleMisScaleLe(float(pdfG), probGuide, pdfBAtDir, probBsdf, firstNeePdf);
+                        if (!isnan(scaleLe) && !isinf(scaleLe))
+                            radiance += f * max(dot(surface.N, dir), 0.0) * firstLe * scaleLe;
                     }
                 }
             }
@@ -1459,10 +1581,63 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
 // false-color, 4 = guided sample acceptance green/red/blue).
 
 float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, uint debugView,
-                        float4 fuzzyWeights, int4 fuzzyIndices, int spixelFlat, inout uint seed)
+                        float4 fuzzyWeights, int4 fuzzyIndices, int spixelFlat,
+                        InstanceInfo instance, float3 geometricN, inout uint seed)
 {
+    // A4: primary-visible emitter (PT raytracing.hlsl:287-300 vertex-0 term).
+    // The guide integrator never continued a camera ray onto an emitter, so a
+    // directly visible light read as black; add its emission at weight 1 (front
+    // face only, geometric normal), exactly like PT's vertex 0. Weight-1 term:
+    // outside every MIS branch (and outside the one-sample coin). Views >= 3
+    // that zero direct light zero this too (handled where radiance is set).
+    float3 primaryEmission = float3(0, 0, 0);
+    if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0) &&
+        dot(geometricN, surface.V) > 0.0)
+        primaryEmission = instance.emissiveRadiance;
+
     if (numBounces == 0)
-        return CalculateDirectLightning(hit, surface);
+        return primaryEmission + SampleDirectLight(hit, surface, seed);
+
+#if GUIDING_DEBUG_VIEWS
+    // View 15: symmetric in-framework baseline (SIByL gi.slang strategy 0).
+    // A COMPLETE estimator, not a diagnostic: weight-1 BSDF sample, zero guide
+    // math (no guide branch, no reverse pdf query), direct light and the
+    // ADR-0009 VPL write identical to the full integrator — the frame differs
+    // from view 0 by exactly the guide-side work. Converges to the PT target.
+    if (debugView == 15u)
+    {
+        float3 radianceBaseline = primaryEmission + SampleDirectLight(hit, surface, seed);
+        float2 xi = Random2D(seed);
+        seed = pcg_hash(seed);
+        float selector = Random1D(seed);
+        seed = pcg_hash(seed);
+
+        float pdfB;
+        float3 dir = SampleBsdfDir(surface, specularProb, xi, selector, pdfB);
+        if (pdfB > EPSILON && dot(dir, surface.N) > 0.0)
+        {
+            float3 f = EvalBsdfBounce(surface, dir);
+            if (any(f > 0))
+            {
+                float3 hitPos;
+                bool didHit;
+                float3 firstLe; float firstNeePdf;
+                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
+                float NdotL = dot(surface.N, dir);
+                radianceBaseline += f * NdotL * incoming / pdfB;
+                // No guide strategy in the baseline: the 3-way weight collapses to
+                // PT's 2-way BSDF/NEE form (other-strategy pdf = 0). Gate 4 checks
+                // this reduces exactly to PT's Le-at-hit weight.
+                if (any(firstLe > 0.0))
+                {
+                    float wLe = BalanceWeight(pdfB, 0.0 + firstNeePdf, 0.0);
+                    radianceBaseline += f * NdotL * firstLe * wLe / pdfB;
+                }
+            }
+        }
+        return radianceBaseline;
+    }
+#endif
 
     const uint litVoxelCount = LitVoxelCount();
     // Guide-dead pixels (no lit voxels, or every fuzzy parent's heap empty) run
@@ -1477,17 +1652,52 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     // path — meaningful only at bounces >= 2.
     const bool guideSecondBounce = ((guidingFlags >> 7) & 1u) != 0u && numBounces >= 2u;
 
-    float3 radiance = (debugView >= 3u) ? float3(0, 0, 0)
-                                        : CalculateDirectLightning(hit, surface);
+    // Exact 3-way NEE at the guided first vertex (A1): NEE competes with the
+    // BSDF strategy AND the voxel guide, so the guide's reverse pdf toward the
+    // sampled emitter point (pG) belongs in the balance denominator. The
+    // Le-at-hit sides below already sum all three pdfs; routing NEE through the
+    // same denominator makes the three weights sum to exactly 1. Split the
+    // sample from its weight because the light point is chosen inside the
+    // sampler, so pG can only be queried after the point is known. debugView>=3
+    // skips the call (no direct light, no RNG) exactly as before.
+    uint neeKind = 0u;
+    float3 neeLightPoint = float3(0, 0, 0);
+    float neePdfNee = 0.0, neePdfBsdf = 0.0, neePdfGuide = 0.0;
+    float3 neeUnweighted = float3(0, 0, 0);
+    if (debugView < 3u)
+    {
+        SampleDirectLightComponents(hit, surface, seed, neeKind, neeLightPoint,
+                                    neePdfNee, neePdfBsdf, neeUnweighted);
+        if (neeKind == 2u && guideAlive)
+        {
+            neePdfGuide = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices,
+                                hit.position, surface.N, neeLightPoint, treeWeightMode));
+            if (isnan(neePdfGuide)) neePdfGuide = 0.0; // match the BSDF branch's w2 guard
+        }
+    }
+
+    float3 radiance = float3(0, 0, 0);
+    if (debugView < 3u)
+    {
+        radiance = primaryEmission;
+        radiance += (neeKind == 2u)
+            ? neeUnweighted * BalanceWeight(neePdfNee, neePdfBsdf + neePdfGuide, 0.0)
+            : neeUnweighted; // delta (weight 1) or early-out zero
+    }
 
 #if ONE_SAMPLE_MIS
     // One-sample MIS (vxpg.oneSampleMis, guidingFlags bit 8, ADR 0015): trace
     // one stochastically-selected strategy per sample instead of both. Debug
     // views keep the two-sample estimator (views 1-4 dissect its branches).
+    // Pass the NEE components (not the pre-weighted value): the one-sample NEE
+    // weight uses the q-weighted coin-group mixture density, not the two-sample
+    // denominator, so the weight is applied inside once q is known.
     if (((guidingFlags >> 8) & 1u) != 0u && debugView == 0u)
         return ShadeFirstVertexOneSample(hit, surface, specularProb, fuzzyWeights, fuzzyIndices,
                                          spixelFlat, treeWeightMode, guideSecondBounce,
-                                         litVoxelCount, guideAlive, radiance, seed);
+                                         litVoxelCount, guideAlive, primaryEmission,
+                                         neeKind, neeUnweighted, neePdfNee, neePdfBsdf,
+                                         neePdfGuide, seed);
 #endif
 
     float misWeightB = 0.0;
@@ -1515,13 +1725,17 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
             {
                 float3 hitPos;
                 bool didHit;
-                float3 incoming = guideSecondBounce
-                    ? TraceIndirectSecondGuide(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit)
-                    : TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit);
+                float3 firstLe; float firstNeePdf;
+                float3 incoming;
+                if (guideSecondBounce)
+                    incoming = TraceIndirectSecondGuide(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
+                else
+                    incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
 
                 // Guide pdf at the BSDF sample, evaluated through the reverse
                 // chain at the ray's hit voxel (0 for misses / unreachable
-                // voxels -> weight 1 for this sample).
+                // voxels -> weight 1 for this sample). Reused below for the
+                // first-segment emissive weight (no second tree walk).
                 float pdfGAtDir = 0.0;
                 if (guideAlive && didHit)
                     pdfGAtDir = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices, hit.position, surface.N, hitPos, treeWeightMode));
@@ -1529,10 +1743,17 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
 
                 float weight = MisWeight(pdfB, pdfGAtDir);
                 misWeightB = weight;
+                float NdotL = dot(surface.N, dir);
                 if (debugView != 3u)
                 {
-                    float NdotL = dot(surface.N, dir);
                     radiance += f * NdotL * incoming * weight / pdfB;
+                    // First-segment emissive hit: 3-way (BSDF self + guide + NEE-at-v0).
+                    // guideAlive false -> pdfGAtDir 0 -> collapses to PT's 2-way form.
+                    if (any(firstLe > 0.0))
+                    {
+                        float wLe = BalanceWeight(pdfB, pdfGAtDir + firstNeePdf, 0.0);
+                        radiance += f * NdotL * firstLe * wLe / pdfB;
+                    }
                 }
             }
         }
@@ -1561,8 +1782,9 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
             // SIByL's ordering. Rare with intensity-only traversal
             // (internal intensity = exact child sum), but not impossible
             // with float summation drift.
-            return (debugView >= 3u) ? float3(0, 0, 0)
-                                     : CalculateDirectLightning(hit, surface);
+            if (debugView >= 3u)
+                return float3(0, 0, 0);
+            return SampleDirectLight(hit, surface, seed);
         }
         if (chain == GUIDE_CHAIN_OK)
         {
@@ -1573,7 +1795,8 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
             {
                 float3 hitPos;
                 bool didHit;
-                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ false, hitPos, didHit);
+                float3 firstLe; float firstNeePdf;
+                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ false, hitPos, didHit, firstLe, firstNeePdf);
 
                 // Semi-NEE gate: the claimed pdf belongs to the chosen
                 // voxel, so only count hits inside its AABB.
@@ -1582,7 +1805,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
 
                 if (accepted)
                 {
-                    float pdfBAtDir = PdfBsdf(surface, specularProb, dir);
+                    float pdfBAtDir = PdfBsdfMixture(surface, specularProb, dir);
                     if (isnan(pdfBAtDir)) pdfBAtDir = 0.0; // SIByL w1 guard
                     float weight = MisWeight(float(pdfG), pdfBAtDir);
                     misWeightG = weight;
@@ -1590,6 +1813,13 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                     {
                         float NdotL = dot(surface.N, dir);
                         radiance += f * NdotL * incoming * weight / float(pdfG);
+                        // First-segment emissive hit: 3-way (guide self + BSDF + NEE-at-v0).
+                        // Gated by the semi-NEE acceptance, like all guided contribution.
+                        if (any(firstLe > 0.0))
+                        {
+                            float wLe = BalanceWeight(float(pdfG), pdfBAtDir + firstNeePdf, 0.0);
+                            radiance += f * NdotL * firstLe * wLe / float(pdfG);
+                        }
                     }
                 }
             }
@@ -2064,27 +2294,35 @@ void GuidedIntegratorMain()
     }
 #endif // GUIDING_DEBUG_VIEWS
 
-    float3 F = FresnelSchlick(NdotV, surface.F0);
-    float specularProb = (F.r + F.g + F.b) / 3.0;
+    float specularProb = SurfaceSpecularProb(surface);
 
     // SLIC superpixel of this pixel (hard assignment, kept as the fuzzy
     // fall-through) and the fuzzy 4-nearest parent set. Weights are
     // renormalized after dropping parents whose importance heap is empty
     // (SIByL gi.slang:293-299); all-dropped => guide dead for this pixel.
     // Read once; every spp sample shares them.
-    const int spixelFlat = gSpixelIndexImage[launchIndex];
-    float4 fuzzyWeights = gFuzzyWeights[launchIndex];
-    const int4 fuzzyIndices = gFuzzyIndices[launchIndex];
-    [unroll] for (int f = 0; f < 4; ++f)
+    int spixelFlat = -1;
+    float4 fuzzyWeights = float4(0, 0, 0, 0);
+    int4 fuzzyIndices = int4(-1, -1, -1, -1);
+    // The symmetric baseline (view 15) never touches the guide — skip its
+    // superpixel/heap reads so the baseline frame carries zero guide math,
+    // matching SIByL's strategy-0 raygen.
+    if (debugView != 15u)
     {
-        const bool parentAlive = fuzzyWeights[f] > 0.0 && fuzzyIndices[f] >= 0 &&
-            gSpixelClusterImportanceHeap[uint(fuzzyIndices[f]) * 64u + 1u] > 0.0f;
-        if (!parentAlive)
-            fuzzyWeights[f] = 0.0;
+        spixelFlat = gSpixelIndexImage[launchIndex];
+        fuzzyWeights = gFuzzyWeights[launchIndex];
+        fuzzyIndices = gFuzzyIndices[launchIndex];
+        [unroll] for (int f = 0; f < 4; ++f)
+        {
+            const bool parentAlive = fuzzyWeights[f] > 0.0 && fuzzyIndices[f] >= 0 &&
+                gSpixelClusterImportanceHeap[uint(fuzzyIndices[f]) * 64u + 1u] > 0.0f;
+            if (!parentAlive)
+                fuzzyWeights[f] = 0.0;
+        }
+        const float fuzzyTotal = dot(fuzzyWeights, float4(1, 1, 1, 1));
+        if (fuzzyTotal > 0.0)
+            fuzzyWeights /= fuzzyTotal;
     }
-    const float fuzzyTotal = dot(fuzzyWeights, float4(1, 1, 1, 1));
-    if (fuzzyTotal > 0.0)
-        fuzzyWeights /= fuzzyTotal;
 
     float3 accumulated = float3(0, 0, 0);
     for (uint i = 0; i < (uint)samplesPerPixel; i++)
@@ -2092,7 +2330,8 @@ void GuidedIntegratorMain()
         uint seed = pcg_hash(pixelId ^ (i * 2654435761u) ^ (frameIndex * 805459861u));
         seed = pcg_hash(seed);
         accumulated += ShadeFirstVertex(hit, surface, specularProb, debugView,
-                                        fuzzyWeights, fuzzyIndices, spixelFlat, seed);
+                                        fuzzyWeights, fuzzyIndices, spixelFlat,
+                                        instance, geometricN, seed);
     }
 
     gOutput[launchIndex] = float4(accumulated / samplesPerPixel, 1.0);

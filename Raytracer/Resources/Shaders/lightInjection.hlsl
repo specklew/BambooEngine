@@ -125,7 +125,7 @@ void InjectHit(inout InjectPayload payload : SV_RayPayload, in Attributes attr)
     // Only the VPL bounce is traced now — the primary hit comes from the
     // VBuffer and is shaded in raygen. This is the second path vertex:
     // evaluate direct light here, raygen injects it.
-    payload.result = CalculateDirectLightning(hit, surface);
+    payload.result = SampleDirectLight(hit, surface, payload.seed);
     payload.flags = 1;
 
     // VXPG B+: stash the representative VPL (pos + normal) for this voxel and

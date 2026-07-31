@@ -102,6 +102,28 @@ float3 EvalDiffuseBounce(SurfaceData s, float3 kD, float3 bounceDir)
     return kD * s.albedo;
 }
 
+// ---- Shared BSDF-mixture pdf (matches ImportanceSampleGGX/CosineSampleHemisphere) ----
+// PT, the light pool, and the guided integrator share this one definition; the
+// guided shader's bit-identical PdfBsdf/PdfGGX/PdfCosine were removed in Task 7.
+
+float PdfBsdfMixture(SurfaceData s, float specularProb, float3 dir)
+{
+    if (dot(dir, s.N) <= 0.0)
+        return 0.0;
+    float3 H = normalize(s.V + dir);
+    float NdotH = max(dot(s.N, H), EPSILON);
+    float VdotH = max(dot(s.V, H), EPSILON);
+    float pdfSpecular = DistributionGGX(NdotH, s.roughness) * NdotH / (4.0 * VdotH);
+    float pdfDiffuse = max(dot(s.N, dir), 0.0) / PI;
+    return specularProb * pdfSpecular + (1.0 - specularProb) * pdfDiffuse;
+}
+
+float SurfaceSpecularProb(SurfaceData s)
+{
+    float3 F = FresnelSchlick(s.NdotV, s.F0);
+    return (F.r + F.g + F.b) / 3.0;
+}
+
 // ---- Direct lighting BRDF evaluation (no PDF, raw BRDF value) ----
 
 // Cook-Torrance specular for a known light direction.
@@ -158,25 +180,12 @@ float GetLightAttenuation(float3 shadingPoint, LightData light)
     return attenuation;
 }
 
-float3 CalculateDirectLightning(HitData hit, SurfaceData surface)
-{
-    float3 directLighting = float3(0, 0, 0);
+// CalculateDirectLightning (per-light analytic loop) was removed in Task 7 — its
+// last callers (PT and the guided integrator) now use SampleDirectLight from the
+// unified pool below. GetLightAttenuation / EvalDirectBRDF / GetShadowRayDirection
+// remain: SampleDirectLight's analytic-delta branch reuses them.
 
-    for (uint i = 0; i < numLights; i++)
-    {
-        LightData light = g_lightData[i];
-        float3 L = GetShadowRayDirection(hit.position, light);
-
-        float visibility = TraceShadow(hit.position + surface.N * EPSILON, light);
-        if (visibility <= 0.0)
-            continue;
-
-        float atten = GetLightAttenuation(hit.position, light);
-        float3 brdf = EvalDirectBRDF(surface, L);
-        directLighting += brdf * light.color * light.intensity * atten * visibility * max(dot(surface.N, L), 0.0);
-    }
-    return directLighting;
-}
+#include "LightPool.hlsl"
 
 // ---- Ray generation ----
 
@@ -206,6 +215,8 @@ void RayGen()
 
         float3 radiance = float3(0, 0, 0);
         float3 pathThroughput = float3(1, 1, 1);
+        float3 previousVertexPosition = rayOrigin;
+        float prevBouncePdf = 0.0; // vertex 0 = camera ray (full weight)
 
         // Vertex 0 = primary hit; direct light at every vertex; a bounce is
         // sampled while vertexIndex < numBounces (numBounces+1 path segments).
@@ -273,7 +284,22 @@ void RayGen()
             surface.roughness = roughness;
             surface.metallic  = metallic;
 
-            radiance += pathThroughput * CalculateDirectLightning(hit, surface);
+            if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0))
+            {
+                float3 geometricLightNormal = geometricN;
+                if (dot(geometricLightNormal, V) > 0.0) // front face only
+                {
+                    float weight = 1.0;
+                    if (vertexIndex > 0u)
+                    {
+                        float pdfNee = PdfNeeTowardHit(previousVertexPosition, instance, p.primitiveId, hit.position);
+                        weight = BalanceWeight(prevBouncePdf, pdfNee, 0.0);
+                    }
+                    radiance += pathThroughput * instance.emissiveRadiance * weight;
+                }
+            }
+
+            radiance += pathThroughput * SampleDirectLight(hit, surface, seed);
 
             if (vertexIndex >= (uint)numBounces)
                 break;
@@ -281,7 +307,7 @@ void RayGen()
             // Continuation sample: stochastic specular/diffuse selection,
             // pdf-cancelled throughput.
             float3 F = FresnelSchlick(surface.NdotV, surface.F0);
-            float specularProb = (F.r + F.g + F.b) / 3.0;
+            float specularProb = SurfaceSpecularProb(surface);
 
             float2 xi = Random2D(seed);
             seed = pcg_hash(seed);  // advance: next bounce gets a different xi
@@ -312,6 +338,9 @@ void RayGen()
                     break; // invalid bounce sample — direct light at this vertex stands
                 throughput /= (1.0 - specularProb);  // branch guarantees pathSelector>=specularProb => 1-specularProb>0
             }
+
+            prevBouncePdf = PdfBsdfMixture(surface, specularProb, bounceDir);
+            previousVertexPosition = hit.position;
 
 #if RT_DEBUG_VIEWS
             // BounceHealth: classify a NaN bounce direction at this hit.

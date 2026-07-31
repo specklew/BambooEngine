@@ -135,7 +135,7 @@ void LightInjectionPass::CreateGlobalRootSignature()
                                         shadingPointsRange, voxelRepresentativeRange, vplPositionRange,
                                         vbufferRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[8];
+    CD3DX12_ROOT_PARAMETER rootParameters[10];
     rootParameters[0].InitAsDescriptorTable(13, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
@@ -144,8 +144,10 @@ void LightInjectionPass::CreateGlobalRootSignature()
     rootParameters[5].InitAsConstants(1, 1);           // Time
     rootParameters[6].InitAsConstantBufferView(3, 0);  // Pass constants
     rootParameters[7].InitAsConstantBufferView(4, 0);  // Voxel grid constants
+    rootParameters[8].InitAsShaderResourceView(1, 1); // Emissive triangles (t1, space1)
+    rootParameters[9].InitAsShaderResourceView(2, 1); // Light pool (t2, space1)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(8, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(10, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -299,6 +301,8 @@ void LightInjectionPass::Render()
     m_commandList->SetComputeRoot32BitConstant(5, time, 0);
     m_commandList->SetComputeRootConstantBufferView(6, m_passConstants->GetGpuVirtualAddress());
     m_commandList->SetComputeRootConstantBufferView(7, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(8, m_currentScene->GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(9, m_currentScene->GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
 
     D3D12_DISPATCH_RAYS_DESC desc = {};
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();

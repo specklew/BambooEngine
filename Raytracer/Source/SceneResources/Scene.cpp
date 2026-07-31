@@ -82,10 +82,10 @@ static std::shared_ptr<StructuredBuffer<GeometryInfo>> CreateGeometryInfoBuffer(
     return geo_buffer;
 }
 
-static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(Renderer& renderer, const std::vector<std::shared_ptr<GameObject>>& gameObjects, const std::vector<std::shared_ptr<Primitive>>& primitives)
+static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(Renderer& renderer, const std::vector<std::shared_ptr<GameObject>>& gameObjects, const std::vector<std::shared_ptr<Primitive>>& primitives, std::vector<EmissiveTriangle>& outEmissiveTriangles)
 {
     std::vector<InstanceInfo> instances_info;
-    
+
     for (auto go : gameObjects)
     {
         auto model = go->GetModel();
@@ -101,6 +101,7 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
             float metallic_factor = 1.0f;
             float roughness_factor = 1.0f;
             DirectX::XMFLOAT4 base_color_factor = { 1.0f, 1.0f, 1.0f, 1.0f };
+            DirectX::XMFLOAT3 emissive_radiance = { 0.0f, 0.0f, 0.0f };
 
             if (primitive->m_material)
             {
@@ -116,6 +117,7 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
                 metallic_factor = primitive->m_material->m_data.metallicFactor;
                 roughness_factor = primitive->m_material->m_data.roughnessFactor;
                 base_color_factor = primitive->m_material->m_data.baseColorFactor;
+                emissive_radiance = primitive->m_material->m_emissiveRadiance;
             }
 
             InstanceInfo info = {};
@@ -126,11 +128,62 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
             info.metallicFactor = metallic_factor;
             info.roughnessFactor = roughness_factor;
             info.baseColorFactor = base_color_factor;
+            info.emissiveRadiance = emissive_radiance;
+            info.emissiveLightOffset = -1;
             // Explicit transpose into the DXR ObjectToWorld3x4 layout.
             const DirectX::XMFLOAT4X4 world = go->GetWorldFloat4X4();
             for (int r = 0; r < 3; ++r)
                 for (int c = 0; c < 4; ++c)
                     info.objectToWorld.m[r][c] = world.m[c][r];
+
+            const bool is_emissive = emissive_radiance.x != 0.0f || emissive_radiance.y != 0.0f || emissive_radiance.z != 0.0f;
+            if (is_emissive)
+            {
+                if (primitive->m_emissiveBakePositions.empty() || primitive->m_emissiveBakeIndices.empty())
+                {
+                    spdlog::error("Material claims emissive radiance but primitive has no baked emissive positions/indices (loader bug); treating instance as non-emissive. instance={} geometry_id={}",
+                        instances_info.size(), geometry_id);
+                }
+                else
+                {
+                    const uint32_t instance_id = static_cast<uint32_t>(instances_info.size());
+                    // Emissive-first pool layout (Step 3b): offset is the triangle
+                    // index alone, independent of analytic light count, so this
+                    // stays valid across runtime light-data rebuilds.
+                    info.emissiveLightOffset = static_cast<int>(outEmissiveTriangles.size());
+
+                    const DirectX::XMMATRIX world_matrix = go->GetWorldMatrix();
+                    const size_t triangle_count = primitive->m_emissiveBakeIndices.size() / 3;
+                    for (size_t t = 0; t < triangle_count; ++t)
+                    {
+                        const uint32_t i0 = primitive->m_emissiveBakeIndices[t * 3 + 0];
+                        const uint32_t i1 = primitive->m_emissiveBakeIndices[t * 3 + 1];
+                        const uint32_t i2 = primitive->m_emissiveBakeIndices[t * 3 + 2];
+
+                        const DirectX::XMVECTOR world_v0 = DirectX::XMVector3Transform(DirectX::XMLoadFloat3(&primitive->m_emissiveBakePositions[i0]), world_matrix);
+                        const DirectX::XMVECTOR world_v1 = DirectX::XMVector3Transform(DirectX::XMLoadFloat3(&primitive->m_emissiveBakePositions[i1]), world_matrix);
+                        const DirectX::XMVECTOR world_v2 = DirectX::XMVector3Transform(DirectX::XMLoadFloat3(&primitive->m_emissiveBakePositions[i2]), world_matrix);
+
+                        EmissiveTriangle tri = {};
+                        DirectX::XMStoreFloat3(&tri.v0, world_v0);
+                        DirectX::XMStoreFloat3(&tri.v1, world_v1);
+                        DirectX::XMStoreFloat3(&tri.v2, world_v2);
+                        tri.radiance = emissive_radiance;
+
+                        const DirectX::XMVECTOR cross_vec = DirectX::XMVector3Cross(
+                            DirectX::XMVectorSubtract(world_v1, world_v0),
+                            DirectX::XMVectorSubtract(world_v2, world_v0));
+                        const float area = 0.5f * DirectX::XMVectorGetX(DirectX::XMVector3Length(cross_vec));
+                        // Never skip a triangle here: emissiveLightOffset + PrimitiveIndex()
+                        // contiguity requires exactly one pool entry per primitive triangle.
+                        tri.area = (area < 1e-8f) ? 0.0f : area;
+                        tri.instanceId = instance_id;
+
+                        outEmissiveTriangles.push_back(tri);
+                    }
+                }
+            }
+
             instances_info.push_back(info);
         }
     }
@@ -200,8 +253,45 @@ std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
     auto all_prims = GetAllPrimitives();
     
     auto geo_info_buffer = CreateGeometryInfoBuffer(renderer, all_prims);
-    auto instance_info_buffer = CreateInstanceInfoBuffer(renderer, m_gameObjects, all_prims);
+
+    std::vector<EmissiveTriangle> emissive_triangles;
+    auto instance_info_buffer = CreateInstanceInfoBuffer(renderer, m_gameObjects, all_prims, emissive_triangles);
     auto light_data_buffer = CreateLightDataBuffer(renderer, m_lightData);
+
+    // Emissive-first layout (Step 3b): emissive triangles occupy pool indices
+    // [0, emissive_triangles.size()), independent of analytic light count, so
+    // InstanceInfo.emissiveLightOffset (baked above) never needs to change when
+    // analytic lights are added/removed/edited at runtime. Analytic entries fill
+    // the tail and are the only ones a runtime rebuild ever touches.
+    std::vector<LightPoolEntry> light_pool;
+    light_pool.reserve(emissive_triangles.size() + m_lightData.size());
+    constexpr float kPi = 3.14159265358979323846f;
+    for (uint32_t i = 0; i < emissive_triangles.size(); ++i)
+    {
+        const EmissiveTriangle& t = emissive_triangles[i];
+        light_pool.push_back({ LightPoolEmissiveTriangle, i, LightPoolLuminance(t.radiance) * t.area * kPi, 0.0f });
+    }
+    for (uint32_t i = 0; i < m_lightData.size(); ++i)
+    {
+        light_pool.push_back({ LightPoolAnalytic, i, AnalyticLightPoolPower(m_lightData[i]), 0.0f });
+    }
+    float light_pool_total_power = 0.0f;
+    for (const LightPoolEntry& e : light_pool)
+        light_pool_total_power += e.power;
+    float running_power = 0.0f;
+    for (LightPoolEntry& e : light_pool)
+    {
+        running_power += e.power;
+        e.cdf = (light_pool_total_power > 0.0f) ? running_power / light_pool_total_power : 1.0f;
+    }
+    if (!light_pool.empty())
+        light_pool.back().cdf = 1.0f;
+
+    auto emissive_triangle_buffer = renderer.CreateStructuredBuffer(emissive_triangles);
+    auto light_pool_buffer = renderer.CreateStructuredBuffer(light_pool);
+
+    spdlog::info("Light pool built: {} analytic lights, {} emissive triangles, total power={:.3f}",
+        m_lightData.size(), emissive_triangles.size(), light_pool_total_power);
 
     Scene scene;
     scene.m_lightDataCPU = m_lightData;
@@ -216,12 +306,46 @@ std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
     scene.m_geometryInfoBuffer = std::move(geo_info_buffer);
     scene.m_instanceInfoBuffer = std::move(instance_info_buffer);
     scene.m_lightDataBuffer = std::move(light_data_buffer);
+    scene.m_emissiveTriangleBuffer = std::move(emissive_triangle_buffer);
+    scene.m_lightPoolBuffer = std::move(light_pool_buffer);
+    scene.m_lightPoolTotalPower = light_pool_total_power;
+    scene.m_lightPoolCount = static_cast<uint32_t>(light_pool.size());
+    scene.m_lightPoolCPU = std::move(light_pool);
 
     spdlog::info("Scene AABB: min=({:.3f},{:.3f},{:.3f}) max=({:.3f},{:.3f},{:.3f})",
         scene.m_aabbMin.x, scene.m_aabbMin.y, scene.m_aabbMin.z,
         scene.m_aabbMax.x, scene.m_aabbMax.y, scene.m_aabbMax.z);
 
     return std::make_shared<Scene>(std::move(scene));
+}
+
+void Scene::RebuildLightPoolAnalyticTail(Renderer& renderer)
+{
+    // Emissive prefix is static geometry — its length never changes, so it's
+    // read straight from the GPU buffer's fixed element count.
+    const size_t emissiveCount = m_emissiveTriangleBuffer ? m_emissiveTriangleBuffer->GetElementsCount() : 0;
+    m_lightPoolCPU.resize(emissiveCount);
+    for (uint32_t i = 0; i < m_lightDataCPU.size(); ++i)
+        m_lightPoolCPU.push_back({ LightPoolAnalytic, i, AnalyticLightPoolPower(m_lightDataCPU[i]), 0.0f });
+
+    float totalPower = 0.0f;
+    for (const LightPoolEntry& e : m_lightPoolCPU)
+        totalPower += e.power;
+    float runningPower = 0.0f;
+    for (LightPoolEntry& e : m_lightPoolCPU)
+    {
+        runningPower += e.power;
+        e.cdf = (totalPower > 0.0f) ? runningPower / totalPower : 1.0f;
+    }
+    if (!m_lightPoolCPU.empty())
+        m_lightPoolCPU.back().cdf = 1.0f;
+
+    m_lightPoolBuffer = renderer.CreateStructuredBuffer(m_lightPoolCPU);
+    m_lightPoolTotalPower = totalPower;
+    m_lightPoolCount = static_cast<uint32_t>(m_lightPoolCPU.size());
+
+    spdlog::info("Light pool rebuilt: {} analytic lights, {} emissive triangles, total power={:.3f}",
+        m_lightDataCPU.size(), emissiveCount, totalPower);
 }
 
 void SceneBuilder::UpdateMatricesInNodesRecursively(const std::shared_ptr<SceneNode>& node)

@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include "LightData.h"
+#include "LightPool.h"
 #include "Resources/StructuredBuffer.h"
 
 class ConstantBuffer;
@@ -32,6 +33,10 @@ struct InstanceInfo
     // Object-to-world in DXR ObjectToWorld3x4() layout (transpose of the
     // row-vector world matrix). Lets raygen shaders reconstruct VBuffer hits.
     DirectX::XMFLOAT3X4 objectToWorld;
+    DirectX::XMFLOAT3 emissiveRadiance; // 0 = not emissive
+    // -1 = not a light; else light-pool index of this instance's primitive 0
+    // (lightIndex = emissiveLightOffset + PrimitiveIndex()).
+    int emissiveLightOffset;
 };
 
 class Scene
@@ -54,6 +59,18 @@ public:
     bool IsLightDataDirty() const { return m_lightDataDirty; }
     void ClearLightDataDirty() { m_lightDataDirty = false; }
 
+    [[nodiscard]] std::shared_ptr<StructuredBuffer<EmissiveTriangle>> GetEmissiveTriangleBuffer() { return m_emissiveTriangleBuffer; }
+    [[nodiscard]] std::shared_ptr<StructuredBuffer<LightPoolEntry>> GetLightPoolBuffer() { return m_lightPoolBuffer; }
+    [[nodiscard]] float GetLightPoolTotalPower() const { return m_lightPoolTotalPower; }
+    [[nodiscard]] uint32_t GetLightPoolCount() const { return m_lightPoolCount; }
+
+    // Rebuilds the pool's analytic tail (entries after the fixed emissive-triangle
+    // prefix) from the current GetLightDataCPU(), re-prefix-sums the whole pool's
+    // CDF, and re-uploads the pool buffer. Called when light data goes dirty at
+    // runtime (headless overrides, EditorUI edits) — emissive entries are static
+    // geometry and never change.
+    void RebuildLightPoolAnalyticTail(Renderer& renderer);
+
     [[nodiscard]] const DirectX::XMFLOAT3& GetAabbMin() const { return m_aabbMin; }
     [[nodiscard]] const DirectX::XMFLOAT3& GetAabbMax() const { return m_aabbMax; }
 
@@ -68,6 +85,12 @@ private:
     std::shared_ptr<StructuredBuffer<LightData>> m_lightDataBuffer;
     std::vector<LightData> m_lightDataCPU;
     bool m_lightDataDirty = false;
+
+    std::shared_ptr<StructuredBuffer<EmissiveTriangle>> m_emissiveTriangleBuffer;
+    std::shared_ptr<StructuredBuffer<LightPoolEntry>> m_lightPoolBuffer;
+    std::vector<LightPoolEntry> m_lightPoolCPU;
+    float m_lightPoolTotalPower = 0.0f;
+    uint32_t m_lightPoolCount = 0;
 
     std::string m_name;
     std::shared_ptr<SceneNode> m_root;

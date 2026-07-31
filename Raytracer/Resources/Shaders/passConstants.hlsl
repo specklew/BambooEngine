@@ -22,9 +22,11 @@ cbuffer PassConstants : register(b3)
     // 1 = skybox radiance lights surfaces via indirect rays (default); 0 = sky
     // stays visible as primary-ray background but contributes no lighting.
     // Benchmark isolation: VXPG's guide targets first-bounce DIRECT-lit
-    // surfaces only (injection deposits CalculateDirectLightning), so sky-driven
+    // surfaces only (injection deposits SampleDirectLight), so sky-driven
     // indirect is unguidable variance in both techniques.
     uint skyLightingEnabled;
+    uint  lightPoolCount;
+    float lightPoolTotalPower;
 }
 
 #endif

@@ -140,6 +140,22 @@ namespace
         return fallback;
     }
 
+    // Tungsten emission: number (gray) | 3-array (rgb); anything else is not a
+    // supported form -> warn and treat the primitive as non-emissive.
+    DirectX::XMFLOAT3 ParseEmission(const rapidjson::Value& value)
+    {
+        if (value.IsNumber())
+        {
+            const float v = value.GetFloat();
+            return { v, v, v };
+        }
+        if (value.IsArray() && value.Size() >= 3)
+            return { value[0].GetFloat(), value[1].GetFloat(), value[2].GetFloat() };
+
+        spdlog::warn("Tungsten: unsupported 'emission' value shape -> treating primitive as non-emissive");
+        return { 0.0f, 0.0f, 0.0f };
+    }
+
     struct AlbedoResult
     {
         Rgb color{ 0.8f, 0.8f, 0.8f };
@@ -330,15 +346,126 @@ std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const Asse
 
     int meshCount = 0, skippedCount = 0;
 
+    // Shared tail for both the .wo3 mesh path and the emitter-quad path:
+    // uploads primVertices/primIndices, retains emissive bake data, and builds
+    // the Primitive/Model/GameObject/SceneNode + transform from `prim`.
+    auto addMeshPrimitive = [&](std::vector<Vertex>& primVertices, std::vector<uint32_t>& primIndices,
+        const std::shared_ptr<Material>& material, const rapidjson::Value& prim)
+    {
+        BufferView vertexView{};
+        vertexView.buffer = nullptr;
+        vertexView.count = primVertices.size();
+        vertexView.offset = vertices.size();
+        vertexView.offsetBytes = vertices.size() * sizeof(Vertex);
+        vertexView.size = primVertices.size() * sizeof(Vertex);
+
+        BufferView indexView{};
+        indexView.buffer = nullptr;
+        indexView.count = primIndices.size();
+        indexView.offset = indices.size();
+        indexView.offsetBytes = indices.size() * sizeof(uint32_t);
+        indexView.size = primIndices.size() * sizeof(uint32_t);
+
+        XMFLOAT3 localMin{ FLT_MAX, FLT_MAX, FLT_MAX };
+        XMFLOAT3 localMax{ -FLT_MAX, -FLT_MAX, -FLT_MAX };
+        for (const Vertex& v : primVertices)
+        {
+            localMin.x = std::min(localMin.x, v.Pos.x); localMax.x = std::max(localMax.x, v.Pos.x);
+            localMin.y = std::min(localMin.y, v.Pos.y); localMax.y = std::max(localMax.y, v.Pos.y);
+            localMin.z = std::min(localMin.z, v.Pos.z); localMax.z = std::max(localMax.z, v.Pos.z);
+        }
+
+        vertices.insert(vertices.end(), primVertices.begin(), primVertices.end());
+        indices.insert(indices.end(), primIndices.begin(), primIndices.end());
+
+        auto primitive = std::make_shared<Primitive>(vertexView, indexView, material);
+        primitive->m_localAabbMin = localMin;
+        primitive->m_localAabbMax = localMax;
+
+        const XMFLOAT3& emissiveRadiance = material->m_emissiveRadiance;
+        if (emissiveRadiance.x != 0.0f || emissiveRadiance.y != 0.0f || emissiveRadiance.z != 0.0f)
+        {
+            primitive->m_emissiveBakePositions.reserve(primVertices.size());
+            for (const Vertex& v : primVertices)
+                primitive->m_emissiveBakePositions.push_back(v.Pos);
+            primitive->m_emissiveBakeIndices = primIndices;
+        }
+
+        auto model = std::make_shared<Model>();
+        model->AddMesh(primitive);
+        sceneBuilder.AddModel(model);
+
+        auto gameObject = renderer.InstantiateGameObject();
+        sceneBuilder.AddGameObject(gameObject, model);
+
+        auto node = std::make_shared<SceneNode>();
+        node->AddGameObject(gameObject);
+
+        SimpleMath::Vector3 position{ 0, 0, 0 };
+        SimpleMath::Vector3 scale{ 1, 1, 1 };
+        SimpleMath::Vector3 rotationDeg{ 0, 0, 0 };
+        if (prim.HasMember("transform") && prim["transform"].IsObject())
+        {
+            const rapidjson::Value& transform = prim["transform"];
+            if (transform.HasMember("position")) position = ParseVec3(transform["position"], position);
+            if (transform.HasMember("scale")) scale = ParseScale(transform["scale"]);
+            if (transform.HasMember("rotation")) rotationDeg = ParseVec3(transform["rotation"], rotationDeg);
+        }
+
+        const float toRad = 3.14159265358979323846f / 180.0f;
+        // Tungsten rotation = XYZ Euler degrees. Single-axis cases (this scene)
+        // are order/handedness-robust; verify sign on multi-axis scenes.
+        SimpleMath::Quaternion rotation = SimpleMath::Quaternion::CreateFromYawPitchRoll(
+            rotationDeg.y * toRad, rotationDeg.x * toRad, rotationDeg.z * toRad);
+
+        node->SetScale(scale);
+        node->SetRotation(rotation);
+        node->SetPosition(position);
+        sceneBuilder.AddChild(sceneBuilder.GetRoot(), node);
+
+        ++meshCount;
+    };
+
     if (doc.HasMember("primitives") && doc["primitives"].IsArray())
     {
         for (const rapidjson::Value& prim : doc["primitives"].GetArray())
         {
             const char* type = prim.HasMember("type") && prim["type"].IsString() ? prim["type"].GetString() : "";
 
+            const bool isQuad = std::string(type) == "quad";
+            const bool hasEmission = prim.HasMember("emission");
+            if (isQuad && hasEmission)
+            {
+                // Tungsten quad: unit square in local XZ, normal +Y. LoadWo3 (and
+                // the glTF loader) apply NO axis negation or winding swap -- both
+                // source formats are kept exactly as authored (see LoadWo3 above
+                // and ADR 0005); the same "no conversion" applies here, so this
+                // winding/normal is used verbatim.
+                std::vector<Vertex> primVertices(4);
+                primVertices[0].Pos = { -0.5f, 0.0f, -0.5f };
+                primVertices[1].Pos = {  0.5f, 0.0f, -0.5f };
+                primVertices[2].Pos = {  0.5f, 0.0f,  0.5f };
+                primVertices[3].Pos = { -0.5f, 0.0f,  0.5f };
+                for (Vertex& v : primVertices) { v.Normal = { 0, 1, 0 }; v.Tex0 = { 0, 0 }; }
+                std::vector<uint32_t> primIndices = { 0, 2, 1, 0, 3, 2 };
+
+                MeshUtils::ComputeTangents(primVertices, primIndices);
+                MeshUtils::EnforceVertexInvariants(primVertices);
+
+                auto material = std::make_shared<Material>();
+                material->m_data.baseColorFactor = { 0.0f, 0.0f, 0.0f, 1.0f };
+                material->m_data.roughnessFactor = 1.0f;
+                material->m_data.metallicFactor = 0.0f;
+                material->m_emissiveRadiance = ParseEmission(prim["emission"]);
+                material->UpdateMaterial();
+
+                addMeshPrimitive(primVertices, primIndices, material, prim);
+                continue;
+            }
+
             if (std::string(type) != "mesh" || !prim.HasMember("file") || !prim["file"].IsString())
             {
-                // Analytic quad/cube/sphere and emitter-only primitives: not v1.
+                // Analytic (non-emitter) quad/cube/sphere primitives: not v1.
                 ++skippedCount;
                 continue;
             }
@@ -355,29 +482,6 @@ std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const Asse
             MeshUtils::DropDegenerateTriangles(primVertices, primIndices);
             MeshUtils::ComputeTangents(primVertices, primIndices); // .wo3 carries normals, not tangents
             MeshUtils::EnforceVertexInvariants(primVertices);
-
-            BufferView vertexView{};
-            vertexView.buffer = nullptr;
-            vertexView.count = primVertices.size();
-            vertexView.offset = vertices.size();
-            vertexView.offsetBytes = vertices.size() * sizeof(Vertex);
-            vertexView.size = primVertices.size() * sizeof(Vertex);
-
-            BufferView indexView{};
-            indexView.buffer = nullptr;
-            indexView.count = primIndices.size();
-            indexView.offset = indices.size();
-            indexView.offsetBytes = indices.size() * sizeof(uint32_t);
-            indexView.size = primIndices.size() * sizeof(uint32_t);
-
-            XMFLOAT3 localMin{ FLT_MAX, FLT_MAX, FLT_MAX };
-            XMFLOAT3 localMax{ -FLT_MAX, -FLT_MAX, -FLT_MAX };
-            for (const Vertex& v : primVertices)
-            {
-                localMin.x = std::min(localMin.x, v.Pos.x); localMax.x = std::max(localMax.x, v.Pos.x);
-                localMin.y = std::min(localMin.y, v.Pos.y); localMax.y = std::max(localMax.y, v.Pos.y);
-                localMin.z = std::min(localMin.z, v.Pos.z); localMax.z = std::max(localMax.z, v.Pos.z);
-            }
 
             // Resolve the primitive's BSDF (named reference or inline object).
             std::shared_ptr<Material> material;
@@ -406,46 +510,7 @@ std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const Asse
                 material->UpdateMaterial();
             }
 
-            vertices.insert(vertices.end(), primVertices.begin(), primVertices.end());
-            indices.insert(indices.end(), primIndices.begin(), primIndices.end());
-
-            auto primitive = std::make_shared<Primitive>(vertexView, indexView, material);
-            primitive->m_localAabbMin = localMin;
-            primitive->m_localAabbMax = localMax;
-
-            auto model = std::make_shared<Model>();
-            model->AddMesh(primitive);
-            sceneBuilder.AddModel(model);
-
-            auto gameObject = renderer.InstantiateGameObject();
-            sceneBuilder.AddGameObject(gameObject, model);
-
-            auto node = std::make_shared<SceneNode>();
-            node->AddGameObject(gameObject);
-
-            SimpleMath::Vector3 position{ 0, 0, 0 };
-            SimpleMath::Vector3 scale{ 1, 1, 1 };
-            SimpleMath::Vector3 rotationDeg{ 0, 0, 0 };
-            if (prim.HasMember("transform") && prim["transform"].IsObject())
-            {
-                const rapidjson::Value& transform = prim["transform"];
-                if (transform.HasMember("position")) position = ParseVec3(transform["position"], position);
-                if (transform.HasMember("scale")) scale = ParseScale(transform["scale"]);
-                if (transform.HasMember("rotation")) rotationDeg = ParseVec3(transform["rotation"], rotationDeg);
-            }
-
-            const float toRad = 3.14159265358979323846f / 180.0f;
-            // Tungsten rotation = XYZ Euler degrees. Single-axis cases (this scene)
-            // are order/handedness-robust; verify sign on multi-axis scenes.
-            SimpleMath::Quaternion rotation = SimpleMath::Quaternion::CreateFromYawPitchRoll(
-                rotationDeg.y * toRad, rotationDeg.x * toRad, rotationDeg.z * toRad);
-
-            node->SetScale(scale);
-            node->SetRotation(rotation);
-            node->SetPosition(position);
-            sceneBuilder.AddChild(sceneBuilder.GetRoot(), node);
-
-            ++meshCount;
+            addMeshPrimitive(primVertices, primIndices, material, prim);
         }
     }
 
@@ -457,15 +522,27 @@ std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const Asse
         return nullptr;
     }
 
-    // v1: no Tungsten emitters/env imported — engine default directional light.
-    LightData defaultLight;
-    defaultLight.type = Directional;
-    defaultLight.position = { 0, 0, 0 };
-    defaultLight.direction = { -0.5f, -0.7071f, -0.067f };
-    defaultLight.color = { 1, 1, 1 };
-    defaultLight.intensity = 3.0f;
-    defaultLight.range = 0.0f;
-    sceneBuilder.AddLightData(defaultLight);
+    // v1: no Tungsten analytic lights/env imported. Only fall back to the engine
+    // default directional light when the scene has no light source at all —
+    // i.e. no emissive material was imported either (Task 3: quad emitters).
+    bool anyEmissive = false;
+    for (const auto& model : sceneBuilder.GetModels())
+        for (const auto& primitive : model->GetMeshes())
+            if (primitive->m_material && (primitive->m_material->m_emissiveRadiance.x > 0 ||
+                primitive->m_material->m_emissiveRadiance.y > 0 || primitive->m_material->m_emissiveRadiance.z > 0))
+                anyEmissive = true;
+
+    if (!anyEmissive)
+    {
+        LightData defaultLight;
+        defaultLight.type = Directional;
+        defaultLight.position = { 0, 0, 0 };
+        defaultLight.direction = { -0.5f, -0.7071f, -0.067f };
+        defaultLight.color = { 1, 1, 1 };
+        defaultLight.intensity = 3.0f;
+        defaultLight.range = 0.0f;
+        sceneBuilder.AddLightData(defaultLight);
+    }
 
     auto vertexIndexPair = renderer.CreateSceneResources(vertices, indices);
     auto vertexBuffer = vertexIndexPair.first;

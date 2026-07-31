@@ -268,6 +268,20 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
         material->m_data.metallicFactor = static_cast<float>(pbr.metallicFactor);
         material->m_data.roughnessFactor = static_cast<float>(pbr.roughnessFactor);
 
+        const auto& gltf_material = model.materials[primitive.material];
+        const auto& ef = gltf_material.emissiveFactor; // std::vector<double>, size 3
+        float emissive_strength = 1.0f;
+        if (auto it = gltf_material.extensions.find("KHR_materials_emissive_strength");
+            it != gltf_material.extensions.end() && it->second.Has("emissiveStrength"))
+            emissive_strength = static_cast<float>(it->second.Get("emissiveStrength").GetNumberAsDouble());
+        if (ef.size() == 3)
+        {
+            material->m_emissiveRadiance = {
+                static_cast<float>(ef[0]) * emissive_strength,
+                static_cast<float>(ef[1]) * emissive_strength,
+                static_cast<float>(ef[2]) * emissive_strength };
+        }
+
         material->UpdateMaterial();
     }
 
@@ -304,6 +318,16 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     auto prim = std::make_shared<Primitive>(vertex_view, index_view, material);
     prim->m_localAabbMin = local_min;
     prim->m_localAabbMax = local_max;
+
+    const DirectX::XMFLOAT3& emissive_radiance = material->m_emissiveRadiance;
+    if (emissive_radiance.x != 0.0f || emissive_radiance.y != 0.0f || emissive_radiance.z != 0.0f)
+    {
+        prim->m_emissiveBakePositions.reserve(vertices.size());
+        for (const Vertex& v : vertices)
+            prim->m_emissiveBakePositions.push_back(v.Pos);
+        prim->m_emissiveBakeIndices = indices;
+    }
+
     return prim;
 }
 

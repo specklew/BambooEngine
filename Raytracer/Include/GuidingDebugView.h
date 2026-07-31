@@ -22,6 +22,10 @@ enum class GuidingDebugView : int
 	TopLevelHeapView = 12,
 	PdfRoundTripView = 13,
 	SelectedClusterView = 14,
+	// Not a diagnostic: a complete weight-1 BSDF estimator inside the guided
+	// technique's frame (SIByL gi.slang strategy 0) for symmetric-baseline
+	// equal-time benchmarks. Last free slot of the 4-bit field.
+	SymmetricBsdfBaseline = 15,
 };
 
 // Runtime docs, one per enum entry in order (FormatDebugViewDocs static_asserts the count).
@@ -41,4 +45,5 @@ inline constexpr DebugViewDoc kGuidingDebugViewDocs[] = {
 	{"VxpgLightTreePass top-level tree (Pass 7)", "DISABLE ACCUMULATION. Screen-space per-superpixel (32px blocky). green = heap sum invariant holds (parent == sum of children for slots 1..31) and root > 0; magenta = invariant broken (wave-reduction translation bug); red = NaN/inf in the heap; dark blue = root 0 (superpixel sees no lit cluster / sky). Mostly green+blue = healthy; any magenta = the top-level reduction is wrong", "verifies the per-superpixel implicit importance heap gSpixelClusterImportanceHeap: heap[i] must equal heap[2i]+heap[2i+1] for the 31 internal slots"},
 	{"GuidedPathTracingPass forward/reverse pdf round trip (integrator)", "DISABLE ACCUMULATION. green on lit geometry = forward walk pdf matches the reverse telescoped query and the leaf/cluster maps round-trip; magenta = MISMATCH — a silent-bias bug the image alone would never show (also covers heap-picked cluster with no tree root / dead branch); red = NaN/inf in either pdf; dark blue = guide dead here (heap root 0 / no lit voxels / no superpixel). ANY magenta = fix before trusting benchmarks", "samples the discrete guide chain once (heap walk + tree walk), then reverse-queries the same outcome via inverse index / cluster assignments / compact->leaf; pdfs compared at rel-eps 1e-3"},
 	{"GuidedPathTracingPass forward-selected cluster (integrator)", "DISABLE ACCUMULATION (colors strobe per frame). Superpixel-blocky hue-wheel regions whose boundaries line up with view 10's tiles; magenta = heap picked a cluster with no tree root; dark blue = guide dead here. Uniform single color everywhere = spixel-index wiring bug; pixel-fine noise = index texture not superpixel-granular", "one importance-heap walk per pixel per frame, painted in the view-9 hue wheel — validates the superpixel index binding and per-region adaptation"},
+	{"GuidedPathTracingPass symmetric baseline (benchmark)", "a COMPLETE unbiased estimator (converges to the Path Tracing reference): the guided technique's frame with the guide sampling stripped — use as the equal-time baseline arm for VXPG-vs-baseline comparisons", "first bounce = weight-1 BSDF sample only (SIByL strategy 0): no guide branch, no guide pdf query; direct light, VPL writes, and every build pass unchanged"},
 };

@@ -62,6 +62,37 @@ float TraceShadow(float3 shadingPoint, LightData light)
     return (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
 }
 
+// Occlusion test along an explicit segment (origin, dir, maxT) instead of a
+// LightData — used by pool NEE for sampled emissive-triangle points. TMax is
+// pulled in by 2*RAY_TMIN so the sampled light point itself is never its own
+// occluder. Same flags/alpha handling as TraceShadow.
+float TraceShadowSegment(float3 origin, float3 direction, float maxT)
+{
+    RayDesc shadowRay;
+    shadowRay.Origin = origin;
+    shadowRay.Direction = direction;
+    shadowRay.TMin = RAY_TMIN;
+    shadowRay.TMax = max(RAY_TMIN, maxT - 2 * RAY_TMIN);
+
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
+    query.TraceRayInline(SceneBVH, RAY_FLAG_NONE, ~0, shadowRay);
+    while (query.Proceed())
+    {
+        if (query.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE)
+        {
+            InstanceInfo instance = g_instanceInfo[query.CandidateInstanceID()];
+            uint vertexOffset = g_geometryInfo[instance.geometryIndex].vertexOffset;
+            uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
+            HitData hit = GetHitData(query.CandidatePrimitiveIndex(), vertexOffset, indexOffset,
+                                     query.CandidateTriangleBarycentrics(), instance.objectToWorld);
+            float4 albedo = SampleTextureColor(instance, hit) * instance.baseColorFactor;
+            if (albedo.a >= EPSILON)
+                query.CommitNonOpaqueTriangleHit();
+        }
+    }
+    return (query.CommittedStatus() == COMMITTED_TRIANGLE_HIT) ? 0.0 : 1.0;
+}
+
 #else // pipeline backend
 
 float TraceShadow(float3 shadingPoint, LightData light)
@@ -94,6 +125,24 @@ void ShadowHit(inout ShadowPayload payload : SV_RayPayload, Attributes attr)
 
     payload.visibility = 0.0;
     AcceptHitAndEndSearch();
+}
+
+// Occlusion test along an explicit segment (origin, dir, maxT) instead of a
+// LightData — used by pool NEE for sampled emissive-triangle points. TMax is
+// pulled in by 2*RAY_TMIN so the sampled light point itself is never its own
+// occluder. Same flags/alpha handling as TraceShadow (ShadowHit/ShadowMiss).
+float TraceShadowSegment(float3 origin, float3 direction, float maxT)
+{
+    RayDesc shadowRay;
+    shadowRay.Origin = origin;
+    shadowRay.Direction = direction;
+    shadowRay.TMin = RAY_TMIN;
+    shadowRay.TMax = max(RAY_TMIN, maxT - 2 * RAY_TMIN);
+
+    ShadowPayload payload = { 0.0 }; // Start fully lit
+    TraceRay(SceneBVH, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, ~0, 1, 1, 1, shadowRay, payload);
+
+    return payload.visibility;
 }
 
 [shader("miss")]

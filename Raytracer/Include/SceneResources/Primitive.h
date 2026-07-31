@@ -3,6 +3,7 @@
 #include "pch.h"
 
 #include <cfloat>
+#include <vector>
 
 #include "Material.h"
 #include "Resources/BufferView.h"
@@ -32,6 +33,11 @@ struct Primitive
 
     DirectX::XMFLOAT3 m_localAabbMin{  FLT_MAX,  FLT_MAX,  FLT_MAX };
     DirectX::XMFLOAT3 m_localAabbMax{ -FLT_MAX, -FLT_MAX, -FLT_MAX };
+
+    // Local-space copies retained ONLY for emissive primitives: the light-pool
+    // bake (SceneBuilder::Build) needs triangle positions after GPU upload.
+    std::vector<DirectX::XMFLOAT3> m_emissiveBakePositions;
+    std::vector<uint32_t> m_emissiveBakeIndices;
 
     [[nodiscard]] std::shared_ptr<Material> GetMaterial() const { return m_material; }
     BufferView GetVertexView() const { return m_vertexBufferOffset; }

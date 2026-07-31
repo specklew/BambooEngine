@@ -119,6 +119,8 @@ void RaytracePass::Render()
     m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(3, m_randomBuffer->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(4, m_currentScene->GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(7, m_currentScene->GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(8, m_currentScene->GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
 
     uint32_t time;
     memcpy(&time, &m_time, sizeof(float));
@@ -394,7 +396,7 @@ void RaytracePass::CreateGlobalRootSignature()
 
     D3D12_DESCRIPTOR_RANGE ranges[7] = {cbvRange, rtRange, tlasRange, vertex_range, index_range, texture_range, skybox_range};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[7];
+    CD3DX12_ROOT_PARAMETER rootParameters[9];
     rootParameters[0].InitAsDescriptorTable(7, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
@@ -402,8 +404,10 @@ void RaytracePass::CreateGlobalRootSignature()
     rootParameters[4].InitAsShaderResourceView(6, 0); // Lights struct buffer
     rootParameters[5].InitAsConstants(1, 1);           // Time
     rootParameters[6].InitAsConstantBufferView(3, 0);  // Pass constants
+    rootParameters[7].InitAsShaderResourceView(1, 1); // Emissive triangles (t1, space1)
+    rootParameters[8].InitAsShaderResourceView(2, 1); // Light pool (t2, space1)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(7, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(9, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());

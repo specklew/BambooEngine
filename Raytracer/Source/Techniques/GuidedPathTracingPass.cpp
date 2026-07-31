@@ -236,7 +236,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
                                          voxelRepresentativeRange, vplPositionRange, vbufferRange, clusterMaskRange,
                                          spixelIndexRange, fuzzyWeightRange, fuzzyIndexRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[22];
+    CD3DX12_ROOT_PARAMETER rootParameters[24];
     rootParameters[0].InitAsDescriptorTable(16, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
@@ -259,8 +259,10 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     rootParameters[19].InitAsUnorderedAccessView(19, 0); // Live voxel bound max (compact-bound guide sampling)
     rootParameters[20].InitAsUnorderedAccessView(22, 0); // Per-tile adaptive guide q (one-sample MIS, ADR 0015)
     rootParameters[21].InitAsUnorderedAccessView(23, 0); // Per-tile strategy stats (one-sample MIS, ADR 0015)
+    rootParameters[22].InitAsShaderResourceView(1, 1); // Emissive triangles (t1, space1)
+    rootParameters[23].InitAsShaderResourceView(2, 1); // Light pool (t2, space1)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(22, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(24, rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -331,6 +333,8 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(3, m_randomBuffer->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(4, m_currentScene->GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(22, m_currentScene->GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(23, m_currentScene->GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
 
     uint32_t time;
     memcpy(&time, &m_time, sizeof(float));

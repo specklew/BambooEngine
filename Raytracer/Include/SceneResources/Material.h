@@ -12,6 +12,9 @@ struct Material
     std::shared_ptr<Texture> m_albedoTexture;
     std::shared_ptr<Texture> m_normalTexture;
     std::shared_ptr<Texture> m_metallicRoughnessTexture;
+    // CPU-only (raster untouched): >0 marks every triangle of the primitive an
+    // area light with this constant radiance.
+    DirectX::XMFLOAT3 m_emissiveRadiance{ 0.0f, 0.0f, 0.0f };
 
     struct MaterialData
     {

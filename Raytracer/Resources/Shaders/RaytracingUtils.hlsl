@@ -44,6 +44,8 @@ struct InstanceInfo
     // row-vector world matrix). Lets raygen shaders reconstruct hits from the
     // VBuffer without hit-shader intrinsics.
     row_major float3x4 objectToWorld;
+    float3 emissiveRadiance; // 0 = not emissive
+    int    emissiveLightOffset; // -1 = not a light; else light-pool index of primitive 0
 };
 
 struct LightData
@@ -107,6 +109,23 @@ ByteAddressBuffer g_indices : register(t2);
 StructuredBuffer<GeometryInfo> g_geometryInfo : register(t3);
 StructuredBuffer<InstanceInfo> g_instanceInfo : register(t4);
 StructuredBuffer<LightData> g_lightData : register(t6);
+
+struct EmissiveTriangle
+{
+    float3 v0; float3 v1; float3 v2;
+    float3 radiance;
+    float  area;
+    uint   instanceId;
+};
+struct LightPoolEntry
+{
+    uint  kind;      // 0 analytic, 1 emissive triangle
+    uint  dataIndex;
+    float power;
+    float cdf;
+};
+StructuredBuffer<EmissiveTriangle> g_emissiveTriangles : register(t1, space1);
+StructuredBuffer<LightPoolEntry>   g_lightPool         : register(t2, space1);
 
 Texture2D g_textures[MAX_TEXTURES] : register(t7);
 

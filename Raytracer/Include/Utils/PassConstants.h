@@ -33,6 +33,8 @@ public:
         // 0 = sky stays visible as background but contributes no lighting.
         // See passConstants.hlsl.
         uint32_t skyLightingEnabled = 1;
+        uint32_t lightPoolCount = 0;
+        float lightPoolTotalPower = 0.0f;
     } data;
 
 private:
