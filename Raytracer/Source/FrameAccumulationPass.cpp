@@ -81,15 +81,8 @@ void FrameAccumulationPass::CreateResources()
         desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-            D3D12_HEAP_FLAG_NONE,
-            &desc,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            nullptr,
-            IID_PPV_ARGS(&m_accumulationBuffer)));
-
-        m_accumulationBuffer->SetName(L"FrameAccumulation Buffer");
+        m_accumulationBuffer = std::make_unique<Texture>(m_device, desc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, L"FrameAccumulation Buffer");
     }
 
     // Display buffer (R16G16B16A16_FLOAT — HDR, tonemapped by PostProcessPass)
@@ -107,15 +100,8 @@ void FrameAccumulationPass::CreateResources()
         desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-            D3D12_HEAP_FLAG_NONE,
-            &desc,
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            nullptr,
-            IID_PPV_ARGS(&m_displayBuffer)));
-
-        m_displayBuffer->SetName(L"FrameDisplay Buffer");
+        m_displayBuffer = std::make_unique<Texture>(m_device, desc,
+            D3D12_RESOURCE_STATE_COPY_SOURCE, L"FrameDisplay Buffer");
     }
 }
 
@@ -136,8 +122,7 @@ void FrameAccumulationPass::CreatePSO()
     m_pso->SetName(L"FrameAccumulationPass PSO");
 }
 
-void FrameAccumulationPass::Render(
-    const Microsoft::WRL::ComPtr<ID3D12Resource>& currentFrameOutput)
+void FrameAccumulationPass::Render(Texture& currentFrameOutput)
 {
     if (!m_initialized)
         return;
@@ -152,19 +137,19 @@ void FrameAccumulationPass::Render(
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(currentFrameOutput.Get(), &srvDesc, cpuHandle);
+    m_device->CreateShaderResourceView(currentFrameOutput.GetUnderlyingResource().Get(), &srvDesc, cpuHandle);
 
     // Create UAV for accumulation buffer at slot 1 (u0)
     cpuHandle.Offset(1, descriptorSize);
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(m_accumulationBuffer.Get(), nullptr, &uavDesc, cpuHandle);
+    m_device->CreateUnorderedAccessView(m_accumulationBuffer->GetUnderlyingResource().Get(), nullptr, &uavDesc, cpuHandle);
 
     // Create UAV for display buffer at slot 2 (u1)
     cpuHandle.Offset(1, descriptorSize);
     uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    m_device->CreateUnorderedAccessView(m_displayBuffer.Get(), nullptr, &uavDesc, cpuHandle);
+    m_device->CreateUnorderedAccessView(m_displayBuffer->GetUnderlyingResource().Get(), nullptr, &uavDesc, cpuHandle);
 
     // Bind root signature and PSO
     m_commandList->SetComputeRootSignature(m_rootSignature.Get());
@@ -179,13 +164,9 @@ void FrameAccumulationPass::Render(
     m_commandList->SetComputeRoot32BitConstant(1, m_frameCount + 1, 0);
 
     // Transition display buffer to UAV
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_displayBuffer.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    m_displayBuffer->TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_COPY_SOURCE,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     // Dispatch
     UINT width = Window::Get().GetWidth();
@@ -195,19 +176,12 @@ void FrameAccumulationPass::Render(
     m_commandList->Dispatch(threadsX, threadsY, 1);
 
     // UAV barrier to flush writes
-    {
-        CD3DX12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_displayBuffer.Get());
-        m_commandList->ResourceBarrier(1, &uavBarrier);
-    }
+    m_displayBuffer->UavBarrierChecked(m_commandList.Get());
 
     // Transition display buffer back to copy source
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_displayBuffer.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_COPY_SOURCE);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    m_displayBuffer->TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_COPY_SOURCE);
 
     m_frameCount++;
 }
@@ -230,8 +204,8 @@ void FrameAccumulationPass::OnResize()
         return;
 
     spdlog::debug("Resizing frame accumulation buffers");
-    m_accumulationBuffer.Reset();
-    m_displayBuffer.Reset();
+    m_accumulationBuffer.reset();
+    m_displayBuffer.reset();
     CreateResources();
     Reset();
 }

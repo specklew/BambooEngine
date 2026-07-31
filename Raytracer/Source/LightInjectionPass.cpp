@@ -30,7 +30,7 @@ TechniqueDesc LightInjectionPass::GetTechniqueDesc() const
     };
     desc.maxPayloadSize    = 9 * sizeof(float); // InjectPayload: 2x float3 + 3x uint
     desc.maxAttributeSize  = 2 * sizeof(float);
-    desc.maxRecursionDepth = 3; // raygen -> hit -> shadow ray
+    desc.maxRecursionDepth = 3; // -> hit -> shadow ray
     return desc;
 }
 

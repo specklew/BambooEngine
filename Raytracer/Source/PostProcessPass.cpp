@@ -80,15 +80,8 @@ void PostProcessPass::CreateResources()
         desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-        ThrowIfFailed(m_device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-            D3D12_HEAP_FLAG_NONE,
-            &desc,
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            nullptr,
-            IID_PPV_ARGS(&m_outputBuffer)));
-
-        m_outputBuffer->SetName(L"PostProcess Output Buffer");
+        m_outputBuffer = std::make_unique<Texture>(m_device, desc,
+            D3D12_RESOURCE_STATE_COPY_SOURCE, L"PostProcess Output Buffer");
     }
 }
 
@@ -110,8 +103,8 @@ void PostProcessPass::CreatePSO()
 }
 
 void PostProcessPass::Render(
-    const Microsoft::WRL::ComPtr<ID3D12Resource>& input,
-    const Microsoft::WRL::ComPtr<ID3D12Resource>& backBuffer,
+    Texture& input,
+    Texture& backBuffer,
     const PostProcessParams& params)
 {
     if (!m_initialized)
@@ -127,14 +120,14 @@ void PostProcessPass::Render(
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(input.Get(), &srvDesc, cpuHandle);
+    m_device->CreateShaderResourceView(input.GetUnderlyingResource().Get(), &srvDesc, cpuHandle);
 
     // Create UAV for output buffer at slot 1 (u0)
     cpuHandle.Offset(1, descriptorSize);
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(m_outputBuffer.Get(), nullptr, &uavDesc, cpuHandle);
+    m_device->CreateUnorderedAccessView(m_outputBuffer->GetUnderlyingResource().Get(), nullptr, &uavDesc, cpuHandle);
 
     // Bind root signature and PSO
     m_commandList->SetComputeRootSignature(m_rootSignature.Get());
@@ -150,22 +143,14 @@ void PostProcessPass::Render(
     m_commandList->SetComputeRoot32BitConstants(1, 4, &params, 0);
 
     // Transition input to SRV
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            input.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    input.TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_COPY_SOURCE,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     // Transition output buffer to UAV
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_outputBuffer.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    m_outputBuffer->TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_COPY_SOURCE,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     // Dispatch
     UINT width = Window::Get().GetWidth();
@@ -175,47 +160,28 @@ void PostProcessPass::Render(
     m_commandList->Dispatch(threadsX, threadsY, 1);
 
     // UAV barrier to flush writes
-    {
-        CD3DX12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_outputBuffer.Get());
-        m_commandList->ResourceBarrier(1, &uavBarrier);
-    }
+    m_outputBuffer->UavBarrierChecked(m_commandList.Get());
 
     // Transition output buffer back to copy source
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_outputBuffer.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_COPY_SOURCE);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    m_outputBuffer->TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_COPY_SOURCE);
 
     // Transition input back to COPY_SOURCE
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            input.Get(),
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-            D3D12_RESOURCE_STATE_COPY_SOURCE);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    input.TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        D3D12_RESOURCE_STATE_COPY_SOURCE);
 
     // Copy output buffer to back buffer
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            backBuffer.Get(),
-            D3D12_RESOURCE_STATE_RENDER_TARGET,
-            D3D12_RESOURCE_STATE_COPY_DEST);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    backBuffer.TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_RENDER_TARGET,
+        D3D12_RESOURCE_STATE_COPY_DEST);
 
-    m_commandList->CopyResource(backBuffer.Get(), m_outputBuffer.Get());
+    m_commandList->CopyResource(backBuffer.GetUnderlyingResource().Get(), m_outputBuffer->GetUnderlyingResource().Get());
 
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            backBuffer.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_RENDER_TARGET);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    backBuffer.TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_RENDER_TARGET);
 }
 
 void PostProcessPass::OnResize()
@@ -224,6 +190,6 @@ void PostProcessPass::OnResize()
         return;
 
     spdlog::debug("Resizing post-process output buffer");
-    m_outputBuffer.Reset();
+    m_outputBuffer.reset();
     CreateResources();
 }

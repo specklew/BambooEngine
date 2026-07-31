@@ -68,7 +68,7 @@ void RaytracePass::Update(double /*elapsedTime*/, double totalTime)
 
 void RaytracePass::OnResize()
 {
-    m_outputResource.Reset();
+    m_outputResource.reset();
     CreateRaytracingOutputBuffer();
     CreateShaderResourceHeap();
 }
@@ -127,13 +127,9 @@ void RaytracePass::Render()
     m_commandList->SetComputeRoot32BitConstant(5, time, 0);
     m_commandList->SetComputeRootConstantBufferView(6, m_passConstants->GetGpuVirtualAddress());
 
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_outputResource.Get(),
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    m_outputResource->TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
     D3D12_DISPATCH_RAYS_DESC desc = {};
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();
@@ -154,18 +150,11 @@ void RaytracePass::Render()
     m_commandList->SetPipelineState1(m_rtStateObject.Get());
     m_commandList->DispatchRays(&desc);
 
-    {
-        CD3DX12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_outputResource.Get());
-        m_commandList->ResourceBarrier(1, &uavBarrier);
-    }
+    m_outputResource->UavBarrierChecked(m_commandList.Get());
 
-    {
-        CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_outputResource.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        m_commandList->ResourceBarrier(1, &transition);
-    }
+    m_outputResource->TransitionChecked(m_commandList.Get(),
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 }
 
 
@@ -466,13 +455,8 @@ void RaytracePass::CreateRaytracingOutputBuffer()
     outputBufferDesc.SampleDesc.Count = 1;
     outputBufferDesc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-    ThrowIfFailed(m_device->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-        D3D12_HEAP_FLAG_NONE,
-        &outputBufferDesc,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-        nullptr,
-        IID_PPV_ARGS(&m_outputResource)));
+    m_outputResource = std::make_unique<Texture>(m_device, outputBufferDesc,
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, L"Raytrace Output");
 }
 
 void RaytracePass::CreateShaderResourceHeap()
@@ -484,7 +468,7 @@ void RaytracePass::CreateShaderResourceHeap()
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(m_outputResource.Get(), nullptr, &uavDesc, srvHandle);
+    m_device->CreateUnorderedAccessView(m_outputResource->GetUnderlyingResource().Get(), nullptr, &uavDesc, srvHandle);
 
     srvHandle.ptr += increment; // slot 3: TLAS
 

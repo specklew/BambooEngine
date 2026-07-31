@@ -1,4 +1,5 @@
 #pragma once
+#include "Resources/Texture.h"
 
 class FrameAccumulationPass
 {
@@ -7,8 +8,7 @@ public:
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList);
 
-    void Render(
-        const Microsoft::WRL::ComPtr<ID3D12Resource>& currentFrameOutput);
+    void Render(Texture& currentFrameOutput);
 
     void Update(double elapsedTime);
     void Reset();
@@ -17,7 +17,7 @@ public:
     uint32_t GetFrameCount()    const { return m_frameCount; }
     double   GetAccumulatedTime() const { return m_accumulatedTime; }
     uint32_t GetResetCount()    const { return m_resetCount; }
-    const Microsoft::WRL::ComPtr<ID3D12Resource>& GetDisplayBuffer() const { return m_displayBuffer; }
+    Texture& GetDisplayBuffer() const { return *m_displayBuffer; }
 
 private:
     void CreateResources();
@@ -26,8 +26,8 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
-    Microsoft::WRL::ComPtr<ID3D12Resource>             m_accumulationBuffer;
-    Microsoft::WRL::ComPtr<ID3D12Resource>             m_displayBuffer;
+    std::unique_ptr<Texture>                           m_accumulationBuffer;
+    std::unique_ptr<Texture>                           m_displayBuffer;
     Microsoft::WRL::ComPtr<ID3D12RootSignature>        m_rootSignature;
     Microsoft::WRL::ComPtr<ID3D12PipelineState>        m_pso;
     Microsoft::WRL::ComPtr<IDxcBlob>                   m_computeShaderBlob;

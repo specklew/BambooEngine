@@ -1,4 +1,5 @@
 #pragma once
+#include "Resources/Texture.h"
 
 struct PostProcessParams
 {
@@ -16,15 +17,15 @@ public:
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList);
 
     void Render(
-        const Microsoft::WRL::ComPtr<ID3D12Resource>& input,
-        const Microsoft::WRL::ComPtr<ID3D12Resource>& backBuffer,
+        Texture& input,
+        Texture& backBuffer,
         const PostProcessParams& params = {});
 
     void OnResize();
 
     // Returns the post-process output texture (DXGI_FORMAT_R8G8B8A8_UNORM).
     // In D3D12_RESOURCE_STATE_COPY_SOURCE after Render().
-    const Microsoft::WRL::ComPtr<ID3D12Resource>& GetOutputBuffer() const { return m_outputBuffer; }
+    Texture& GetOutputBuffer() const { return *m_outputBuffer; }
 
 private:
     void CreateResources();
@@ -33,7 +34,7 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
-    Microsoft::WRL::ComPtr<ID3D12Resource>             m_outputBuffer;
+    std::unique_ptr<Texture>                           m_outputBuffer;
     Microsoft::WRL::ComPtr<ID3D12RootSignature>        m_rootSignature;
     Microsoft::WRL::ComPtr<ID3D12PipelineState>        m_pso;
     Microsoft::WRL::ComPtr<IDxcBlob>                   m_computeShaderBlob;

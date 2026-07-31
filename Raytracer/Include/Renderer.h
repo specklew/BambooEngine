@@ -9,12 +9,12 @@
 #include "Keyboard.h"
 #include "SimpleMath.h"
 #include "Resources/StructuredBuffer.h"
+#include "Resources/Texture.h"
 #include "Utils/Utils.h"
 
 class IndexBuffer;
 class VertexBuffer;
 class PassConstants;
-class Texture;
 struct Material;
 class GameObject;
 struct AccelerationStructureBuffers;
@@ -187,6 +187,8 @@ private:
 	
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_d3d12RTVDescriptorHeap;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_d3d12RenderTargets[Constants::Graphics::NUM_FRAMES];
+	// State-tracked wrappers over the swap-chain buffers; all barriers go through these
+	std::unique_ptr<Texture> m_backBufferTextures[Constants::Graphics::NUM_FRAMES];
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_d3d12DSVDescriptorHeap;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_depthStencilBuffer;
 	

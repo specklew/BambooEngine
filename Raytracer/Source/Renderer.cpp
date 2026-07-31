@@ -19,6 +19,7 @@
 #include "backends/imgui_impl_dx12.h"
 
 #include "InputElements.h"
+#include "Resources/ResourceStateTracker.h"
 #include "SceneResources/ModelLoading.h"
 #include "SceneResources/Primitive.h"
 #include "RaytracePass.h"
@@ -541,15 +542,12 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
 	
 	auto allocator = m_d3d12CommandAllocators[m_frameIndex];
-	auto backBuffer = m_d3d12RenderTargets[m_frameIndex];
-	
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		   backBuffer.Get(),
-		   D3D12_RESOURCE_STATE_PRESENT,
-		   D3D12_RESOURCE_STATE_RENDER_TARGET);
+	Texture& backBuffer = *m_backBufferTextures[m_frameIndex];
 
-		m_d3d12CommandList->ResourceBarrier(1, &barrier);
+	{
+		backBuffer.TransitionChecked(m_d3d12CommandList.Get(),
+			D3D12_RESOURCE_STATE_PRESENT,
+			D3D12_RESOURCE_STATE_RENDER_TARGET);
 
 		FLOAT clearColor[4] = { 0.3f, 0.6f, 0.9f, 1.0f };
 
@@ -626,27 +624,24 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		postProcessParams.lift       = g_lift.Get();
 
 		ScopedGpuMarker postMarker(m_d3d12CommandList.Get(), "Accumulation+PostProcess");
+		Texture& raytraceOutput = *m_raytracePass->GetOutputTexture();
 		if (g_accumulationEnabled.Get())
 		{
-			m_accumulationPass->Render(m_raytracePass->GetOutputResource());
+			m_accumulationPass->Render(raytraceOutput);
 			m_postProcessPass->Render(m_accumulationPass->GetDisplayBuffer(), backBuffer, postProcessParams);
 		}
 		else
 		{
 			// Bypass accumulation — normalize raytrace output to COPY_SOURCE for PostProcessPass
-			CD3DX12_RESOURCE_BARRIER transition = CD3DX12_RESOURCE_BARRIER::Transition(
-				m_raytracePass->GetOutputResource().Get(),
+			raytraceOutput.TransitionChecked(m_d3d12CommandList.Get(),
 				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
 				D3D12_RESOURCE_STATE_COPY_SOURCE);
-			m_d3d12CommandList->ResourceBarrier(1, &transition);
 
-			m_postProcessPass->Render(m_raytracePass->GetOutputResource(), backBuffer, postProcessParams);
+			m_postProcessPass->Render(raytraceOutput, backBuffer, postProcessParams);
 
-			CD3DX12_RESOURCE_BARRIER transition2 = CD3DX12_RESOURCE_BARRIER::Transition(
-				m_raytracePass->GetOutputResource().Get(),
+			raytraceOutput.TransitionChecked(m_d3d12CommandList.Get(),
 				D3D12_RESOURCE_STATE_COPY_SOURCE,
 				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-			m_d3d12CommandList->ResourceBarrier(1, &transition2);
 		}
 
 		// Restore main descriptor heap for ImGui (post-process pass may have changed it)
@@ -655,27 +650,22 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 		// Issue screenshot readback copy if this frame was chosen by Tick()
 		if (m_screenshotManager->IsCaptureDue())
-			m_screenshotManager->RecordCopy(m_postProcessPass->GetOutputBuffer());
+			m_screenshotManager->RecordCopy(m_postProcessPass->GetOutputBuffer().GetUnderlyingResource());
 	}
 
 	if (!m_headless)
 		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_d3d12CommandList.Get());
 	
-	{
-		CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-			backBuffer.Get(),
-			D3D12_RESOURCE_STATE_RENDER_TARGET,
-			D3D12_RESOURCE_STATE_PRESENT);
+	backBuffer.TransitionChecked(m_d3d12CommandList.Get(),
+		D3D12_RESOURCE_STATE_RENDER_TARGET,
+		D3D12_RESOURCE_STATE_PRESENT);
 
-		m_d3d12CommandList->ResourceBarrier(1, &barrier);
-		
-	}
-	
 	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
 
 	ThrowIfFailed(m_d3d12CommandList->Close());
 
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	ResourceStateTracker::Get().OnExecuteCommandLists();
 	UINT presentFlags = m_tearingSupport ? DXGI_PRESENT_ALLOW_TEARING : 0; // TODO: do not check every time
 
 	ThrowIfFailed(m_dxgiSwapChain->Present(0, presentFlags));
@@ -708,6 +698,7 @@ void Renderer::OnResize()
 
 	for (int i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
 	{
+		m_backBufferTextures[i].reset();
 		m_d3d12RenderTargets[i].Reset();
 	}
 
@@ -724,6 +715,8 @@ void Renderer::OnResize()
 	{
 		ThrowIfFailed(m_dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
 		g_device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
+		m_backBufferTextures[i] = std::make_unique<Texture>(g_device, m_d3d12RenderTargets[i],
+			D3D12_RESOURCE_STATE_PRESENT, L"Back Buffer " + std::to_wstring(i));
 		rtvHandle.Offset(1, m_rtvDescriptorSize);
 	}
 	
@@ -972,6 +965,8 @@ void Renderer::CreateRenderTargetViews()
 	{
 		ThrowIfFailed(m_dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
 		g_device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
+		m_backBufferTextures[i] = std::make_unique<Texture>(g_device, m_d3d12RenderTargets[i],
+			D3D12_RESOURCE_STATE_PRESENT, L"Back Buffer " + std::to_wstring(i));
 
 		rtvHandle.ptr += m_rtvDescriptorSize;
 	}
@@ -1837,9 +1832,10 @@ void Renderer::OnShaderReload()
 	ThrowIfFailed(m_d3d12CommandList->Close());
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	ResourceStateTracker::Get().OnExecuteCommandLists();
 
 	FlushCommandQueue();
-	
+
 	spdlog::info("Creating pipeline state for new shaders...");
 	CreatePipelineState();
 	m_raytracePass->OnShaderReload();
@@ -1945,6 +1941,7 @@ std::shared_ptr<Texture> Renderer::CreateTextureFromGLTF(const tinygltf::Image& 
 	m_d3d12CommandList->Close();
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	ResourceStateTracker::Get().OnExecuteCommandLists();
 	FlushCommandQueue();
 	ResetCommandList();
 
@@ -2051,6 +2048,7 @@ void Renderer::ExecuteCommandsAndReset()
 	ThrowIfFailed(m_d3d12CommandList->Close());
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
 	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	ResourceStateTracker::Get().OnExecuteCommandLists();
 	FlushCommandQueue();
 	// WHY is resetting the allocator impossible if:
 	// 1. commands are closed

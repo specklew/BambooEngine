@@ -140,6 +140,7 @@
     <ClInclude Include="Include\Resources\ConstantBuffer.h" />
     <ClInclude Include="Include\Resources\IndexBuffer.h" />
     <ClInclude Include="Include\Resources\Resource.h" />
+    <ClInclude Include="Include\Resources\ResourceStateTracker.h" />
     <ClInclude Include="Include\Resources\ShaderBindingTable.h" />
     <ClInclude Include="Include\Resources\StringHash.h" />
     <ClInclude Include="Include\Resources\StringId.h" />
@@ -402,6 +403,7 @@
     <ClCompile Include="Source\Resources\ConstantBuffer.cpp" />
     <ClCompile Include="Source\Resources\IndexBuffer.cpp" />
     <ClCompile Include="Source\Resources\Resource.cpp" />
+    <ClCompile Include="Source\Resources\ResourceStateTracker.cpp" />
     <ClCompile Include="Source\Resources\ShaderBindingTable.cpp"/>
     <ClCompile Include="Source\Resources\StringId.cpp"/>
     <ClCompile Include="Source\Resources\StructuredBuffer.cpp"/>

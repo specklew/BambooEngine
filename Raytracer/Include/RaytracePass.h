@@ -1,5 +1,6 @@
 #pragma once
 #include "Resources/StructuredBuffer.h"
+#include "Resources/Texture.h"
 #include "Techniques/TechniqueDescriptor.h"
 #include "RasterDebugMode.h" // VxpgStage
 
@@ -46,7 +47,8 @@ public:
     // reads the flag.
     bool SetOneSampleMisCompiled(bool enabled);
 
-    const Microsoft::WRL::ComPtr<ID3D12Resource>& GetOutputResource() const { return m_outputResource; }
+    // Null for auxiliary passes that override CreateRaytracingOutputBuffer empty.
+    Texture* GetOutputTexture() const { return m_outputResource.get(); }
 
     // Technique registry — populated via REGISTER_RAYTRACE_TECHNIQUE macro
     static std::vector<TechniqueEntry>& GetRegistry();
@@ -96,7 +98,7 @@ protected:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_globalRootSignature;
 
     // Output resources
-    Microsoft::WRL::ComPtr<ID3D12Resource>       m_outputResource;
+    std::unique_ptr<Texture>                     m_outputResource;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvUavHeap;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbDescriptorHeap;
 
