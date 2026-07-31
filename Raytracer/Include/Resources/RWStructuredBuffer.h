@@ -18,10 +18,9 @@ public:
 
     D3D12_GPU_VIRTUAL_ADDRESS GetGPUVirtualAddress() const { return m_resource->GetGPUVirtualAddress(); }
 
-    void UavBarrier(ID3D12GraphicsCommandList* commandList) const
+    void UavBarrier(ID3D12GraphicsCommandList* commandList)
     {
-        auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(m_resource.Get());
-        commandList->ResourceBarrier(1, &barrier);
+        UavBarrierChecked(commandList);
     }
 
 private:

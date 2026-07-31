@@ -264,6 +264,9 @@
     <ClInclude Include="Include\Resources\ResourceStateTracker.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\GraphicsDevice.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Resources\VertexBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -732,6 +735,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Resources\ResourceStateTracker.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\GraphicsDevice.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\Resources\Resource.cpp">

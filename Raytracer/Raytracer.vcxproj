@@ -139,6 +139,7 @@
     <ClInclude Include="Include\Resources\BufferView.h" />
     <ClInclude Include="Include\Resources\ConstantBuffer.h" />
     <ClInclude Include="Include\Resources\IndexBuffer.h" />
+    <ClInclude Include="Include\GraphicsDevice.h" />
     <ClInclude Include="Include\Resources\Resource.h" />
     <ClInclude Include="Include\Resources\ResourceStateTracker.h" />
     <ClInclude Include="Include\Resources\ShaderBindingTable.h" />
@@ -402,6 +403,7 @@
     <ClCompile Include="Source\Resources\Buffer.cpp" />
     <ClCompile Include="Source\Resources\ConstantBuffer.cpp" />
     <ClCompile Include="Source\Resources\IndexBuffer.cpp" />
+    <ClCompile Include="Source\GraphicsDevice.cpp" />
     <ClCompile Include="Source\Resources\Resource.cpp" />
     <ClCompile Include="Source\Resources\ResourceStateTracker.cpp" />
     <ClCompile Include="Source\Resources\ShaderBindingTable.cpp"/>

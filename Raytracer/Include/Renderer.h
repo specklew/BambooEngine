@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "Constants.h"
+#include "GraphicsDevice.h"
 #include "Headless.h" // HeadlessConfig
 #include "InputElements.h"
 #include "RasterDebugMode.h" // VxpgStage
@@ -107,11 +108,6 @@ public:
 	static std::array<const CD3DX12_STATIC_SAMPLER_DESC, Constants::Graphics::STATIC_SAMPLERS_COUNT> GetStaticSamplers();
 	
 private:
-	void SetupDeviceAndDebug();
-	void CreateCommandQueue();
-	void CreateCommandAllocators();
-	void CreateFence();
-	void CreateSwapChain();
 	void CreateCommandList();
 
 	void ResetCommandList() const;
@@ -133,9 +129,6 @@ private:
 	void SetScissorRect();
 
 	void FlushCommandQueue();
-	
-	bool CheckTearingSupport();
-	bool CheckRayTracingSupport() const;
 
 	void CreateTextureSRV(const std::shared_ptr<Texture>& texture);
 	void CreateVertexSRV();
@@ -164,22 +157,11 @@ private:
 	DirectX::SimpleMath::Vector3 m_prevCameraPos = {};
 	DirectX::XMFLOAT4            m_prevCameraRot = { 0, 0, 0, 1 };
 
-	bool m_tearingSupport = false;
 	bool m_rasterize = true;
 	bool m_headless = false;
 	int  m_activeTechniqueIndex = 0;
-	
-	Microsoft::WRL::ComPtr<IDXGIAdapter4> GetHardwareAdapter(bool useWarp = false);
-	Microsoft::WRL::ComPtr<ID3D12Device5> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);
 
-	Microsoft::WRL::ComPtr<ID3D12InfoQueue> m_infoQueue;
-	DWORD m_debugMessageCallbackCookie = 0;
-	
-	Microsoft::WRL::ComPtr<IDXGIFactory6> m_dxgiFactory;
-	Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_d3d12CommandQueue;
-	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_d3d12CommandAllocators[Constants::Graphics::NUM_FRAMES];
-	Microsoft::WRL::ComPtr<ID3D12Fence> m_d3d12Fence;
-	Microsoft::WRL::ComPtr<IDXGISwapChain3> m_dxgiSwapChain;
+	std::unique_ptr<GraphicsDevice> m_graphicsDevice;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_d3d12CommandList;
 
 	DXGI_FORMAT m_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -191,6 +173,7 @@ private:
 	std::unique_ptr<Texture> m_backBufferTextures[Constants::Graphics::NUM_FRAMES];
 	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_d3d12DSVDescriptorHeap;
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_depthStencilBuffer;
+	std::unique_ptr<Texture> m_depthStencilTexture;
 	
 	std::shared_ptr<ConstantBuffer> m_projectionMatrixConstantBuffer;
 	std::shared_ptr<ConstantBuffer> m_modelIndexConstantBuffer;
@@ -207,10 +190,6 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS;
 	std::unordered_map<std::shared_ptr<Model>, std::shared_ptr<AccelerationStructureBuffers>> m_modelsBLASes;
 	
-	UINT m_frameIndex = 0;
-	UINT64 m_fenceValue = 0;
-	HANDLE m_fenceEvent = nullptr;
-
 	UINT m_rtvDescriptorSize = 0;
 
 	int m_lastMousePosX = 0;
@@ -234,7 +213,7 @@ private:
 
 	std::shared_ptr<PassConstants> m_passConstants;
 	std::shared_ptr<StructuredBuffer<float>> m_randomBuffer;
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_skyboxResource;
+	std::unique_ptr<Texture> m_skyboxTexture;
 
 	std::shared_ptr<class EditorUI> m_editorUI;
 	std::shared_ptr<StatesManager> m_statesManager;

@@ -221,18 +221,16 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
     // The args buffer was just written as a UAV; flip it to INDIRECT_ARGUMENT for
     // the ExecuteIndirect read, then back to UAV so the downstream cluster pass
     // and next frame's presample see it as a UAV again.
-    ID3D12Resource* argsResource = m_guidingDispatchArgs->GetUnderlyingResource().Get();
-    auto toIndirect = CD3DX12_RESOURCE_BARRIER::Transition(argsResource,
+    m_guidingDispatchArgs->TransitionChecked(cmd,
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-    cmd->ResourceBarrier(1, &toIndirect);
 
     constexpr uint32_t kVisibilityArgsOffset = 2 * sizeof(DirectX::XMUINT4); // entry [2]
-    cmd->ExecuteIndirect(m_dispatchCommandSignature.Get(), 1, argsResource,
+    cmd->ExecuteIndirect(m_dispatchCommandSignature.Get(), 1,
+        m_guidingDispatchArgs->GetUnderlyingResource().Get(),
         kVisibilityArgsOffset, nullptr, 0);
 
-    auto toUav = CD3DX12_RESOURCE_BARRIER::Transition(argsResource,
+    m_guidingDispatchArgs->TransitionChecked(cmd,
         D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    cmd->ResourceBarrier(1, &toUav);
 
     m_voxelFingerprints->UavBarrier(cmd);
 }

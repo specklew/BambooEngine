@@ -55,31 +55,6 @@
 
 #include "AccelerationStructures.h"
 
-#ifdef _DEBUG
-#define ENABLE_GPU_BASED_VALIDATION 1
-// Routes every D3D12 debug-layer message to spdlog so validation errors/warnings
-// appear in the engine console (and the headless log), not just the attached
-// debugger's output window.
-static void CALLBACK D3D12DebugMessageCallback(
-	D3D12_MESSAGE_CATEGORY /*category*/, D3D12_MESSAGE_SEVERITY severity,
-	D3D12_MESSAGE_ID /*id*/, LPCSTR description, void* /*context*/)
-{
-	switch (severity)
-	{
-	case D3D12_MESSAGE_SEVERITY_CORRUPTION:
-	case D3D12_MESSAGE_SEVERITY_ERROR:
-		spdlog::error("[D3D12] {}", description);
-		break;
-	case D3D12_MESSAGE_SEVERITY_WARNING:
-		spdlog::warn("[D3D12] {}", description);
-		break;
-	default:
-		spdlog::debug("[D3D12] {}", description);
-		break;
-	}
-}
-#endif
-
 using namespace Microsoft::WRL;
 
 namespace
@@ -205,16 +180,19 @@ void Renderer::Initialize()
 	_CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
 #endif
 
-	SetupDeviceAndDebug();
-	CheckTearingSupport();
-	
-	if (!CheckRayTracingSupport()) 	throw std::runtime_error("Raytracing is not supported on this device.");;
-	
-	CreateCommandQueue();
-	CreateCommandAllocators();
-	CreateFence();
-	CreateSwapChain();
-	
+	m_graphicsDevice = std::make_unique<GraphicsDevice>();
+	m_graphicsDevice->Initialize(g_enableDebugLayer);
+	g_device = m_graphicsDevice->GetDevice();
+	m_graphicsDevice->CheckTearingSupport();
+
+	if (!m_graphicsDevice->CheckRayTracingSupport()) 	throw std::runtime_error("Raytracing is not supported on this device.");;
+
+	m_graphicsDevice->CreateCommandQueue();
+	m_graphicsDevice->CreateCommandAllocators();
+	m_graphicsDevice->CreateFence();
+	m_graphicsDevice->CreateSwapChain(Window::Get().GetHandle(), Window::Get().GetWidth(),
+		Window::Get().GetHeight(), m_backBufferFormat);
+
 	CreateCommandList();
 	ResetCommandList();
 	
@@ -539,10 +517,10 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	SetViewport();
 	SetScissorRect();
 	
-	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
-	
-	auto allocator = m_d3d12CommandAllocators[m_frameIndex];
-	Texture& backBuffer = *m_backBufferTextures[m_frameIndex];
+	m_graphicsDevice->RefreshFrameIndex();
+	const UINT frameIndex = m_graphicsDevice->GetFrameIndex();
+
+	Texture& backBuffer = *m_backBufferTextures[frameIndex];
 
 	{
 		backBuffer.TransitionChecked(m_d3d12CommandList.Get(),
@@ -553,7 +531,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
 			m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-			m_frameIndex,
+			frameIndex,
 			m_rtvDescriptorSize);
 		
 		m_d3d12CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
@@ -664,11 +642,11 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	ThrowIfFailed(m_d3d12CommandList->Close());
 
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	m_graphicsDevice->GetCommandQueue()->ExecuteCommandLists(_countof(commandLists), commandLists);
 	ResourceStateTracker::Get().OnExecuteCommandLists();
-	UINT presentFlags = m_tearingSupport ? DXGI_PRESENT_ALLOW_TEARING : 0; // TODO: do not check every time
+	UINT presentFlags = m_graphicsDevice->IsTearingSupported() ? DXGI_PRESENT_ALLOW_TEARING : 0; // TODO: do not check every time
 
-	ThrowIfFailed(m_dxgiSwapChain->Present(0, presentFlags));
+	ThrowIfFailed(m_graphicsDevice->GetSwapChain()->Present(0, presentFlags));
 
 	FlushCommandQueue();
 	ResetCommandList();
@@ -690,7 +668,7 @@ void Renderer::CleanUp()
 void Renderer::OnResize()
 {
 	assert(g_device && "Attempted to resize window without device.");
-	assert(m_dxgiSwapChain && "Attempted to resize window without swap chain.");
+	assert(m_graphicsDevice->GetSwapChain() && "Attempted to resize window without swap chain.");
 	
 	auto& window = Window::Get();
 
@@ -702,8 +680,8 @@ void Renderer::OnResize()
 		m_d3d12RenderTargets[i].Reset();
 	}
 
-	int swapChainFlags = CheckTearingSupport() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-	ThrowIfFailed(m_dxgiSwapChain->ResizeBuffers(
+	int swapChainFlags = m_graphicsDevice->CheckTearingSupport() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+	ThrowIfFailed(m_graphicsDevice->GetSwapChain()->ResizeBuffers(
 		Constants::Graphics::NUM_FRAMES,
 		window.GetWidth(),
 		window.GetHeight(),
@@ -713,13 +691,14 @@ void Renderer::OnResize()
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
 	{
-		ThrowIfFailed(m_dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
+		ThrowIfFailed(m_graphicsDevice->GetSwapChain()->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
 		g_device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
 		m_backBufferTextures[i] = std::make_unique<Texture>(g_device, m_d3d12RenderTargets[i],
 			D3D12_RESOURCE_STATE_PRESENT, L"Back Buffer " + std::to_wstring(i));
 		rtvHandle.Offset(1, m_rtvDescriptorSize);
 	}
 	
+	m_depthStencilTexture.reset();
 	m_depthStencilBuffer.Reset();
 
 	CreateDepthStencilView();
@@ -816,123 +795,12 @@ void Renderer::OnKeyDown(unsigned long long btnState) const
 	m_keyboardTracker->Update(state);
 }
 
-void Renderer::SetupDeviceAndDebug()
-{
-
-#ifdef _DEBUG
-	ComPtr<ID3D12Debug> debugController;
-	D3D12GetDebugInterface(IID_PPV_ARGS(&debugController));
-	if (g_enableDebugLayer)
-		debugController->EnableDebugLayer();
-
-	// DRED: on device-removed, ThrowIfFailed dumps auto-breadcrumbs (which
-	// command in which command list hung/faulted) + page-fault allocation info.
-	// Breadcrumbs inject per-command marker writes driver-side, so gate on the
-	// same switch as the debug layer — headless benchmark runs stay untaxed.
-	if (g_enableDebugLayer)
-	{
-		ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dredSettings;
-		if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dredSettings))))
-		{
-			dredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-			dredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-		}
-	}
-#endif
-	
-	UINT createFactoryFlags = 0;
-
-#ifdef _DEBUG
-	createFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-#endif
-
-	ThrowIfFailed(::CreateDXGIFactory2(createFactoryFlags, IID_PPV_ARGS(&m_dxgiFactory)));
-
-#ifdef _DEBUG
-	if (g_enableDebugLayer) {
-	ComPtr<ID3D12Debug1> debugController1;
-	ThrowIfFailed(debugController.As(&debugController1));
-
-	debugController1->SetEnableGPUBasedValidation(ENABLE_GPU_BASED_VALIDATION);
-	}
-#endif
-
-	if (ComPtr<IDXGIAdapter4> dxgiAdapter = GetHardwareAdapter())
-	{
-		g_device = GetDeviceForAdapter(dxgiAdapter);
-	}
-}
-
-void Renderer::CreateCommandQueue()
-{
-	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
-
-	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-
-	ThrowIfFailed(g_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_d3d12CommandQueue)));
-}
-
-void Renderer::CreateCommandAllocators()
-{
-	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
-	{
-		ThrowIfFailed(g_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_d3d12CommandAllocators[i])));
-	}
-}
-
-void Renderer::CreateFence()
-{
-	ThrowIfFailed(g_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_d3d12Fence)));
-
-	m_fenceValue++;
-
-	m_fenceEvent = CreateEventEx(nullptr, FALSE, FALSE, EVENT_ALL_ACCESS);
-
-	if (m_fenceEvent == nullptr)
-	{
-		ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-	}
-}
-
-void Renderer::CreateSwapChain()
-{
-	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-	swapChainDesc.BufferCount = Constants::Graphics::NUM_FRAMES;
-	swapChainDesc.Width = Window::Get().GetWidth();
-	swapChainDesc.Height = Window::Get().GetHeight();
-	swapChainDesc.Format = m_backBufferFormat;
-	swapChainDesc.SampleDesc.Count = 1;
-	swapChainDesc.SampleDesc.Quality = 0;
-	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	swapChainDesc.Flags = CheckTearingSupport() ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
-	swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
-	swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
-	
-	IDXGISwapChain1* swapChain1;
-	
-	ThrowIfFailed(m_dxgiFactory->CreateSwapChainForHwnd(
-		m_d3d12CommandQueue.Get(),
-		Window::Get().GetHandle(),
-		&swapChainDesc,
-		nullptr,
-		nullptr,
-		&swapChain1));
-
-	ThrowIfFailed(m_dxgiFactory->MakeWindowAssociation(Window::Get().GetHandle(), DXGI_MWA_NO_ALT_ENTER));
-
-	ThrowIfFailed(swapChain1->QueryInterface(IID_PPV_ARGS(&m_dxgiSwapChain)));
-
-	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
-}
-
 void Renderer::CreateCommandList()
 {
 	ThrowIfFailed(g_device->CreateCommandList(
 		0,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		m_d3d12CommandAllocators[m_frameIndex].Get(),
+		m_graphicsDevice->GetCommandAllocator(m_graphicsDevice->GetFrameIndex()).Get(),
 		nullptr,
 		IID_PPV_ARGS(&m_d3d12CommandList)));
 
@@ -941,8 +809,9 @@ void Renderer::CreateCommandList()
 
 void Renderer::ResetCommandList() const
 {
-	ThrowIfFailed(m_d3d12CommandAllocators[m_frameIndex]->Reset());
-	ThrowIfFailed(m_d3d12CommandList->Reset(m_d3d12CommandAllocators[m_frameIndex].Get(), m_pipelineStateObject.Get()));
+	auto& allocator = m_graphicsDevice->GetCommandAllocator(m_graphicsDevice->GetFrameIndex());
+	ThrowIfFailed(allocator->Reset());
+	ThrowIfFailed(m_d3d12CommandList->Reset(allocator.Get(), m_pipelineStateObject.Get()));
 }
 
 void Renderer::CreateRTVDescriptorHeap()
@@ -963,7 +832,7 @@ void Renderer::CreateRenderTargetViews()
 
 	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
 	{
-		ThrowIfFailed(m_dxgiSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
+		ThrowIfFailed(m_graphicsDevice->GetSwapChain()->GetBuffer(i, IID_PPV_ARGS(&m_d3d12RenderTargets[i])));
 		g_device->CreateRenderTargetView(m_d3d12RenderTargets[i].Get(), nullptr, rtvHandle);
 		m_backBufferTextures[i] = std::make_unique<Texture>(g_device, m_d3d12RenderTargets[i],
 			D3D12_RESOURCE_STATE_PRESENT, L"Back Buffer " + std::to_wstring(i));
@@ -1002,23 +871,23 @@ void Renderer::CreateDepthStencilView()
 		&clearValue,
 		IID_PPV_ARGS(&m_depthStencilBuffer)));
 
+	m_depthStencilTexture = std::make_unique<Texture>(g_device, m_depthStencilBuffer,
+		D3D12_RESOURCE_STATE_COMMON, L"Depth Stencil");
+
 	D3D12_DEPTH_STENCIL_VIEW_DESC viewDesc;
 	viewDesc.Flags = D3D12_DSV_FLAG_NONE;
 	viewDesc.Format = m_depthStencilFormat;
 	viewDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
 	viewDesc.Texture2D.MipSlice = 0;
-	
+
 	g_device->CreateDepthStencilView(
 		m_depthStencilBuffer.Get(),
 		&viewDesc,
 		m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-	
-	m_d3d12CommandList->ResourceBarrier(
-		1,
-		&CD3DX12_RESOURCE_BARRIER::Transition(
-			m_depthStencilBuffer.Get(),
-			D3D12_RESOURCE_STATE_COMMON,
-			D3D12_RESOURCE_STATE_DEPTH_WRITE));
+
+	m_depthStencilTexture->TransitionChecked(m_d3d12CommandList.Get(),
+		D3D12_RESOURCE_STATE_COMMON,
+		D3D12_RESOURCE_STATE_DEPTH_WRITE);
 }
 
 void Renderer::CreateDSVDescriptorHeap()
@@ -1253,86 +1122,7 @@ void Renderer::SetScissorRect()
 
 void Renderer::FlushCommandQueue()
 {
-	m_fenceValue++;
-	ThrowIfFailed(m_d3d12CommandQueue->Signal(m_d3d12Fence.Get(), m_fenceValue));
-
-	if (m_d3d12Fence->GetCompletedValue() < m_fenceValue)
-	{
-		ThrowIfFailed(m_d3d12Fence->SetEventOnCompletion(m_fenceValue, m_fenceEvent));
-		WaitForSingleObject(m_fenceEvent, INFINITE);
-	}
-
-	m_frameIndex = m_dxgiSwapChain->GetCurrentBackBufferIndex();
-}
-
-bool Renderer::CheckTearingSupport()
-{
-	BOOL tearingAllowed;
-
-	if (FAILED(m_dxgiFactory->CheckFeatureSupport(
-		DXGI_FEATURE_PRESENT_ALLOW_TEARING,
-		&tearingAllowed,
-		sizeof(tearingAllowed))))
-	{
-		tearingAllowed = false;
-	}
-	
-	m_tearingSupport = tearingAllowed;
-	return tearingAllowed;
-}
-
-bool Renderer::CheckRayTracingSupport() const
-{
-	spdlog::info("Checking ray tracing support...");
-	
-	D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-	ThrowIfFailed(g_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
-	if (options5.RaytracingTier < D3D12_RAYTRACING_TIER_1_1)
-	{
-		spdlog::error("Ray tracing not supported!");
-		return false;
-	}
-
-	// VXPG fingerprint / cvis visibility kernels use inline RayQuery (Tier 1.1,
-	// above) plus [WaveSize(32)] ballot packing, which needs shader model 6.6.
-	D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { D3D_SHADER_MODEL_6_6 };
-	ThrowIfFailed(g_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
-	if (shaderModel.HighestShaderModel < D3D_SHADER_MODEL_6_6)
-	{
-		spdlog::error("Shader model 6.6 not supported (required by VXPG wave-intrinsic passes)!");
-		return false;
-	}
-
-	// VXPG light tree: uint64 bitonic sort keys need Int64ShaderOps; the
-	// byte-identical uint16 TreeNode layout needs native 16-bit shader ops.
-	D3D12_FEATURE_DATA_D3D12_OPTIONS1 options1 = {};
-	ThrowIfFailed(g_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options1, sizeof(options1)));
-	if (!options1.Int64ShaderOps)
-	{
-		spdlog::error("Int64 shader ops not supported (required by the VXPG light-tree sort)!");
-		return false;
-	}
-
-	D3D12_FEATURE_DATA_D3D12_OPTIONS4 options4 = {};
-	ThrowIfFailed(g_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS4, &options4, sizeof(options4)));
-	if (!options4.Native16BitShaderOpsSupported)
-	{
-		spdlog::error("Native 16-bit shader ops not supported (required by the VXPG light-tree nodes)!");
-		return false;
-	}
-
-	// VXPG guided integrator carries its sampling pdfs in double, faithful to
-	// SIByL (ADR 0003 integrator-swap section).
-	D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
-	ThrowIfFailed(g_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)));
-	if (!options.DoublePrecisionFloatShaderOps)
-	{
-		spdlog::error("Double-precision shader ops not supported (required by the VXPG guided integrator pdfs)!");
-		return false;
-	}
-
-	spdlog::info("Ray tracing supported!");
-	return true;
+	m_graphicsDevice->FlushCommandQueue();
 }
 
 void Renderer::CreateTextureSRV(const std::shared_ptr<Texture>& texture)
@@ -1415,7 +1205,7 @@ void Renderer::CreateIndexSRV()
 void Renderer::InitializeEditorUI()
 {
 	m_editorUI = std::make_shared<EditorUI>();
-	m_editorUI->Initialize(g_device, m_d3d12CommandQueue, m_srvCbvUavDescriptorHeap);
+	m_editorUI->Initialize(g_device, m_graphicsDevice->GetCommandQueue(), m_srvCbvUavDescriptorHeap);
 	m_editorUI->SetCamera(m_camera);
 	m_editorUI->SetScene(m_scene);
 	m_editorUI->SetAccumulationPass(m_accumulationPass);
@@ -1786,21 +1576,18 @@ void Renderer::LoadSkybox(const std::wstring& path)
 		&bufferDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr, IID_PPV_ARGS(&uploadBuffer)));
 
-	{
-		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(textureResource.Get(),
-			D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
-		m_d3d12CommandList->ResourceBarrier(1, &barrier);
-	}
+	m_skyboxTexture = std::make_unique<Texture>(g_device, textureResource,
+		D3D12_RESOURCE_STATE_COMMON, L"Skybox");
+
+	m_skyboxTexture->TransitionChecked(m_d3d12CommandList.Get(),
+		D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
 
 	UpdateSubresources(m_d3d12CommandList.Get(), textureResource.Get(), uploadBuffer.Get(),
 		0, 0, static_cast<UINT>(subresources.size()), subresources.data());
 
-	{
-		auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(textureResource.Get(),
-			D3D12_RESOURCE_STATE_COPY_DEST,
-			D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-		m_d3d12CommandList->ResourceBarrier(1, &barrier);
-	}
+	m_skyboxTexture->TransitionChecked(m_d3d12CommandList.Get(),
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
 	// Create SRV at SKYBOX_DESCRIPTOR_INDEX
 	auto desc = textureResource->GetDesc();
@@ -1818,8 +1605,6 @@ void Renderer::LoadSkybox(const std::wstring& path)
 
 	g_device->CreateShaderResourceView(textureResource.Get(), &srvDesc, srvHandle);
 
-	m_skyboxResource = textureResource;
-
 	ExecuteCommandsAndReset();
 	spdlog::info("Skybox loaded successfully.");
 }
@@ -1831,7 +1616,7 @@ void Renderer::OnShaderReload()
 	
 	ThrowIfFailed(m_d3d12CommandList->Close());
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	m_graphicsDevice->GetCommandQueue()->ExecuteCommandLists(_countof(commandLists), commandLists);
 	ResourceStateTracker::Get().OnExecuteCommandLists();
 
 	FlushCommandQueue();
@@ -1935,12 +1720,13 @@ std::shared_ptr<Texture> Renderer::CreateTextureFromGLTF(const tinygltf::Image& 
 
 	auto texture_resource = RenderingUtils::CreateDefaultTexture(g_device.Get(), m_d3d12CommandList.Get(), image, upload_buffer);
 
-	std::shared_ptr<Texture> texture = std::make_shared<Texture>(g_device, texture_resource);
+	std::shared_ptr<Texture> texture = std::make_shared<Texture>(g_device, texture_resource,
+		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	CreateTextureSRV(texture);
 
 	m_d3d12CommandList->Close();
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	m_graphicsDevice->GetCommandQueue()->ExecuteCommandLists(_countof(commandLists), commandLists);
 	ResourceStateTracker::Get().OnExecuteCommandLists();
 	FlushCommandQueue();
 	ResetCommandList();
@@ -1948,73 +1734,6 @@ std::shared_ptr<Texture> Renderer::CreateTextureFromGLTF(const tinygltf::Image& 
 	m_textures.push_back(texture);
 	
 	return texture;
-}
-
-ComPtr<IDXGIAdapter4> Renderer::GetHardwareAdapter(bool useWarp)
-{
-	ComPtr<IDXGIAdapter1> adapter1;
-	ComPtr<IDXGIAdapter4> adapter;
-
-	if (useWarp)
-	{
-		ThrowIfFailed(m_dxgiFactory->EnumWarpAdapter(IID_PPV_ARGS(&adapter1)));
-		ThrowIfFailed(adapter1.As(&adapter));
-		return adapter;
-	}
-
-	size_t maxDedicatedVideoMemory = 0;
-
-	for (UINT i = 0; m_dxgiFactory->EnumAdapters1(i, &adapter1) != DXGI_ERROR_NOT_FOUND; ++i){
-		DXGI_ADAPTER_DESC1 desc;
-		adapter1->GetDesc1(&desc);
-
-		if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-			continue;
-
-		if (SUCCEEDED(D3D12CreateDevice(adapter1.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
-		{
-			if (desc.DedicatedVideoMemory > maxDedicatedVideoMemory)
-			{
-				maxDedicatedVideoMemory = desc.DedicatedVideoMemory;
-				ThrowIfFailed(adapter1.As(&adapter));
-			}
-		}
-	}
-
-	return adapter;
-}
-
-ComPtr<ID3D12Device5> Renderer::GetDeviceForAdapter(ComPtr<IDXGIAdapter1> adapter)
-{
-	ComPtr<ID3D12Device5> device;
-	ThrowIfFailed(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)));
-
-#ifdef _DEBUG
-	if (g_enableDebugLayer) { // InfoQueue interfaces only exist with the debug layer
-	ThrowIfFailed(device->QueryInterface(IID_PPV_ARGS(&m_infoQueue)));
-	// Only break into the debugger on genuine memory corruption; errors and
-	// warnings are logged (below) so headless runs surface them instead of
-	// aborting on a breakpoint with no debugger attached.
-	ThrowIfFailed(m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true));
-	m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, false);
-	m_infoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, false);
-
-	// Mirror every debug-layer message into spdlog (console + headless log).
-	ComPtr<ID3D12InfoQueue1> infoQueue1;
-	if (SUCCEEDED(m_infoQueue.As(&infoQueue1)))
-	{
-		infoQueue1->RegisterMessageCallback(&D3D12DebugMessageCallback,
-			D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &m_debugMessageCallbackCookie);
-	}
-	else
-	{
-		spdlog::warn("ID3D12InfoQueue1 unavailable; D3D12 messages will only reach the debugger output.");
-	}
-	}
-#endif
-
-
-	return device;
 }
 
 std::shared_ptr<GameObject> Renderer::InstantiateGameObject()
@@ -2047,7 +1766,7 @@ void Renderer::ExecuteCommandsAndReset()
 {
 	ThrowIfFailed(m_d3d12CommandList->Close());
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
-	m_d3d12CommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
+	m_graphicsDevice->GetCommandQueue()->ExecuteCommandLists(_countof(commandLists), commandLists);
 	ResourceStateTracker::Get().OnExecuteCommandLists();
 	FlushCommandQueue();
 	// WHY is resetting the allocator impossible if:

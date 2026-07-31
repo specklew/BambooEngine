@@ -156,18 +156,16 @@ void VxpgClusterPass::Run(uint32_t frameIndex)
     // The args buffer (owned by the fingerprint pass) is currently a UAV; flip it
     // to INDIRECT_ARGUMENT for the ExecuteIndirect read, then back so the next
     // frame's presample writes it as a UAV again.
-    ID3D12Resource* argsResource =
-        m_fingerprintPass->GetGuidingDispatchArgsBuffer()->GetUnderlyingResource().Get();
-    auto toIndirect = CD3DX12_RESOURCE_BARRIER::Transition(argsResource,
+    auto& argsBuffer = *m_fingerprintPass->GetGuidingDispatchArgsBuffer();
+    argsBuffer.TransitionChecked(cmd,
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-    cmd->ResourceBarrier(1, &toIndirect);
 
-    cmd->ExecuteIndirect(m_dispatchCommandSignature.Get(), 1, argsResource,
+    cmd->ExecuteIndirect(m_dispatchCommandSignature.Get(), 1,
+        argsBuffer.GetUnderlyingResource().Get(),
         0, nullptr, 0); // entry [0]
 
-    auto toUav = CD3DX12_RESOURCE_BARRIER::Transition(argsResource,
+    argsBuffer.TransitionChecked(cmd,
         D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    cmd->ResourceBarrier(1, &toUav);
 
     m_voxelClusterAssignments->UavBarrier(cmd);
 }
