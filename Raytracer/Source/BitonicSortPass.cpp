@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "BitonicSortPass.h"
 
 #include "ResourceManager/ResourceManager.h"
@@ -71,8 +72,7 @@ void BitonicSortPass::Sort(
 
     auto keyBarrier = [&]()
     {
-        auto b = CD3DX12_RESOURCE_BARRIER::UAV(keyBuffer);
-        cmd->ResourceBarrier(1, &b);
+        CommandContext::Get().UavBarrierRaw(keyBuffer);
     };
     auto setConstants = [&](uint32_t k, uint32_t j)
     {
@@ -83,7 +83,7 @@ void BitonicSortPass::Sort(
     // Presort: sort each 2048-block into bitonic order.
     cmd->SetPipelineState(m_presortProgram->GetPipelineState());
     setConstants(0, 0);
-    cmd->Dispatch(kGroups, 1, 1);
+    CommandContext::Get().Dispatch(kGroups, 1, 1);
     keyBarrier();
 
     // Outer/inner ladder: 1 presort + 15 outer + 5 inner = 21 dispatches.
@@ -93,12 +93,12 @@ void BitonicSortPass::Sort(
         {
             cmd->SetPipelineState(m_outerProgram->GetPipelineState());
             setConstants(k, j);
-            cmd->Dispatch(kGroups, 1, 1);
+            CommandContext::Get().Dispatch(kGroups, 1, 1);
             keyBarrier();
         }
         cmd->SetPipelineState(m_innerProgram->GetPipelineState());
         setConstants(k, 0);
-        cmd->Dispatch(kGroups, 1, 1);
+        CommandContext::Get().Dispatch(kGroups, 1, 1);
         keyBarrier();
     }
 }

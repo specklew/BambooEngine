@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "Techniques/GuidedPathTracingPass.h"
 
 #include "AccelerationStructures.h"
@@ -356,7 +357,7 @@ void GuidedPathTracingPass::Render()
         m_commandList->SetPipelineState(m_inlineRqProgram->GetPipelineState());
         const uint32_t width  = Window::Get().GetWidth();
         const uint32_t height = Window::Get().GetHeight();
-        m_commandList->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
+        CommandContext::Get().Dispatch((width + 7) / 8, (height + 7) / 8, 1);
     }
     else
     {
@@ -377,7 +378,7 @@ void GuidedPathTracingPass::Render()
         desc.Depth  = 1;
 
         m_commandList->SetPipelineState1(m_rtStateObject.Get());
-        m_commandList->DispatchRays(&desc);
+        CommandContext::Get().DispatchRays(desc);
     }
 
     // Adaptive-q update (ADR 0015): fold this frame's per-tile strategy stats
@@ -390,7 +391,7 @@ void GuidedPathTracingPass::Render()
         m_tileStrategyStats->UavBarrier(m_commandList.Get());
         m_commandList->SetPipelineState(m_adaptiveQUpdateProgram->GetPipelineState());
         const uint32_t tileCount = m_tileGridWidth * m_tileGridHeight;
-        m_commandList->Dispatch((tileCount + 63) / 64, 1, 1);
+        CommandContext::Get().Dispatch((tileCount + 63) / 64, 1, 1);
         m_tileGuideQ->UavBarrier(m_commandList.Get());
     }
 

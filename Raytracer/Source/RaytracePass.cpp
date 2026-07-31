@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "RaytracePass.h"
 
 #include <wrl/client.h>
@@ -147,7 +148,7 @@ void RaytracePass::Render()
     desc.Depth  = 1;
 
     m_commandList->SetPipelineState1(m_rtStateObject.Get());
-    m_commandList->DispatchRays(&desc);
+    CommandContext::Get().DispatchRays(desc);
 
     m_outputResource->UavBarrierChecked(m_commandList.Get());
 

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "VxpgLightTreePass.h"
 
 #include "Constants.h"
@@ -184,13 +185,13 @@ void VxpgLightTreePass::Run()
     // Reset compact->leaf to -1 and NULL-pad the whole sort-key buffer (so the
     // fixed 65536 sort network's over-dispatch reads padding, not stale garbage).
     cmd->SetPipelineState(m_clearProgram->GetPipelineState());
-    cmd->Dispatch(clearGroups, 1, 1);
+    CommandContext::Get().Dispatch(clearGroups, 1, 1);
     m_compactToLeaf->UavBarrier(cmd);
     m_sortKeys->UavBarrier(cmd);
 
     // Encode leaf sort keys + dispatch args (+ overflow flag).
     cmd->SetPipelineState(m_encodeProgram->GetPipelineState());
-    cmd->Dispatch(leafGroups, 1, 1);
+    CommandContext::Get().Dispatch(leafGroups, 1, 1);
     m_sortKeys->UavBarrier(cmd);
     m_dispatchArgs->UavBarrier(cmd);
 
@@ -205,19 +206,19 @@ void VxpgLightTreePass::Run()
 
     // Initialize the 2N-1 node array (leaves get AABB / intensity / cluster).
     cmd->SetPipelineState(m_initialProgram->GetPipelineState());
-    cmd->Dispatch(nodeGroups, 1, 1);
+    CommandContext::Get().Dispatch(nodeGroups, 1, 1);
     m_nodes->UavBarrier(cmd);
     m_compactToLeaf->UavBarrier(cmd);
     m_clusterRoots->UavBarrier(cmd);
 
     // Build the Karras hierarchy (child + parent links).
     cmd->SetPipelineState(m_internalProgram->GetPipelineState());
-    cmd->Dispatch(internalGroups, 1, 1);
+    CommandContext::Get().Dispatch(internalGroups, 1, 1);
     m_nodes->UavBarrier(cmd);
 
     // Merge bottom-up: AABB + intensity + per-cluster root detection.
     cmd->SetPipelineState(m_mergeProgram->GetPipelineState());
-    cmd->Dispatch(leafGroups, 1, 1);
+    CommandContext::Get().Dispatch(leafGroups, 1, 1);
     m_nodes->UavBarrier(cmd);
     m_clusterRoots->UavBarrier(cmd);
 
@@ -240,7 +241,7 @@ void VxpgLightTreePass::Run()
         // One warp (32 lanes) per superpixel; 8 warps per group => ceil(mapX/8)
         // groups wide, mapY tall (SIByL dispatch (5,23) for its 40x23 map).
         cmd->SetPipelineState(m_topLevelProgram->GetPipelineState());
-        cmd->Dispatch((m_mapX + 7) / 8, m_mapY, 1);
+        CommandContext::Get().Dispatch((m_mapX + 7) / 8, m_mapY, 1);
         m_spixelClusterHeap->UavBarrier(cmd);
     }
 }

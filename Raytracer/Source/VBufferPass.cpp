@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "VBufferPass.h"
 
 #include "AccelerationStructures.h"
@@ -172,8 +173,7 @@ void VBufferPass::Render()
     desc.Depth  = 1;
 
     m_commandList->SetPipelineState1(m_rtStateObject.Get());
-    m_commandList->DispatchRays(&desc);
+    CommandContext::Get().DispatchRays(desc);
 
-    D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::UAV(m_vbufferTex.Get());
-    m_commandList->ResourceBarrier(1, &barrier);
+    CommandContext::Get().UavBarrierRaw(m_vbufferTex.Get());
 }

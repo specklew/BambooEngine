@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "LightInjectionPass.h"
 
 #include "AccelerationStructures.h"
@@ -312,13 +313,12 @@ void LightInjectionPass::Render()
     desc.Depth  = 1;
 
     m_commandList->SetPipelineState1(m_rtStateObject.Get());
-    m_commandList->DispatchRays(&desc);
+    CommandContext::Get().DispatchRays(desc);
 
-    D3D12_RESOURCE_BARRIER barriers[5];
-    barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_voxelPass->GetIrradianceTexture().Get());
-    barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_voxelPass->GetVplCountTexture().Get());
-    barriers[2] = CD3DX12_RESOURCE_BARRIER::UAV(m_shadingPointsTex.Get());
-    barriers[3] = CD3DX12_RESOURCE_BARRIER::UAV(m_voxelRepresentativeTex.Get());
-    barriers[4] = CD3DX12_RESOURCE_BARRIER::UAV(m_vplPositionTex.Get());
-    m_commandList->ResourceBarrier(_countof(barriers), barriers);
+    CommandContext& context = CommandContext::Get();
+    context.UavBarrierRaw(m_voxelPass->GetIrradianceTexture().Get());
+    context.UavBarrierRaw(m_voxelPass->GetVplCountTexture().Get());
+    context.UavBarrierRaw(m_shadingPointsTex.Get());
+    context.UavBarrierRaw(m_voxelRepresentativeTex.Get());
+    context.UavBarrierRaw(m_vplPositionTex.Get());
 }

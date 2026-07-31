@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "SuperpixelBuildPass.h"
 
 #include "Constants.h"
@@ -230,8 +231,7 @@ void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float
 
     auto setConstants = [&]() { cmd->SetComputeRoot32BitConstants(0, 12, &c, 0); };
     auto uavBarrier = [&](ID3D12Resource* r) {
-        D3D12_RESOURCE_BARRIER b = CD3DX12_RESOURCE_BARRIER::UAV(r);
-        cmd->ResourceBarrier(1, &b);
+        CommandContext::Get().UavBarrierRaw(r);
     };
 
     const uint32_t mapGroupsX = (m_mapX + 7) / 8;
@@ -242,7 +242,7 @@ void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float
     // Seed centers from tile middle pixels.
     setConstants();
     cmd->SetPipelineState(m_initProgram->GetPipelineState());
-    cmd->Dispatch(mapGroupsX, mapGroupsY, 1);
+    CommandContext::Get().Dispatch(mapGroupsX, mapGroupsY, 1);
     uavBarrier(m_center.Get());
 
     // Iterate: associate (no gather), then average-update centers.
@@ -251,24 +251,24 @@ void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float
         c.writeGather = 0;
         setConstants();
         cmd->SetPipelineState(m_assocProgram->GetPipelineState());
-        cmd->Dispatch(imgGroupsX, imgGroupsY, 1);
+        CommandContext::Get().Dispatch(imgGroupsX, imgGroupsY, 1);
         uavBarrier(m_index.Get());
 
         cmd->SetPipelineState(m_sumProgram->GetPipelineState());
-        cmd->Dispatch(m_mapX, m_mapY, 1);
+        CommandContext::Get().Dispatch(m_mapX, m_mapY, 1);
         uavBarrier(m_center.Get());
     }
 
     // Clear the counter, then a final association that also emits gather lists,
     // consistent with the converged centers.
     cmd->SetPipelineState(m_clearProgram->GetPipelineState());
-    cmd->Dispatch(mapGroupsX, mapGroupsY, 1);
+    CommandContext::Get().Dispatch(mapGroupsX, mapGroupsY, 1);
     uavBarrier(m_counter.Get());
 
     c.writeGather = 1;
     setConstants();
     cmd->SetPipelineState(m_assocProgram->GetPipelineState());
-    cmd->Dispatch(imgGroupsX, imgGroupsY, 1);
+    CommandContext::Get().Dispatch(imgGroupsX, imgGroupsY, 1);
     uavBarrier(m_index.Get());
     uavBarrier(m_counter.Get());
     uavBarrier(m_gathered.Get());

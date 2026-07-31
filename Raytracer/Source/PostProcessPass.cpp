@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "PostProcessPass.h"
 
 #include "Constants.h"
@@ -148,7 +149,7 @@ void PostProcessPass::Render(
     UINT height = Window::Get().GetHeight();
     UINT threadsX = (width + 7) / 8;   // 8x8 thread groups
     UINT threadsY = (height + 7) / 8;
-    m_commandList->Dispatch(threadsX, threadsY, 1);
+    CommandContext::Get().Dispatch(threadsX, threadsY, 1);
 
     // UAV barrier to flush writes
     m_outputBuffer->UavBarrierChecked(m_commandList.Get());
@@ -168,7 +169,7 @@ void PostProcessPass::Render(
         D3D12_RESOURCE_STATE_RENDER_TARGET,
         D3D12_RESOURCE_STATE_COPY_DEST);
 
-    m_commandList->CopyResource(backBuffer.GetUnderlyingResource().Get(), m_outputBuffer->GetUnderlyingResource().Get());
+    CommandContext::Get().CopyResource(backBuffer.GetUnderlyingResource().Get(), m_outputBuffer->GetUnderlyingResource().Get());
 
     backBuffer.TransitionChecked(m_commandList.Get(),
         D3D12_RESOURCE_STATE_COPY_DEST,

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "VoxelGuidingBuildPass.h"
 
 #include "Constants.h"
@@ -171,17 +172,17 @@ void VoxelGuidingBuildPass::Run(ID3D12Resource* representativeTex)
     const uint32_t groups = (gridDim + 7) / 8;
 
     m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
-    m_commandList->Dispatch(1, 1, 1);
+    CommandContext::Get().Dispatch(1, 1, 1);
     m_counters->UavBarrier(cmd);
 
     // Reload baked bounds for lit voxels before compaction reads them.
     m_commandList->SetPipelineState(m_reloadProgram->GetPipelineState());
-    m_commandList->Dispatch(groups, groups, groups);
+    CommandContext::Get().Dispatch(groups, groups, groups);
     m_liveBoundMin->UavBarrier(cmd);
     m_liveBoundMax->UavBarrier(cmd);
 
     m_commandList->SetPipelineState(m_compactProgram->GetPipelineState());
-    m_commandList->Dispatch(groups, groups, groups);
+    CommandContext::Get().Dispatch(groups, groups, groups);
     m_counters->UavBarrier(cmd);
     m_compactIds->UavBarrier(cmd);
     m_inverseIndex->UavBarrier(cmd);

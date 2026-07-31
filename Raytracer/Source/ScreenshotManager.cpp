@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "ScreenshotManager.h"
 
 #include "FrameAccumulationPass.h"
@@ -168,7 +169,7 @@ void ScreenshotManager::RecordCopy(const Microsoft::WRL::ComPtr<ID3D12Resource>&
 
     CD3DX12_TEXTURE_COPY_LOCATION srcLoc(source.Get(), 0);
     CD3DX12_TEXTURE_COPY_LOCATION dstLoc(m_readbackBuffer.Get(), layout);
-    m_commandList->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
+    CommandContext::Get().GetCommandList()->CopyTextureRegion(&dstLoc, 0, 0, 0, &srcLoc, nullptr);
     m_copyRecorded = true;
 }
 

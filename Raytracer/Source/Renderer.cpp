@@ -18,6 +18,7 @@
 #include "imgui.h"
 #include "backends/imgui_impl_dx12.h"
 
+#include "CommandContext.h"
 #include "InputElements.h"
 #include "ShaderProgram.h"
 #include "Resources/ResourceStateTracker.h"
@@ -535,8 +536,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			frameIndex,
 			m_rtvDescriptorSize);
 		
-		m_d3d12CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-		m_d3d12CommandList->ClearDepthStencilView(
+		CommandContext::Get().GetCommandList()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+		CommandContext::Get().GetCommandList()->ClearDepthStencilView(
 			m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
 			D3D12_CLEAR_FLAG_DEPTH,
 			1.0f,
@@ -585,7 +586,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 				m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
 				
-				m_d3d12CommandList->DrawIndexedInstanced(index_view.count, 1, index_view.offset, vertex_view.offset, 0);
+				CommandContext::Get().DrawIndexedInstanced(index_view.count, 1, index_view.offset, vertex_view.offset, 0);
 			}
 		}
 	}
@@ -641,7 +642,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
 
-	ThrowIfFailed(m_d3d12CommandList->Close());
+	CommandContext::Get().Close();
 
 	m_graphicsDevice->GetCommandQueue()->ExecuteCommandLists(_countof(commandLists), commandLists);
 	ResourceStateTracker::Get().OnExecuteCommandLists();
@@ -805,7 +806,8 @@ void Renderer::CreateCommandList()
 		nullptr,
 		IID_PPV_ARGS(&m_d3d12CommandList)));
 
-	ThrowIfFailed(m_d3d12CommandList->Close());
+	CommandContext::Get().Bind(m_d3d12CommandList.Get());
+	CommandContext::Get().Close();
 }
 
 void Renderer::ResetCommandList() const
@@ -1555,7 +1557,7 @@ void Renderer::LoadSkybox(const std::wstring& path)
 	m_skyboxTexture->TransitionChecked(m_d3d12CommandList.Get(),
 		D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
 
-	UpdateSubresources(m_d3d12CommandList.Get(), textureResource.Get(), uploadBuffer.Get(),
+	UpdateSubresources(CommandContext::Get().GetCommandList(), textureResource.Get(), uploadBuffer.Get(),
 		0, 0, static_cast<UINT>(subresources.size()), subresources.data());
 
 	m_skyboxTexture->TransitionChecked(m_d3d12CommandList.Get(),
@@ -1582,7 +1584,7 @@ void Renderer::OnShaderReload()
 	spdlog::info("Reloading shaders...");
 	ResourceManager::Get().RecompileAllShaders();
 	
-	ThrowIfFailed(m_d3d12CommandList->Close());
+	CommandContext::Get().Close();
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
 	m_graphicsDevice->GetCommandQueue()->ExecuteCommandLists(_countof(commandLists), commandLists);
 	ResourceStateTracker::Get().OnExecuteCommandLists();
@@ -1695,7 +1697,7 @@ std::shared_ptr<Texture> Renderer::CreateTextureFromGLTF(const tinygltf::Image& 
 		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	CreateTextureSRV(texture);
 
-	m_d3d12CommandList->Close();
+	CommandContext::Get().Close();
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
 	m_graphicsDevice->GetCommandQueue()->ExecuteCommandLists(_countof(commandLists), commandLists);
 	ResourceStateTracker::Get().OnExecuteCommandLists();
@@ -1735,7 +1737,7 @@ std::shared_ptr<GameObject> Renderer::InstantiateGameObject()
 
 void Renderer::ExecuteCommandsAndReset()
 {
-	ThrowIfFailed(m_d3d12CommandList->Close());
+	CommandContext::Get().Close();
 	ID3D12CommandList* commandLists[] = { m_d3d12CommandList.Get() };
 	m_graphicsDevice->GetCommandQueue()->ExecuteCommandLists(_countof(commandLists), commandLists);
 	ResourceStateTracker::Get().OnExecuteCommandLists();

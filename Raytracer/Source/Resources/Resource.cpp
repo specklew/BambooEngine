@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Resources/Resource.h"
 
+#include "CommandContext.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Utils/Utils.h"
 
@@ -74,16 +75,19 @@ void Resource::InitializeTrackedState(D3D12_RESOURCE_STATES initialState)
     ResourceStateTracker::Get().Register(*this);
 }
 
-void Resource::TransitionChecked(ID3D12GraphicsCommandList* commandList,
+// The command list argument is vestigial: barriers are queued on the context that
+// owns the engine's one direct list and flushed ahead of the work that needs them.
+// It dies together with expectedBefore when phase 3 synthesizes barriers.
+void Resource::TransitionChecked(ID3D12GraphicsCommandList* /*commandList*/,
                                  D3D12_RESOURCE_STATES expectedBefore,
                                  D3D12_RESOURCE_STATES after)
 {
-    ResourceStateTracker::Get().TransitionChecked(commandList, *this, expectedBefore, after);
+    CommandContext::Get().Transition(*this, expectedBefore, after);
 }
 
-void Resource::UavBarrierChecked(ID3D12GraphicsCommandList* commandList)
+void Resource::UavBarrierChecked(ID3D12GraphicsCommandList* /*commandList*/)
 {
-    ResourceStateTracker::Get().UavBarrierChecked(commandList, *this);
+    CommandContext::Get().UavBarrier(*this);
 }
 
 void Resource::QueryFeatureSupport()

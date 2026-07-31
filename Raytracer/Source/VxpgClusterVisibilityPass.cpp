@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "VxpgClusterVisibilityPass.h"
 
 #include "Constants.h"
@@ -172,20 +173,19 @@ void VxpgClusterVisibilityPass::Run(uint32_t frameIndex)
     cmd->SetComputeRootUnorderedAccessView(9, m_avgVisibility->GetGPUVirtualAddress());
 
     auto maskBarrier = [&]() {
-        auto b = CD3DX12_RESOURCE_BARRIER::UAV(m_mask.Get());
-        cmd->ResourceBarrier(1, &b);
+        CommandContext::Get().UavBarrierRaw(m_mask.Get());
     };
 
     // ---- Clear ----
     cmd->SetPipelineState(m_clearProgram->GetPipelineState());
-    cmd->Dispatch((m_mapX + 15) / 16, (m_mapY + 15) / 16, 1);
+    CommandContext::Get().Dispatch((m_mapX + 15) / 16, (m_mapY + 15) / 16, 1);
     maskBarrier();
     m_clusterLightPointCounts->UavBarrier(cmd);
     m_avgVisibility->UavBarrier(cmd);
 
     // ---- Gather: file VPLs into cluster drawers + seed mask bits ----
     cmd->SetPipelineState(m_gatherProgram->GetPipelineState());
-    cmd->Dispatch((m_width + 15) / 16, (m_height + 15) / 16, 1);
+    CommandContext::Get().Dispatch((m_width + 15) / 16, (m_height + 15) / 16, 1);
     maskBarrier();
     m_clusterGatheredLightPoints->UavBarrier(cmd);
     m_clusterLightPointCounts->UavBarrier(cmd);
@@ -194,7 +194,7 @@ void VxpgClusterVisibilityPass::Run(uint32_t frameIndex)
     // Dispatch covers mapX superpixels wide (32 sample lanes each) and mapY*4
     // groups tall (8 clusters per group x 4 = 32 clusters per superpixel row).
     cmd->SetPipelineState(m_checkProgram->GetPipelineState());
-    cmd->Dispatch(m_mapX, m_mapY * 4, 1);
+    CommandContext::Get().Dispatch(m_mapX, m_mapY * 4, 1);
     maskBarrier();
     m_avgVisibility->UavBarrier(cmd);
 }

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "VoxelizationPass.h"
 
 #include <algorithm>
@@ -367,12 +368,10 @@ void VoxelizationPass::DispatchFrameClear()
     m_commandList->SetComputeRootDescriptorTable(1, table);
 
     const uint32_t groups = (m_gridDim + 7) / 8;
-    m_commandList->Dispatch(groups, groups, groups);
+    CommandContext::Get().Dispatch(groups, groups, groups);
 
-    D3D12_RESOURCE_BARRIER barriers[2];
-    barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_irradianceTex.Get());
-    barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_vplCountTex.Get());
-    m_commandList->ResourceBarrier(_countof(barriers), barriers);
+    CommandContext::Get().UavBarrierRaw(m_irradianceTex.Get());
+    CommandContext::Get().UavBarrierRaw(m_vplCountTex.Get());
 }
 
 void VoxelizationPass::DispatchBakeClear()
@@ -389,13 +388,11 @@ void VoxelizationPass::DispatchBakeClear()
     m_commandList->SetComputeRootUnorderedAccessView(3, m_bakedBoundMax->GetGPUVirtualAddress());
 
     const uint32_t groups = (m_gridDim + 7) / 8;
-    m_commandList->Dispatch(groups, groups, groups);
+    CommandContext::Get().Dispatch(groups, groups, groups);
 
-    D3D12_RESOURCE_BARRIER barriers[3];
-    barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_occupancyTex.Get());
-    barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_bakedBoundMin->GetUnderlyingResource().Get());
-    barriers[2] = CD3DX12_RESOURCE_BARRIER::UAV(m_bakedBoundMax->GetUnderlyingResource().Get());
-    m_commandList->ResourceBarrier(_countof(barriers), barriers);
+    CommandContext::Get().UavBarrierRaw(m_occupancyTex.Get());
+    CommandContext::Get().UavBarrierRaw(m_bakedBoundMin->GetUnderlyingResource().Get());
+    CommandContext::Get().UavBarrierRaw(m_bakedBoundMax->GetUnderlyingResource().Get());
 }
 
 void VoxelizationPass::DispatchBake(const Scene& scene)
@@ -444,7 +441,7 @@ void VoxelizationPass::DispatchBake(const Scene& scene)
                 m_commandList->IASetIndexBuffer(&ib->GetIndexBufferView());
                 m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-                m_commandList->DrawIndexedInstanced(
+                CommandContext::Get().DrawIndexedInstanced(
                     static_cast<UINT>(index_view.count), 1,
                     static_cast<UINT>(index_view.offset),
                     static_cast<INT>(vertex_view.offset), 0);
@@ -452,11 +449,9 @@ void VoxelizationPass::DispatchBake(const Scene& scene)
         }
     }
 
-    D3D12_RESOURCE_BARRIER barriers[3];
-    barriers[0] = CD3DX12_RESOURCE_BARRIER::UAV(m_occupancyTex.Get());
-    barriers[1] = CD3DX12_RESOURCE_BARRIER::UAV(m_bakedBoundMin->GetUnderlyingResource().Get());
-    barriers[2] = CD3DX12_RESOURCE_BARRIER::UAV(m_bakedBoundMax->GetUnderlyingResource().Get());
-    m_commandList->ResourceBarrier(_countof(barriers), barriers);
+    CommandContext::Get().UavBarrierRaw(m_occupancyTex.Get());
+    CommandContext::Get().UavBarrierRaw(m_bakedBoundMin->GetUnderlyingResource().Get());
+    CommandContext::Get().UavBarrierRaw(m_bakedBoundMax->GetUnderlyingResource().Get());
 }
 
 void VoxelizationPass::RunFrame(const Scene& scene, uint32_t requestedGridDim, bool bakeUseCompact, bool bakeClipping)

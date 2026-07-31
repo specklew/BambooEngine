@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "VxpgFingerprintPass.h"
 
 #include "Constants.h"
@@ -188,7 +189,7 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
     cmd->SetComputeRootUnorderedAccessView(4, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
 
     cmd->SetPipelineState(m_presampleProgram->GetPipelineState());
-    cmd->Dispatch(1, 1, 1); // one 16x8 group = 128 representatives
+    CommandContext::Get().Dispatch(1, 1, 1); // one 16x8 group = 128 representatives
     m_screenRepresentativePoints->UavBarrier(cmd);
     m_guidingDispatchArgs->UavBarrier(cmd);
 
@@ -212,9 +213,8 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
 
     constexpr uint32_t kVisibilityArgsOffset = 2 * sizeof(DirectX::XMUINT4); // entry [2]
-    cmd->ExecuteIndirect(m_dispatchCommandSignature.Get(), 1,
-        m_guidingDispatchArgs->GetUnderlyingResource().Get(),
-        kVisibilityArgsOffset, nullptr, 0);
+    CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
+        m_guidingDispatchArgs->GetUnderlyingResource().Get(), kVisibilityArgsOffset);
 
     m_guidingDispatchArgs->TransitionChecked(cmd,
         D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);

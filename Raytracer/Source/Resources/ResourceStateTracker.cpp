@@ -38,6 +38,20 @@ bool ResourceStateTracker::ReportOnce(const std::string& siteKey)
 void ResourceStateTracker::TransitionChecked(ID3D12GraphicsCommandList* commandList, Resource& resource,
                                              D3D12_RESOURCE_STATES expectedBefore, D3D12_RESOURCE_STATES after)
 {
+    const auto barrier = BuildTransitionChecked(resource, expectedBefore, after);
+    commandList->ResourceBarrier(1, &barrier);
+}
+
+void ResourceStateTracker::UavBarrierChecked(ID3D12GraphicsCommandList* commandList, Resource& resource)
+{
+    const auto barrier = BuildUavBarrierChecked(resource);
+    commandList->ResourceBarrier(1, &barrier);
+}
+
+D3D12_RESOURCE_BARRIER ResourceStateTracker::BuildTransitionChecked(Resource& resource,
+                                                                    D3D12_RESOURCE_STATES expectedBefore,
+                                                                    D3D12_RESOURCE_STATES after)
+{
     ResourceState& tracked = resource.GetTrackedState();
 
     if (tracked.tracked)
@@ -90,12 +104,11 @@ void ResourceStateTracker::TransitionChecked(ID3D12GraphicsCommandList* commandL
         }
     }
 
-    const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+    return CD3DX12_RESOURCE_BARRIER::Transition(
         resource.GetUnderlyingResource().Get(), expectedBefore, after);
-    commandList->ResourceBarrier(1, &barrier);
 }
 
-void ResourceStateTracker::UavBarrierChecked(ID3D12GraphicsCommandList* commandList, Resource& resource)
+D3D12_RESOURCE_BARRIER ResourceStateTracker::BuildUavBarrierChecked(Resource& resource)
 {
     ResourceState& tracked = resource.GetTrackedState();
 
@@ -120,8 +133,7 @@ void ResourceStateTracker::UavBarrierChecked(ID3D12GraphicsCommandList* commandL
         }
     }
 
-    const auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(resource.GetUnderlyingResource().Get());
-    commandList->ResourceBarrier(1, &barrier);
+    return CD3DX12_RESOURCE_BARRIER::UAV(resource.GetUnderlyingResource().Get());
 }
 
 void ResourceStateTracker::OnExecuteCommandLists()

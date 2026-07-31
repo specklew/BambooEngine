@@ -1,4 +1,5 @@
-﻿#include "pch.h"
+#include "pch.h"
+#include "CommandContext.h"
 #include "AccelerationStructures.h"
 
 #include "BottomLevelASGenerator.h"
@@ -82,11 +83,11 @@ AccelerationStructureBuffers AccelerationStructures::CreateBottomLevelAS(
     buildDesc.Inputs = inputs;
     buildDesc.ScratchAccelerationStructureData = buffers.p_scratch->GetGPUVirtualAddress();
     buildDesc.DestAccelerationStructureData    = buffers.p_result->GetGPUVirtualAddress();
-    commandList->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
+    // Through the context so any queued barrier lands ahead of the build.
+    CommandContext::Get().GetCommandList()->BuildRaytracingAccelerationStructure(&buildDesc, 0, nullptr);
 
     // The TLAS build (and any trace) must see the finished BLAS.
-    D3D12_RESOURCE_BARRIER uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(buffers.p_result.Get());
-    commandList->ResourceBarrier(1, &uavBarrier);
+    CommandContext::Get().UavBarrierRaw(buffers.p_result.Get());
 
     return buffers;
 }
@@ -129,7 +130,7 @@ void AccelerationStructures::CreateTopLevelAS(
         m_topLevelASBuffers.p_instanceDesc->SetName(L"Instance Descriptions TLAS Buffer");
     }
 
-    m_topLevelAsGenerator->Generate(commandList.Get(),
+    m_topLevelAsGenerator->Generate(CommandContext::Get().GetCommandList(),
         m_topLevelASBuffers.p_scratch.Get(),
         m_topLevelASBuffers.p_result.Get(),
         m_topLevelASBuffers.p_instanceDesc.Get());

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "FrameAccumulationPass.h"
 
 #include "Constants.h"
@@ -164,7 +165,7 @@ void FrameAccumulationPass::Render(Texture& currentFrameOutput)
     UINT height = Window::Get().GetHeight();
     UINT threadsX = (width + 7) / 8;   // 8x8 thread groups
     UINT threadsY = (height + 7) / 8;
-    m_commandList->Dispatch(threadsX, threadsY, 1);
+    CommandContext::Get().Dispatch(threadsX, threadsY, 1);
 
     // UAV barrier to flush writes
     m_displayBuffer->UavBarrierChecked(m_commandList.Get());

@@ -1,4 +1,5 @@
-﻿#include "pch.h"
+#include "pch.h"
+#include "CommandContext.h"
 #include "Utils/Utils.h"
 #include <comdef.h>
 
@@ -242,19 +243,15 @@ namespace RenderingUtils
 		// will copy the CPU memory into the intermediate upload heap.
 		// Then, using ID3D12CommandList::CopySubresourceRegion,
 		// the intermediate upload heap data will be copied to mBuffer.
-		{
-			const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(defaultBuffer.Get(),
-				D3D12_RESOURCE_STATE_COMMON,
-				D3D12_RESOURCE_STATE_COPY_DEST);
-			commandList->ResourceBarrier(1, &barrier);
-		}
-		UpdateSubresources<1>(commandList, defaultBuffer.Get(), uploadBuffer.Get(), 0, 0, 1, &subResourceData);
-		{
-			const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(defaultBuffer.Get(),
-				D3D12_RESOURCE_STATE_COPY_DEST,
-				D3D12_RESOURCE_STATE_GENERIC_READ);
-			commandList->ResourceBarrier(1, &barrier);
-		}
+		CommandContext& context = CommandContext::Get();
+		context.TransitionRaw(defaultBuffer.Get(),
+			D3D12_RESOURCE_STATE_COMMON,
+			D3D12_RESOURCE_STATE_COPY_DEST);
+		// GetCommandList() flushes the queued barrier ahead of the copy.
+		UpdateSubresources<1>(context.GetCommandList(), defaultBuffer.Get(), uploadBuffer.Get(), 0, 0, 1, &subResourceData);
+		context.TransitionRaw(defaultBuffer.Get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			D3D12_RESOURCE_STATE_GENERIC_READ);
 		// Note: uploadBuffer has to be kept alive after the above function
 		// calls because the command list has not been executed yet that
 		// performs the actual copy.
@@ -351,18 +348,15 @@ namespace RenderingUtils
     	uploadCopyLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
     	uploadCopyLocation.PlacedFootprint = footprint;
 
-    	commandList->CopyTextureRegion(&defaultCopyLocation, 0, 0, 0, &uploadCopyLocation, nullptr);
+    	CommandContext::Get().GetCommandList()->CopyTextureRegion(&defaultCopyLocation, 0, 0, 0, &uploadCopyLocation, nullptr);
 
     	// PIXEL | NON_PIXEL (matches the skybox): scene textures are sampled by
     	// the raster PS, the RT passes AND compute kernels (inline-RayQuery
     	// integrator); a pixel-only state faults compute Dispatches under
     	// GPU-based validation (ADR 0003 cvis note — lifted by this widening).
-    	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		    defaultTexture.Get(),
+    	CommandContext::Get().TransitionRaw(defaultTexture.Get(),
 		    D3D12_RESOURCE_STATE_COPY_DEST,
 		    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-
-		commandList->ResourceBarrier(1, &barrier);
     	
     	return defaultTexture;
     }

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "CommandContext.h"
 #include "VxpgClusterPass.h"
 
 #include "Constants.h"
@@ -132,7 +133,7 @@ void VxpgClusterPass::Run(uint32_t frameIndex)
 
     // ---- Kernel 1: k-means++ seeding, one 1024-thread group ----
     cmd->SetPipelineState(m_seedProgram->GetPipelineState());
-    cmd->Dispatch(1, 1, 1);
+    CommandContext::Get().Dispatch(1, 1, 1);
     m_clusterCenters->UavBarrier(cmd);
     m_clusterSeedCompactIds->UavBarrier(cmd);
 
@@ -149,9 +150,8 @@ void VxpgClusterPass::Run(uint32_t frameIndex)
     argsBuffer.TransitionChecked(cmd,
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
 
-    cmd->ExecuteIndirect(m_dispatchCommandSignature.Get(), 1,
-        argsBuffer.GetUnderlyingResource().Get(),
-        0, nullptr, 0); // entry [0]
+    CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
+        argsBuffer.GetUnderlyingResource().Get(), 0); // entry [0]
 
     argsBuffer.TransitionChecked(cmd,
         D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
