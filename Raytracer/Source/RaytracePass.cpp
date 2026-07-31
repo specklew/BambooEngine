@@ -6,6 +6,7 @@
 #include "AccelerationStructures.h"
 #include "Constants.h"
 #include "DXRHelper.h"
+#include "GlobalDescriptorHeap.h"
 #include "Renderer.h"
 #include "Shader.h"
 #include "Window.h"
@@ -40,7 +41,6 @@ int RaytracePass::RegisterTechnique(const std::string& name, std::function<std::
 void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
                               std::shared_ptr<Scene> initialScene,
-                              Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> cbvSrvUavHeap,
                               Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer,
                               std::shared_ptr<PassConstants> passConstants)
 {
@@ -48,7 +48,6 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
 
     m_device       = device;
     m_commandList  = commandList;
-    m_srvUavHeap   = cbvSrvUavHeap;
     m_currentScene = initialScene;
     m_randomBuffer = randomBuffer;
     m_passConstants = passConstants;
@@ -112,9 +111,9 @@ void RaytracePass::Render()
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
     m_commandList->SetGraphicsRootSignature(nullptr);
 
-    std::vector heaps = {m_srvUavHeap.Get()};
-    m_commandList->SetDescriptorHeaps(static_cast<uint32_t>(heaps.size()), heaps.data());
-    m_commandList->SetComputeRootDescriptorTable(0, m_srvUavHeap->GetGPUDescriptorHandleForHeapStart());
+    ID3D12DescriptorHeap* heaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
+    m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
+    m_commandList->SetComputeRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
     m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(3, m_randomBuffer->GetGPUVirtualAddress());
@@ -339,49 +338,49 @@ void RaytracePass::CreateGlobalRootSignature()
     cbvRange.NumDescriptors = 1;
     cbvRange.RegisterSpace = 0;
     cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.OffsetInDescriptorsFromTableStart = 1;
+    cbvRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices);
 
     D3D12_DESCRIPTOR_RANGE rtRange;
     rtRange.BaseShaderRegister = 0;
     rtRange.NumDescriptors = 1;
     rtRange.RegisterSpace = 0;
     rtRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    rtRange.OffsetInDescriptorsFromTableStart = 2;
+    rtRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::RaytraceOutput);
 
     D3D12_DESCRIPTOR_RANGE tlasRange;
     tlasRange.BaseShaderRegister = 0;
     tlasRange.NumDescriptors = 1;
     tlasRange.RegisterSpace = 0;
     tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    tlasRange.OffsetInDescriptorsFromTableStart = 3;
+    tlasRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Tlas);
 
     D3D12_DESCRIPTOR_RANGE vertex_range;
     vertex_range.BaseShaderRegister = 1;
     vertex_range.NumDescriptors = 1;
     vertex_range.RegisterSpace = 0;
     vertex_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    vertex_range.OffsetInDescriptorsFromTableStart = 4;
+    vertex_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Vertices);
 
     D3D12_DESCRIPTOR_RANGE index_range;
     index_range.BaseShaderRegister = 2;
     index_range.NumDescriptors = 1;
     index_range.RegisterSpace = 0;
     index_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    index_range.OffsetInDescriptorsFromTableStart = 5;
+    index_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Indices);
 
     D3D12_DESCRIPTOR_RANGE texture_range;
     texture_range.BaseShaderRegister = 7;
     texture_range.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
     texture_range.RegisterSpace = 0;
     texture_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    texture_range.OffsetInDescriptorsFromTableStart = 6;
+    texture_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::MaterialTextures);
 
     D3D12_DESCRIPTOR_RANGE skybox_range;
     skybox_range.BaseShaderRegister = 0;
     skybox_range.NumDescriptors = 1;
     skybox_range.RegisterSpace = 1;
     skybox_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    skybox_range.OffsetInDescriptorsFromTableStart = Constants::Graphics::SKYBOX_DESCRIPTOR_INDEX;
+    skybox_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Skybox);
 
     D3D12_DESCRIPTOR_RANGE ranges[7] = {cbvRange, rtRange, tlasRange, vertex_range, index_range, texture_range, skybox_range};
 
@@ -461,16 +460,14 @@ void RaytracePass::CreateRaytracingOutputBuffer()
 
 void RaytracePass::CreateShaderResourceHeap()
 {
-    auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
-
-    D3D12_CPU_DESCRIPTOR_HANDLE srvHandle;
-    srvHandle.ptr = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart().ptr + 2 * increment; // slot 2: UAV
+    GlobalDescriptorHeap& heap = GlobalDescriptorHeap::Get();
 
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(m_outputResource->GetUnderlyingResource().Get(), nullptr, &uavDesc, srvHandle);
+    m_device->CreateUnorderedAccessView(m_outputResource->GetUnderlyingResource().Get(), nullptr, &uavDesc,
+        heap.CpuHandle(GlobalDescriptor::RaytraceOutput));
 
-    srvHandle.ptr += increment; // slot 3: TLAS
+    const D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = heap.CpuHandle(GlobalDescriptor::Tlas);
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format                                   = DXGI_FORMAT_UNKNOWN;

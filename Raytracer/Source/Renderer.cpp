@@ -206,7 +206,7 @@ void Renderer::Initialize()
 	ExecuteCommandsAndReset();
 	// Finish execution - reset command list for next setup commands
 
-	CreateDescriptorHeaps();
+	GlobalDescriptorHeap::Get().Initialize(g_device.Get());
 	CreateWorldProjCBV();
 
 	m_scene = ModelLoading::LoadScene(*this, AssetId("resources/models/abeautifulgame.glb"));
@@ -240,7 +240,7 @@ void Renderer::Initialize()
 	if (defaultEntry == registry.end() && !registry.empty())
 		defaultEntry = registry.begin();
 	m_raytracePass = (defaultEntry == registry.end()) ? std::make_shared<RaytracePass>() : defaultEntry->create();
-	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
 	m_accumulationPass = std::make_shared<FrameAccumulationPass>();
 	m_accumulationPass->Initialize(g_device, m_d3d12CommandList);
@@ -259,11 +259,11 @@ void Renderer::Initialize()
 	m_voxelizationPass->OnSceneLoaded(*m_scene);
 
 	m_vbufferPass = std::make_shared<VBufferPass>();
-	m_vbufferPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+	m_vbufferPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
 	m_lightInjectionPass = std::make_shared<LightInjectionPass>();
 	m_lightInjectionPass->SetVoxelizationPass(m_voxelizationPass);
-	m_lightInjectionPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+	m_lightInjectionPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 
 	m_voxelGuidingBuildPass = std::make_shared<VoxelGuidingBuildPass>();
 	m_voxelGuidingBuildPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass);
@@ -283,14 +283,14 @@ void Renderer::Initialize()
 	WriteSuperpixelUavsToGlobalHeap();
 
 	m_clusterVisibilityPass = std::make_shared<VxpgClusterVisibilityPass>();
-	m_clusterVisibilityPass->Initialize(g_device, m_d3d12CommandList, m_srvCbvUavDescriptorHeap,
+	m_clusterVisibilityPass->Initialize(g_device, m_d3d12CommandList,
 		m_voxelizationPass, m_voxelGuidingBuildPass, m_clusterPass, m_superpixelBuildPass);
 	m_clusterVisibilityPass->SetScene(m_scene);
 	m_clusterVisibilityPass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight());
 	WriteClusterVisibilityUavsToGlobalHeap();
 
 	m_lightTreePass = std::make_shared<VxpgLightTreePass>();
-	m_lightTreePass->Initialize(g_device, m_d3d12CommandList, m_srvCbvUavDescriptorHeap,
+	m_lightTreePass->Initialize(g_device, m_d3d12CommandList,
 		m_voxelizationPass, m_voxelGuidingBuildPass, m_clusterPass, m_clusterVisibilityPass);
 	m_lightTreePass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight());
 
@@ -551,7 +551,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	
 	if (m_rasterize)
 	{
-		ID3D12DescriptorHeap* descriptorHeaps[] = {m_srvCbvUavDescriptorHeap.Get()};
+		ID3D12DescriptorHeap* descriptorHeaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
 
 		m_d3d12CommandList->SetPipelineState(m_pipelineStateObject.Get());
 		m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
@@ -582,7 +582,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 				m_d3d12CommandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
 				m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-				m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, m_srvCbvUavDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+				m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
 				
 				m_d3d12CommandList->DrawIndexedInstanced(index_view.count, 1, index_view.offset, vertex_view.offset, 0);
 			}
@@ -623,7 +623,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		}
 
 		// Restore main descriptor heap for ImGui (post-process pass may have changed it)
-		ID3D12DescriptorHeap* mainHeaps[] = { m_srvCbvUavDescriptorHeap.Get() };
+		ID3D12DescriptorHeap* mainHeaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
 		m_d3d12CommandList->SetDescriptorHeaps(_countof(mainHeaps), mainHeaps);
 
 		// Issue screenshot readback copy if this frame was chosen by Tick()
@@ -903,21 +903,6 @@ void Renderer::CreateDSVDescriptorHeap()
 		IID_PPV_ARGS(&m_d3d12DSVDescriptorHeap)));
 }
 
-void Renderer::CreateDescriptorHeaps()
-{
-	///	|							|						|								|					|					|					|							|
-	///	|	SRV IMGUI TEXTURE (1)	|	CBV MATRICES (1)	|	UAV RAYTRACING OUTPUT (1)	|	SRV TLAS (1)	|	VERTEX SRV (1)	|	INDEX SRV (1)	|	TEXTURES (MAX_TEXTURE)	|
-	///	|							|						|								|					|					|					|							|
-	
-	D3D12_DESCRIPTOR_HEAP_DESC desc;
-	desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-	desc.NumDescriptors = Constants::Graphics::NUM_BASE_DESCRIPTORS + Constants::Graphics::MAX_TEXTURES + 15; // +1 skybox, +3 voxel, +1 shadingpoints, +2 superpixel index/center, +2 repVPL/vplPosition, +1 vbuffer, +3 cvis gathered/counter/mask, +2 fuzzy weight/index
-	desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-	desc.NodeMask = 0;
-
-	ThrowIfFailed(g_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_srvCbvUavDescriptorHeap)));
-}
-
 void Renderer::CreateWorldProjCBV()
 {
 	ComPtr<ID3D12Resource> cbvUav;
@@ -939,13 +924,8 @@ void Renderer::CreateWorldProjCBV()
 	cbvDesc.BufferLocation = m_projectionMatrixConstantBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
 	cbvDesc.SizeInBytes = Align(256ULL * 5, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
 
-	auto descriptorDesc = m_srvCbvUavDescriptorHeap->GetDesc();
-	auto increment = g_device->GetDescriptorHandleIncrementSize(descriptorDesc.Type);
-
-	D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle;
-	cbvHandle.ptr = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart().ptr + increment;
-	
-	g_device->CreateConstantBufferView(&cbvDesc, cbvHandle);
+	g_device->CreateConstantBufferView(&cbvDesc,
+		GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::CameraMatrices));
 }
 
 void Renderer::CreateRasterizationRootSignature()
@@ -959,50 +939,50 @@ void Renderer::CreateRasterizationRootSignature()
 	cbvRange.NumDescriptors = 1;
 	cbvRange.RegisterSpace = 0;
 	cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-	cbvRange.OffsetInDescriptorsFromTableStart = 1;
+	cbvRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices);
 
 	D3D12_DESCRIPTOR_RANGE rtRange;
 	rtRange.BaseShaderRegister = 0;
 	rtRange.NumDescriptors = 1;
 	rtRange.RegisterSpace = 0;
 	rtRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	rtRange.OffsetInDescriptorsFromTableStart = 2;
+	rtRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::RaytraceOutput);
 
 	D3D12_DESCRIPTOR_RANGE tlasRange;
 	tlasRange.BaseShaderRegister = 0;
 	tlasRange.NumDescriptors = 1;
 	tlasRange.RegisterSpace = 0;
 	tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	tlasRange.OffsetInDescriptorsFromTableStart = 3;
+	tlasRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Tlas);
 
 	D3D12_DESCRIPTOR_RANGE vertexRange;
 	vertexRange.BaseShaderRegister = 1;
 	vertexRange.NumDescriptors = 1;
 	vertexRange.RegisterSpace = 0;
 	vertexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	vertexRange.OffsetInDescriptorsFromTableStart = 4;
+	vertexRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Vertices);
 	
 	D3D12_DESCRIPTOR_RANGE indexRange;
 	indexRange.BaseShaderRegister = 2;
 	indexRange.NumDescriptors = 1;
 	indexRange.RegisterSpace = 0;
 	indexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	indexRange.OffsetInDescriptorsFromTableStart = 5;
+	indexRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Indices);
 	
 	D3D12_DESCRIPTOR_RANGE textureRange;
 	textureRange.BaseShaderRegister = 3;
 	textureRange.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
 	textureRange.RegisterSpace = 0;
 	textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	textureRange.OffsetInDescriptorsFromTableStart = 6;
+	textureRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::MaterialTextures);
 
-	// u1 = occupancy, u2 = packed irradiance, u3 = vpl count (contiguous heap slots 519..521)
+	// u1 = occupancy, u2 = packed irradiance, u3 = vpl count (three contiguous slots)
 	D3D12_DESCRIPTOR_RANGE voxelOccupancyRange;
 	voxelOccupancyRange.BaseShaderRegister = 1;
 	voxelOccupancyRange.NumDescriptors = 3;
 	voxelOccupancyRange.RegisterSpace = 0;
 	voxelOccupancyRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	voxelOccupancyRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX;
+	voxelOccupancyRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelOccupancy);
 
 	// u4 = ShadingPoints G-buffer (debug overlay reads it by screen pixel)
 	D3D12_DESCRIPTOR_RANGE shadingPointsRange;
@@ -1010,7 +990,7 @@ void Renderer::CreateRasterizationRootSignature()
 	shadingPointsRange.NumDescriptors = 1;
 	shadingPointsRange.RegisterSpace = 0;
 	shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	shadingPointsRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::SHADINGPOINTS_DESCRIPTOR_INDEX;
+	shadingPointsRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ShadingPoints);
 
 	// u7 = superpixel index, u8 = superpixel representative center (debug views 15/16)
 	D3D12_DESCRIPTOR_RANGE superpixelRange;
@@ -1018,7 +998,7 @@ void Renderer::CreateRasterizationRootSignature()
 	superpixelRange.NumDescriptors = 2;
 	superpixelRange.RegisterSpace = 0;
 	superpixelRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	superpixelRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::SUPERPIXEL_INDEX_DESCRIPTOR_INDEX;
+	superpixelRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SuperpixelIndex);
 
 	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, vertexRange, indexRange, textureRange, voxelOccupancyRange, shadingPointsRange, superpixelRange};
 
@@ -1152,8 +1132,8 @@ void Renderer::CreateTextureSRV(const std::shared_ptr<Texture>& texture)
 	srv_desc.Format = desc.Format;
 	srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 
-	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-	handle.Offset(6 + texture->GetTextureIndex(),  g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
+	const auto handle = GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::MaterialTextures,
+		texture->GetTextureIndex());
 
 	g_device->CreateShaderResourceView(resource.Get(), &srv_desc, handle);
 }
@@ -1174,10 +1154,8 @@ void Renderer::CreateVertexSRV()
 	srv_desc.Format = DXGI_FORMAT_R32_TYPELESS;
 	srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 
-	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-	handle.Offset(4, g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
-
-	g_device->CreateShaderResourceView(vertex_buffer->GetUnderlyingResource().Get(), &srv_desc, handle);
+	g_device->CreateShaderResourceView(vertex_buffer->GetUnderlyingResource().Get(), &srv_desc,
+		GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::Vertices));
 }
 
 void Renderer::CreateIndexSRV()
@@ -1196,16 +1174,14 @@ void Renderer::CreateIndexSRV()
 	srv_desc.Format = DXGI_FORMAT_R32_TYPELESS;
 	srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 
-	auto handle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-	handle.Offset(5, g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV));
-
-	g_device->CreateShaderResourceView(index_buffer->GetUnderlyingResource().Get(), &srv_desc, handle);
+	g_device->CreateShaderResourceView(index_buffer->GetUnderlyingResource().Get(), &srv_desc,
+		GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::Indices));
 }
 
 void Renderer::InitializeEditorUI()
 {
 	m_editorUI = std::make_shared<EditorUI>();
-	m_editorUI->Initialize(g_device, m_graphicsDevice->GetCommandQueue(), m_srvCbvUavDescriptorHeap);
+	m_editorUI->Initialize(g_device, m_graphicsDevice->GetCommandQueue(), GlobalDescriptorHeap::Get().GetHeap());
 	m_editorUI->SetCamera(m_camera);
 	m_editorUI->SetScene(m_scene);
 	m_editorUI->SetAccumulationPass(m_accumulationPass);
@@ -1234,7 +1210,9 @@ void Renderer::LoadScene(const std::wstring& path)
 	WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, pathUtf8, sizeof(pathUtf8), nullptr, nullptr);
 	spdlog::info("Scene has been changed. Loading: {}", pathUtf8);
 
-	g_textureIndex = 0;
+	// The outgoing scene's textures die with m_scene below; their slots go back to
+	// the free list holding null views so nothing in the heap outlives its resource.
+	GlobalDescriptorHeap::Get().ReleaseMaterialTextureSlots();
 	m_scene = ModelLoading::LoadScene(*this, AssetId(pathUtf8));
 
 	CreateVertexSRV();
@@ -1262,7 +1240,7 @@ void Renderer::SetTechniqueByIndex(int index)
 		return;
 	spdlog::info("Switching raytracing technique to: {}", registry[index].name);
 	auto newPass = registry[index].create();
-	newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_srvCbvUavDescriptorHeap, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+	newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
 	m_raytracePass = std::move(newPass);
 	m_activeTechniqueIndex = index;
 	WireGuidingResources();
@@ -1483,70 +1461,64 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 
 void Renderer::WriteVoxelUavsToGlobalHeap()
 {
+	GlobalDescriptorHeap& heap = GlobalDescriptorHeap::Get();
+
 	if (!m_voxelizationPass)
+	{
+		heap.ClearSlot(GlobalDescriptor::VoxelOccupancy);
+		heap.ClearSlot(GlobalDescriptor::VoxelIrradiance);
+		heap.ClearSlot(GlobalDescriptor::VoxelVplCount);
 		return;
+	}
 
-	auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-
-	D3D12_CPU_DESCRIPTOR_HANDLE slot = heapStart;
-	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::VOXEL_OCCUPANCY_DESCRIPTOR_INDEX) * descSize;
-	m_voxelizationPass->WriteOccupancyUavTo(slot);
-
-	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::VOXEL_IRRADIANCE_DESCRIPTOR_INDEX) * descSize;
-	m_voxelizationPass->WriteIrradianceUavTo(slot);
-
-	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::VOXEL_VPL_COUNT_DESCRIPTOR_INDEX) * descSize;
-	m_voxelizationPass->WriteVplCountUavTo(slot);
+	m_voxelizationPass->WriteOccupancyUavTo(heap.CpuHandle(GlobalDescriptor::VoxelOccupancy));
+	m_voxelizationPass->WriteIrradianceUavTo(heap.CpuHandle(GlobalDescriptor::VoxelIrradiance));
+	m_voxelizationPass->WriteVplCountUavTo(heap.CpuHandle(GlobalDescriptor::VoxelVplCount));
 }
 
 void Renderer::WriteSuperpixelUavsToGlobalHeap()
 {
+	GlobalDescriptorHeap& heap = GlobalDescriptorHeap::Get();
+
 	if (!m_superpixelBuildPass)
+	{
+		heap.ClearSlot(GlobalDescriptor::SuperpixelIndex);
+		heap.ClearSlot(GlobalDescriptor::SuperpixelCenter);
+		heap.ClearSlot(GlobalDescriptor::FuzzyWeight);
+		heap.ClearSlot(GlobalDescriptor::FuzzyIndex);
 		return;
+	}
 
-	auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-
-	D3D12_CPU_DESCRIPTOR_HANDLE slot = heapStart;
-	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::SUPERPIXEL_INDEX_DESCRIPTOR_INDEX) * descSize;
-	m_superpixelBuildPass->WriteIndexUavTo(slot);
-
-	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::SUPERPIXEL_CENTER_DESCRIPTOR_INDEX) * descSize;
-	m_superpixelBuildPass->WriteCenterUavTo(slot);
-
-	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::FUZZY_WEIGHT_DESCRIPTOR_INDEX) * descSize;
-	m_superpixelBuildPass->WriteFuzzyWeightUavTo(slot);
-
-	slot.ptr = heapStart.ptr + static_cast<SIZE_T>(Constants::Graphics::FUZZY_INDEX_DESCRIPTOR_INDEX) * descSize;
-	m_superpixelBuildPass->WriteFuzzyIndexUavTo(slot);
+	m_superpixelBuildPass->WriteIndexUavTo(heap.CpuHandle(GlobalDescriptor::SuperpixelIndex));
+	m_superpixelBuildPass->WriteCenterUavTo(heap.CpuHandle(GlobalDescriptor::SuperpixelCenter));
+	m_superpixelBuildPass->WriteFuzzyWeightUavTo(heap.CpuHandle(GlobalDescriptor::FuzzyWeight));
+	m_superpixelBuildPass->WriteFuzzyIndexUavTo(heap.CpuHandle(GlobalDescriptor::FuzzyIndex));
 }
 
 void Renderer::WriteClusterVisibilityUavsToGlobalHeap()
 {
-	if (!m_clusterVisibilityPass || !m_superpixelBuildPass)
-		return;
+	GlobalDescriptorHeap& heap = GlobalDescriptorHeap::Get();
 
-	auto descSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-
-	auto writeUav = [&](int index, ID3D12Resource* res, DXGI_FORMAT fmt)
+	auto writeUav = [&](GlobalDescriptor slot, ID3D12Resource* res, DXGI_FORMAT fmt)
 	{
-		if (!res) return;
-		D3D12_CPU_DESCRIPTOR_HANDLE slot = heapStart;
-		slot.ptr = heapStart.ptr + static_cast<SIZE_T>(index) * descSize;
+		if (!res)
+		{
+			heap.ClearSlot(slot);
+			return;
+		}
+
 		D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
 		uav.Format        = fmt;
 		uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-		g_device->CreateUnorderedAccessView(res, nullptr, &uav, slot);
+		g_device->CreateUnorderedAccessView(res, nullptr, &uav, heap.CpuHandle(slot));
 	};
 
-	writeUav(Constants::Graphics::SPIXEL_GATHERED_DESCRIPTOR_INDEX,
-		m_superpixelBuildPass->GetGatheredResource(), DXGI_FORMAT_R32G32_SINT);
-	writeUav(Constants::Graphics::SPIXEL_COUNTER_DESCRIPTOR_INDEX,
-		m_superpixelBuildPass->GetCounterResource(), DXGI_FORMAT_R32_UINT);
-	writeUav(Constants::Graphics::CLUSTER_VISIBILITY_MASK_DESCRIPTOR_INDEX,
-		m_clusterVisibilityPass->GetMaskResource(), DXGI_FORMAT_R32_UINT);
+	writeUav(GlobalDescriptor::SpixelGathered,
+		m_superpixelBuildPass ? m_superpixelBuildPass->GetGatheredResource() : nullptr, DXGI_FORMAT_R32G32_SINT);
+	writeUav(GlobalDescriptor::SpixelCounter,
+		m_superpixelBuildPass ? m_superpixelBuildPass->GetCounterResource() : nullptr, DXGI_FORMAT_R32_UINT);
+	writeUav(GlobalDescriptor::ClusterVisibilityMask,
+		m_clusterVisibilityPass ? m_clusterVisibilityPass->GetMaskResource() : nullptr, DXGI_FORMAT_R32_UINT);
 }
 
 void Renderer::LoadSkybox(const std::wstring& path)
@@ -1589,7 +1561,6 @@ void Renderer::LoadSkybox(const std::wstring& path)
 		D3D12_RESOURCE_STATE_COPY_DEST,
 		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
-	// Create SRV at SKYBOX_DESCRIPTOR_INDEX
 	auto desc = textureResource->GetDesc();
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -1598,12 +1569,8 @@ void Renderer::LoadSkybox(const std::wstring& path)
 	srvDesc.Texture2D.MostDetailedMip = 0;
 	srvDesc.Texture2D.MipLevels = desc.MipLevels;
 
-	UINT descriptorSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(
-		m_srvCbvUavDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-		Constants::Graphics::SKYBOX_DESCRIPTOR_INDEX, descriptorSize);
-
-	g_device->CreateShaderResourceView(textureResource.Get(), &srvDesc, srvHandle);
+	g_device->CreateShaderResourceView(textureResource.Get(), &srvDesc,
+		GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::Skybox));
 
 	ExecuteCommandsAndReset();
 	spdlog::info("Skybox loaded successfully.");

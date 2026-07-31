@@ -204,7 +204,10 @@
     <ClInclude Include="Include\Camera.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\DescriptorHeapAllocator.h">
+    <ClInclude Include="Include\DescriptorAllocator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\GlobalDescriptorHeap.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\ModelLoading.h">
@@ -686,7 +689,10 @@
     <ClCompile Include="Source\Camera.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\DescriptorHeapAllocator.cpp">
+    <ClCompile Include="Source\DescriptorAllocator.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\GlobalDescriptorHeap.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\ModelLoading.cpp">

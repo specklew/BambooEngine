@@ -19,7 +19,6 @@ public:
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5>              device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
-        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>       globalHeap,
         std::shared_ptr<VoxelizationPass>                  voxelPass,
         std::shared_ptr<VoxelGuidingBuildPass>             buildPass,
         std::shared_ptr<VxpgClusterPass>                   clusterPass,
@@ -60,7 +59,6 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>       m_globalHeap;
     std::shared_ptr<VoxelizationPass>                  m_voxelPass;
     std::shared_ptr<VoxelGuidingBuildPass>             m_buildPass;
     std::shared_ptr<VxpgClusterPass>                   m_clusterPass;

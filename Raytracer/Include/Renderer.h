@@ -2,6 +2,7 @@
 #include <vector>
 
 #include "Constants.h"
+#include "GlobalDescriptorHeap.h"
 #include "GraphicsDevice.h"
 #include "Headless.h" // HeadlessConfig
 #include "InputElements.h"
@@ -30,7 +31,6 @@ namespace DirectX
 
 class Camera;
 struct Primitive;
-class DescriptorHeapAllocator;
 class RaytracePass;
 class VBufferPass;
 class LightInjectionPass;
@@ -96,7 +96,6 @@ public:
 	std::shared_ptr<StructuredBuffer<T>> CreateStructuredBuffer(const std::vector<T> &data); 
 	
 	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_device;
-	inline static int g_textureIndex = 0;
 
 	// Headless (benchmark) runs disable the D3D12 debug layer: its per-submit
 	// validation of a fat-root-signature compute Dispatch costs ~100 ms/frame
@@ -118,7 +117,6 @@ private:
 	void CreateDepthStencilView();
 	void CreateDSVDescriptorHeap();
 
-	void CreateDescriptorHeaps();
 	void CreateWorldProjCBV();
 
 	void CreateRasterizationRootSignature();
@@ -177,7 +175,6 @@ private:
 	
 	std::shared_ptr<ConstantBuffer> m_projectionMatrixConstantBuffer;
 	std::shared_ptr<ConstantBuffer> m_modelIndexConstantBuffer;
-	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvCbvUavDescriptorHeap;
 	BYTE* m_mappedData = nullptr;
 
 	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;

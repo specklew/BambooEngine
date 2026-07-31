@@ -2,6 +2,7 @@
 #include "VxpgLightTreePass.h"
 
 #include "Constants.h"
+#include "GlobalDescriptorHeap.h"
 #include "VoxelizationPass.h"
 #include "VoxelGuidingBuildPass.h"
 #include "VxpgClusterPass.h"
@@ -42,7 +43,6 @@ namespace
 void VxpgLightTreePass::Initialize(
     ComPtr<ID3D12Device5>              device,
     ComPtr<ID3D12GraphicsCommandList4> commandList,
-    ComPtr<ID3D12DescriptorHeap>       globalHeap,
     std::shared_ptr<VoxelizationPass>      voxelPass,
     std::shared_ptr<VoxelGuidingBuildPass> buildPass,
     std::shared_ptr<VxpgClusterPass>       clusterPass,
@@ -52,7 +52,6 @@ void VxpgLightTreePass::Initialize(
 
     m_device      = device;
     m_commandList = commandList;
-    m_globalHeap  = globalHeap;
     m_voxelPass   = std::move(voxelPass);
     m_buildPass   = std::move(buildPass);
     m_clusterPass = std::move(clusterPass);
@@ -94,7 +93,7 @@ void VxpgLightTreePass::CreateRootSignature()
     // texture as a shared-heap descriptor table (u13, at slot 530).
     CD3DX12_DESCRIPTOR_RANGE maskRange;
     maskRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 13, 0,
-        Constants::Graphics::CLUSTER_VISIBILITY_MASK_DESCRIPTOR_INDEX); // u13 @ 530
+        GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ClusterVisibilityMask)); // u13 @ 530
 
     CD3DX12_ROOT_PARAMETER params[16];
     params[0].InitAsConstantBufferView(0);
@@ -158,7 +157,7 @@ void VxpgLightTreePass::Run()
     // Bind the shared heap up front: it stays bound through the bitonic sort
     // (which uses only root descriptors) and is needed by the top-level tree's
     // mask descriptor table at the tail.
-    ID3D12DescriptorHeap* heaps[] = { m_globalHeap.Get() };
+    ID3D12DescriptorHeap* heaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
     // Binds the tree root sig + all resources (re-called after the sort swaps in
@@ -243,7 +242,7 @@ void VxpgLightTreePass::Run()
         cmd->SetComputeRoot32BitConstants(12, 4, constants, 0);
         cmd->SetComputeRootUnorderedAccessView(13, avgVisibility->GetGPUVirtualAddress());
         cmd->SetComputeRootUnorderedAccessView(14, m_spixelClusterHeap->GetGPUVirtualAddress());
-        cmd->SetComputeRootDescriptorTable(15, m_globalHeap->GetGPUDescriptorHandleForHeapStart());
+        cmd->SetComputeRootDescriptorTable(15, GlobalDescriptorHeap::Get().GpuStart());
 
         // One warp (32 lanes) per superpixel; 8 warps per group => ceil(mapX/8)
         // groups wide, mapY tall (SIByL dispatch (5,23) for its 40x23 map).

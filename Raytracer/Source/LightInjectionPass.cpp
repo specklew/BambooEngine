@@ -3,6 +3,7 @@
 
 #include "AccelerationStructures.h"
 #include "Constants.h"
+#include "GlobalDescriptorHeap.h"
 #include "Renderer.h"
 #include "VoxelizationPass.h"
 #include "Window.h"
@@ -44,91 +45,91 @@ void LightInjectionPass::CreateGlobalRootSignature()
     cbvRange.NumDescriptors = 1;
     cbvRange.RegisterSpace = 0;
     cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.OffsetInDescriptorsFromTableStart = 1;
+    cbvRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices);
 
     D3D12_DESCRIPTOR_RANGE rtRange;
     rtRange.BaseShaderRegister = 0;
     rtRange.NumDescriptors = 1;
     rtRange.RegisterSpace = 0;
     rtRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    rtRange.OffsetInDescriptorsFromTableStart = 2;
+    rtRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::RaytraceOutput);
 
     D3D12_DESCRIPTOR_RANGE tlasRange;
     tlasRange.BaseShaderRegister = 0;
     tlasRange.NumDescriptors = 1;
     tlasRange.RegisterSpace = 0;
     tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    tlasRange.OffsetInDescriptorsFromTableStart = 3;
+    tlasRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Tlas);
 
     D3D12_DESCRIPTOR_RANGE vertex_range;
     vertex_range.BaseShaderRegister = 1;
     vertex_range.NumDescriptors = 1;
     vertex_range.RegisterSpace = 0;
     vertex_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    vertex_range.OffsetInDescriptorsFromTableStart = 4;
+    vertex_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Vertices);
 
     D3D12_DESCRIPTOR_RANGE index_range;
     index_range.BaseShaderRegister = 2;
     index_range.NumDescriptors = 1;
     index_range.RegisterSpace = 0;
     index_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    index_range.OffsetInDescriptorsFromTableStart = 5;
+    index_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Indices);
 
     D3D12_DESCRIPTOR_RANGE texture_range;
     texture_range.BaseShaderRegister = 7;
     texture_range.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
     texture_range.RegisterSpace = 0;
     texture_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    texture_range.OffsetInDescriptorsFromTableStart = 6;
+    texture_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::MaterialTextures);
 
     D3D12_DESCRIPTOR_RANGE skybox_range;
     skybox_range.BaseShaderRegister = 0;
     skybox_range.NumDescriptors = 1;
     skybox_range.RegisterSpace = 1;
     skybox_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    skybox_range.OffsetInDescriptorsFromTableStart = Constants::Graphics::SKYBOX_DESCRIPTOR_INDEX;
+    skybox_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Skybox);
 
     D3D12_DESCRIPTOR_RANGE voxelIrradianceRange;
     voxelIrradianceRange.BaseShaderRegister = 1;
     voxelIrradianceRange.NumDescriptors = 1;
     voxelIrradianceRange.RegisterSpace = 0;
     voxelIrradianceRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    voxelIrradianceRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_IRRADIANCE_DESCRIPTOR_INDEX;
+    voxelIrradianceRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelIrradiance);
 
     D3D12_DESCRIPTOR_RANGE voxelVplCountRange;
     voxelVplCountRange.BaseShaderRegister = 2;
     voxelVplCountRange.NumDescriptors = 1;
     voxelVplCountRange.RegisterSpace = 0;
     voxelVplCountRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    voxelVplCountRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_VPL_COUNT_DESCRIPTOR_INDEX;
+    voxelVplCountRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelVplCount);
 
     D3D12_DESCRIPTOR_RANGE shadingPointsRange;
     shadingPointsRange.BaseShaderRegister = 3; // u3
     shadingPointsRange.NumDescriptors = 1;
     shadingPointsRange.RegisterSpace = 0;
     shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    shadingPointsRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::SHADINGPOINTS_DESCRIPTOR_INDEX;
+    shadingPointsRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ShadingPoints);
 
     D3D12_DESCRIPTOR_RANGE voxelRepresentativeRange;
     voxelRepresentativeRange.BaseShaderRegister = 4; // u4
     voxelRepresentativeRange.NumDescriptors = 1;
     voxelRepresentativeRange.RegisterSpace = 0;
     voxelRepresentativeRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    voxelRepresentativeRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VOXEL_REPRESENTATIVE_DESCRIPTOR_INDEX;
+    voxelRepresentativeRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelRepresentative);
 
     D3D12_DESCRIPTOR_RANGE vplPositionRange;
     vplPositionRange.BaseShaderRegister = 5; // u5
     vplPositionRange.NumDescriptors = 1;
     vplPositionRange.RegisterSpace = 0;
     vplPositionRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    vplPositionRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VPL_POSITION_DESCRIPTOR_INDEX;
+    vplPositionRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VplPosition);
 
     D3D12_DESCRIPTOR_RANGE vbufferRange;
     vbufferRange.BaseShaderRegister = 6; // u6
     vbufferRange.NumDescriptors = 1;
     vbufferRange.RegisterSpace = 0;
     vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    vbufferRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VBUFFER_DESCRIPTOR_INDEX;
+    vbufferRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VBuffer);
 
     D3D12_DESCRIPTOR_RANGE ranges[13] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
                                         texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
@@ -162,11 +163,8 @@ void LightInjectionPass::CreateGlobalRootSignature()
 
 void LightInjectionPass::CreateShaderResourceHeap()
 {
-    // TLAS only (slot 3) — the main raytrace pass owns the output UAV at slot 2.
-    auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
-
-    D3D12_CPU_DESCRIPTOR_HANDLE srvHandle;
-    srvHandle.ptr = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart().ptr + 3 * increment;
+    // TLAS only — the main raytrace pass owns the output UAV slot.
+    const D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::Tlas);
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format                                   = DXGI_FORMAT_UNKNOWN;
@@ -207,22 +205,17 @@ void LightInjectionPass::CreateShadingPointsResource()
 
     // UAV at the shared heap's ShadingPoints slot — bound via the global root
     // signature's u3 range so the injection raygen/closest-hit can write it.
-    auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
-    D3D12_CPU_DESCRIPTOR_HANDLE uavHandle;
-    uavHandle.ptr = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart().ptr
-                  + Constants::Graphics::SHADINGPOINTS_DESCRIPTOR_INDEX * increment;
-
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(m_shadingPointsTex.Get(), nullptr, &uavDesc, uavHandle);
+    m_device->CreateUnorderedAccessView(m_shadingPointsTex.Get(), nullptr, &uavDesc,
+        GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::ShadingPoints));
 }
 
 void LightInjectionPass::CreateRepresentativeResources()
 {
     auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
-    const D3D12_CPU_DESCRIPTOR_HANDLE heapStart = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart();
+    GlobalDescriptorHeap& globalHeap = GlobalDescriptorHeap::Get();
 
     // Per-voxel representative VPL (pos + octa normal): grid-sized Texture3D.
     m_voxelRepresentativeTex.Reset();
@@ -244,13 +237,12 @@ void LightInjectionPass::CreateRepresentativeResources()
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_voxelRepresentativeTex)));
         m_voxelRepresentativeTex->SetName(L"VXPG VoxelRepresentative");
 
-        D3D12_CPU_DESCRIPTOR_HANDLE uavHandle;
-        uavHandle.ptr = heapStart.ptr + Constants::Graphics::VOXEL_REPRESENTATIVE_DESCRIPTOR_INDEX * increment;
         D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
         uavDesc.Format               = DXGI_FORMAT_R32G32B32A32_FLOAT;
         uavDesc.ViewDimension        = D3D12_UAV_DIMENSION_TEXTURE3D;
         uavDesc.Texture3D.WSize      = gridDim;
-        m_device->CreateUnorderedAccessView(m_voxelRepresentativeTex.Get(), nullptr, &uavDesc, uavHandle);
+        m_device->CreateUnorderedAccessView(m_voxelRepresentativeTex.Get(), nullptr, &uavDesc,
+            globalHeap.CpuHandle(GlobalDescriptor::VoxelRepresentative));
     }
 
     // Per-pixel VPL hit position: screen-sized Texture2D (mirrors ShadingPoints).
@@ -272,12 +264,11 @@ void LightInjectionPass::CreateRepresentativeResources()
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_vplPositionTex)));
         m_vplPositionTex->SetName(L"VXPG VplPosition");
 
-        D3D12_CPU_DESCRIPTOR_HANDLE uavHandle;
-        uavHandle.ptr = heapStart.ptr + Constants::Graphics::VPL_POSITION_DESCRIPTOR_INDEX * increment;
         D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
         uavDesc.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
         uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        m_device->CreateUnorderedAccessView(m_vplPositionTex.Get(), nullptr, &uavDesc, uavHandle);
+        m_device->CreateUnorderedAccessView(m_vplPositionTex.Get(), nullptr, &uavDesc,
+            globalHeap.CpuHandle(GlobalDescriptor::VplPosition));
     }
 }
 
@@ -288,9 +279,9 @@ void LightInjectionPass::Render()
 
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
 
-    std::vector heaps = {m_srvUavHeap.Get()};
-    m_commandList->SetDescriptorHeaps(static_cast<uint32_t>(heaps.size()), heaps.data());
-    m_commandList->SetComputeRootDescriptorTable(0, m_srvUavHeap->GetGPUDescriptorHandleForHeapStart());
+    ID3D12DescriptorHeap* heaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
+    m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
+    m_commandList->SetComputeRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
     m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(3, m_randomBuffer->GetGPUVirtualAddress());

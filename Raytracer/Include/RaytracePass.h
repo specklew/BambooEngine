@@ -19,7 +19,6 @@ public:
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
         std::shared_ptr<Scene> initialScene,
-        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvUavHeap,
         Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer,
         std::shared_ptr<PassConstants> passConstants);
 
@@ -99,7 +98,6 @@ protected:
 
     // Output resources
     std::unique_ptr<Texture>                     m_outputResource;
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_srvUavHeap;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbDescriptorHeap;
 
     std::shared_ptr<ShaderBindingTable> m_shaderBindingTable;

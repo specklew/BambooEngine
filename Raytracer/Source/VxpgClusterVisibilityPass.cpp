@@ -2,6 +2,7 @@
 #include "VxpgClusterVisibilityPass.h"
 
 #include "Constants.h"
+#include "GlobalDescriptorHeap.h"
 #include "Renderer.h" // GetStaticSamplers
 #include "VoxelizationPass.h"
 #include "VoxelGuidingBuildPass.h"
@@ -34,7 +35,6 @@ namespace
 void VxpgClusterVisibilityPass::Initialize(
     ComPtr<ID3D12Device5>              device,
     ComPtr<ID3D12GraphicsCommandList4> commandList,
-    ComPtr<ID3D12DescriptorHeap>       globalHeap,
     std::shared_ptr<VoxelizationPass>      voxelPass,
     std::shared_ptr<VoxelGuidingBuildPass> buildPass,
     std::shared_ptr<VxpgClusterPass>       clusterPass,
@@ -44,7 +44,6 @@ void VxpgClusterVisibilityPass::Initialize(
 
     m_device         = device;
     m_commandList    = commandList;
-    m_globalHeap     = globalHeap;
     m_voxelPass      = std::move(voxelPass);
     m_buildPass      = std::move(buildPass);
     m_clusterPass    = std::move(clusterPass);
@@ -90,12 +89,12 @@ void VxpgClusterVisibilityPass::CreateRootSignature()
     r[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, 3);   // TLAS t0 @ 3
     r[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0, 4);   // vertices t1 @ 4
     r[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2, 0, 5);   // indices t2 @ 5
-    r[4].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 3, 0, Constants::Graphics::SUPERPIXEL_INDEX_DESCRIPTOR_INDEX);        // gSuperpixelIndex u3 @ 523
-    r[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 1, 0, Constants::Graphics::VPL_POSITION_DESCRIPTOR_INDEX);           // gVplPosition u1 @ 526
-    r[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 2, 0, Constants::Graphics::VBUFFER_DESCRIPTOR_INDEX);                // gVBuffer u2 @ 527
-    r[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 4, 0, Constants::Graphics::SPIXEL_GATHERED_DESCRIPTOR_INDEX);        // gSpixelGathered u4 @ 528
-    r[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 5, 0, Constants::Graphics::SPIXEL_COUNTER_DESCRIPTOR_INDEX);         // gSpixelCounter u5 @ 529
-    r[9].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 6, 0, Constants::Graphics::CLUSTER_VISIBILITY_MASK_DESCRIPTOR_INDEX); // gClusterVisibilityMask u6 @ 530
+    r[4].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 3, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SuperpixelIndex));        // gSuperpixelIndex u3 @ 523
+    r[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 1, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VplPosition));           // gVplPosition u1 @ 526
+    r[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 2, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VBuffer));                // gVBuffer u2 @ 527
+    r[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 4, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SpixelGathered));        // gSpixelGathered u4 @ 528
+    r[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 5, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SpixelCounter));         // gSpixelCounter u5 @ 529
+    r[9].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 6, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ClusterVisibilityMask)); // gClusterVisibilityMask u6 @ 530
 
     CD3DX12_ROOT_PARAMETER params[10];
     params[0].InitAsDescriptorTable(_countof(r), r);
@@ -160,11 +159,11 @@ void VxpgClusterVisibilityPass::Run(uint32_t frameIndex)
 
     auto* cmd = m_commandList.Get();
 
-    ID3D12DescriptorHeap* heaps[] = { m_globalHeap.Get() };
+    ID3D12DescriptorHeap* heaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
     cmd->SetComputeRootSignature(m_rootSig.Get());
-    cmd->SetComputeRootDescriptorTable(0, m_globalHeap->GetGPUDescriptorHandleForHeapStart());
+    cmd->SetComputeRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
     cmd->SetComputeRootShaderResourceView(1, m_scene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     cmd->SetComputeRootShaderResourceView(2, m_scene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     cmd->SetComputeRootConstantBufferView(3, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());

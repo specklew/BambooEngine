@@ -105,7 +105,8 @@
     <ClInclude Include="Include\HeadlessRunner.h" />
     <ClInclude Include="Include\Camera.h" />
     <ClInclude Include="Include\Constants.h" />
-    <ClInclude Include="Include\DescriptorHeapAllocator.h" />
+    <ClInclude Include="Include\DescriptorAllocator.h" />
+    <ClInclude Include="Include\GlobalDescriptorHeap.h" />
     <ClInclude Include="Include\FrameAccumulationPass.h" />
     <ClInclude Include="Include\EditorUI.h" />
     <ClInclude Include="Include\PostProcessPass.h" />
@@ -374,7 +375,8 @@
     <ClCompile Include="Source\Headless.cpp" />
     <ClCompile Include="Source\HeadlessRunner.cpp" />
     <ClCompile Include="Source\Camera.cpp" />
-    <ClCompile Include="Source\DescriptorHeapAllocator.cpp" />
+    <ClCompile Include="Source\DescriptorAllocator.cpp" />
+    <ClCompile Include="Source\GlobalDescriptorHeap.cpp" />
     <ClCompile Include="Source\FrameAccumulationPass.cpp" />
     <ClCompile Include="Source\PostProcessPass.cpp" />
     <ClCompile Include="Source\HighResolutionClock.cpp" />

@@ -3,6 +3,7 @@
 
 #include "AccelerationStructures.h"
 #include "Constants.h"
+#include "GlobalDescriptorHeap.h"
 #include "Renderer.h"
 #include "Window.h"
 #include "Resources/ShaderBindingTable.h"
@@ -39,42 +40,42 @@ void VBufferPass::CreateGlobalRootSignature()
     cbvRange.NumDescriptors = 1;
     cbvRange.RegisterSpace = 0;
     cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.OffsetInDescriptorsFromTableStart = 1;
+    cbvRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices);
 
     D3D12_DESCRIPTOR_RANGE tlasRange;
     tlasRange.BaseShaderRegister = 0;
     tlasRange.NumDescriptors = 1;
     tlasRange.RegisterSpace = 0;
     tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    tlasRange.OffsetInDescriptorsFromTableStart = 3;
+    tlasRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Tlas);
 
     D3D12_DESCRIPTOR_RANGE vertex_range;
     vertex_range.BaseShaderRegister = 1;
     vertex_range.NumDescriptors = 1;
     vertex_range.RegisterSpace = 0;
     vertex_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    vertex_range.OffsetInDescriptorsFromTableStart = 4;
+    vertex_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Vertices);
 
     D3D12_DESCRIPTOR_RANGE index_range;
     index_range.BaseShaderRegister = 2;
     index_range.NumDescriptors = 1;
     index_range.RegisterSpace = 0;
     index_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    index_range.OffsetInDescriptorsFromTableStart = 5;
+    index_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Indices);
 
     D3D12_DESCRIPTOR_RANGE texture_range;
     texture_range.BaseShaderRegister = 7;
     texture_range.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
     texture_range.RegisterSpace = 0;
     texture_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    texture_range.OffsetInDescriptorsFromTableStart = 6;
+    texture_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::MaterialTextures);
 
     D3D12_DESCRIPTOR_RANGE vbufferRange;
     vbufferRange.BaseShaderRegister = 9; // u9
     vbufferRange.NumDescriptors = 1;
     vbufferRange.RegisterSpace = 0;
     vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    vbufferRange.OffsetInDescriptorsFromTableStart = Constants::Graphics::VBUFFER_DESCRIPTOR_INDEX;
+    vbufferRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VBuffer);
 
     D3D12_DESCRIPTOR_RANGE allRanges[6] = {cbvRange, tlasRange, vertex_range, index_range,
                                            texture_range, vbufferRange};
@@ -100,11 +101,8 @@ void VBufferPass::CreateGlobalRootSignature()
 
 void VBufferPass::CreateShaderResourceHeap()
 {
-    // TLAS at shared heap slot 3 (idempotent — other DXR passes write the same).
-    auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
-
-    D3D12_CPU_DESCRIPTOR_HANDLE srvHandle;
-    srvHandle.ptr = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart().ptr + 3 * increment;
+    // TLAS at the shared heap's slot (idempotent — other DXR passes write the same).
+    const D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::Tlas);
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format                                   = DXGI_FORMAT_UNKNOWN;
@@ -139,24 +137,20 @@ void VBufferPass::CreateVBufferResource()
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_vbufferTex)));
     m_vbufferTex->SetName(L"VXPG VBuffer");
 
-    auto increment = m_device->GetDescriptorHandleIncrementSize(m_srvUavHeap->GetDesc().Type);
-    D3D12_CPU_DESCRIPTOR_HANDLE uavHandle;
-    uavHandle.ptr = m_srvUavHeap->GetCPUDescriptorHandleForHeapStart().ptr
-                  + Constants::Graphics::VBUFFER_DESCRIPTOR_INDEX * increment;
-
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.Format        = DXGI_FORMAT_R32G32B32A32_UINT;
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(m_vbufferTex.Get(), nullptr, &uavDesc, uavHandle);
+    m_device->CreateUnorderedAccessView(m_vbufferTex.Get(), nullptr, &uavDesc,
+        GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::VBuffer));
 }
 
 void VBufferPass::Render()
 {
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
 
-    std::vector heaps = {m_srvUavHeap.Get()};
-    m_commandList->SetDescriptorHeaps(static_cast<uint32_t>(heaps.size()), heaps.data());
-    m_commandList->SetComputeRootDescriptorTable(0, m_srvUavHeap->GetGPUDescriptorHandleForHeapStart());
+    ID3D12DescriptorHeap* heaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
+    m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
+    m_commandList->SetComputeRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
     m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootConstantBufferView(3, m_passConstants->GetGpuVirtualAddress());
