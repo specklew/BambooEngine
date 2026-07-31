@@ -213,6 +213,9 @@
     <ClInclude Include="Include\CommandContext.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\RenderGraph.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\ShaderProgram.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -702,6 +705,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\CommandContext.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RenderGraph.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\ShaderProgram.cpp">

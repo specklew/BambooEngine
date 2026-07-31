@@ -108,6 +108,7 @@
     <ClInclude Include="Include\DescriptorAllocator.h" />
     <ClInclude Include="Include\GlobalDescriptorHeap.h" />
     <ClInclude Include="Include\CommandContext.h" />
+    <ClInclude Include="Include\RenderGraph.h" />
     <ClInclude Include="Include\ShaderProgram.h" />
     <ClInclude Include="Include\FrameAccumulationPass.h" />
     <ClInclude Include="Include\EditorUI.h" />
@@ -380,6 +381,7 @@
     <ClCompile Include="Source\DescriptorAllocator.cpp" />
     <ClCompile Include="Source\GlobalDescriptorHeap.cpp" />
     <ClCompile Include="Source\CommandContext.cpp" />
+    <ClCompile Include="Source\RenderGraph.cpp" />
     <ClCompile Include="Source\ShaderProgram.cpp" />
     <ClCompile Include="Source\FrameAccumulationPass.cpp" />
     <ClCompile Include="Source\PostProcessPass.cpp" />
