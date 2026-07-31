@@ -155,25 +155,12 @@ void FrameAccumulationPass::Render(Texture& currentFrameOutput)
     // Bind root constant for frameCount
     m_commandList->SetComputeRoot32BitConstant(1, m_frameCount + 1, 0);
 
-    // Transition display buffer to UAV
-    m_displayBuffer->TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_COPY_SOURCE,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
     // Dispatch
     UINT width = Window::Get().GetWidth();
     UINT height = Window::Get().GetHeight();
     UINT threadsX = (width + 7) / 8;   // 8x8 thread groups
     UINT threadsY = (height + 7) / 8;
     CommandContext::Get().Dispatch(threadsX, threadsY, 1);
-
-    // UAV barrier to flush writes
-    m_displayBuffer->UavBarrierChecked(m_commandList.Get());
-
-    // Transition display buffer back to copy source
-    m_displayBuffer->TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_COPY_SOURCE);
 
     m_frameCount++;
 }

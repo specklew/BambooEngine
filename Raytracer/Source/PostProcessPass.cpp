@@ -94,10 +94,7 @@ void PostProcessPass::CreatePSO()
         "resources/shaders/postprocess.cs.shader", L"PostProcessPass PSO");
 }
 
-void PostProcessPass::Render(
-    Texture& input,
-    Texture& backBuffer,
-    const PostProcessParams& params)
+void PostProcessPass::Dispatch(Texture& input, const PostProcessParams& params)
 {
     if (!m_initialized)
         return;
@@ -134,46 +131,23 @@ void PostProcessPass::Render(
     static_assert(sizeof(PostProcessParams) == 4 * sizeof(uint32_t), "PostProcessParams must be exactly 4 floats");
     m_commandList->SetComputeRoot32BitConstants(1, 4, &params, 0);
 
-    // Transition input to SRV
-    input.TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_COPY_SOURCE,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-
-    // Transition output buffer to UAV
-    m_outputBuffer->TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_COPY_SOURCE,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
-    // Dispatch
     UINT width = Window::Get().GetWidth();
     UINT height = Window::Get().GetHeight();
     UINT threadsX = (width + 7) / 8;   // 8x8 thread groups
     UINT threadsY = (height + 7) / 8;
     CommandContext::Get().Dispatch(threadsX, threadsY, 1);
+}
 
-    // UAV barrier to flush writes
-    m_outputBuffer->UavBarrierChecked(m_commandList.Get());
+// Separate graph node from the dispatch: the output flips UAV -> COPY_SOURCE and
+// the back buffer RENDER_TARGET -> COPY_DEST between the two, which the graph
+// synthesizes from the declarations.
+void PostProcessPass::CopyToBackBuffer(Texture& backBuffer)
+{
+    if (!m_initialized)
+        return;
 
-    // Transition output buffer back to copy source
-    m_outputBuffer->TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_COPY_SOURCE);
-
-    // Transition input back to COPY_SOURCE
-    input.TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-        D3D12_RESOURCE_STATE_COPY_SOURCE);
-
-    // Copy output buffer to back buffer
-    backBuffer.TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_RENDER_TARGET,
-        D3D12_RESOURCE_STATE_COPY_DEST);
-
-    CommandContext::Get().CopyResource(backBuffer.GetUnderlyingResource().Get(), m_outputBuffer->GetUnderlyingResource().Get());
-
-    backBuffer.TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_COPY_DEST,
-        D3D12_RESOURCE_STATE_RENDER_TARGET);
+    CommandContext::Get().CopyResource(backBuffer.GetUnderlyingResource().Get(),
+        m_outputBuffer->GetUnderlyingResource().Get());
 }
 
 void PostProcessPass::OnResize()

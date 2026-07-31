@@ -4,6 +4,7 @@
 #include "Constants.h"
 #include "GlobalDescriptorHeap.h"
 #include "GraphicsDevice.h"
+#include "RenderGraph.h"
 #include "Headless.h" // HeadlessConfig
 #include "InputElements.h"
 #include "RasterDebugMode.h" // VxpgStage
@@ -160,6 +161,7 @@ private:
 	int  m_activeTechniqueIndex = 0;
 
 	std::unique_ptr<GraphicsDevice> m_graphicsDevice;
+	RenderGraph                     m_renderGraph;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_d3d12CommandList;
 
 	DXGI_FORMAT m_backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;

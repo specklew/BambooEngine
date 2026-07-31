@@ -127,10 +127,6 @@ void RaytracePass::Render()
     m_commandList->SetComputeRoot32BitConstant(5, time, 0);
     m_commandList->SetComputeRootConstantBufferView(6, m_passConstants->GetGpuVirtualAddress());
 
-    m_outputResource->TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
     D3D12_DISPATCH_RAYS_DESC desc = {};
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();
     desc.RayGenerationShaderRecord.SizeInBytes  = m_shaderBindingTable->GetRayGenSectionSize();
@@ -149,12 +145,6 @@ void RaytracePass::Render()
 
     m_commandList->SetPipelineState1(m_rtStateObject.Get());
     CommandContext::Get().DispatchRays(desc);
-
-    m_outputResource->UavBarrierChecked(m_commandList.Get());
-
-    m_outputResource->TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 }
 
 

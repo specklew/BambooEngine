@@ -592,37 +592,74 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	}
 	else
 	{
-		{
-			ScopedGpuMarker marker(m_d3d12CommandList.Get(), "Raytrace Technique");
-			m_raytracePass->Render();
-		}
-
 		PostProcessParams postProcessParams;
 		postProcessParams.exposure   = g_exposure.Get();
 		postProcessParams.contrast   = g_contrast.Get();
 		postProcessParams.saturation = g_saturation.Get();
 		postProcessParams.lift       = g_lift.Get();
 
-		ScopedGpuMarker postMarker(m_d3d12CommandList.Get(), "Accumulation+PostProcess");
+		// ADR 0017 step A: the raytrace -> accumulate -> tonemap -> copy chain
+		// declares what it touches and the graph places the barriers. The passes
+		// themselves no longer carry any.
 		Texture& raytraceOutput = *m_raytracePass->GetOutputTexture();
-		if (g_accumulationEnabled.Get())
-		{
-			m_accumulationPass->Render(raytraceOutput);
-			m_postProcessPass->Render(m_accumulationPass->GetDisplayBuffer(), backBuffer, postProcessParams);
-		}
-		else
-		{
-			// Bypass accumulation — normalize raytrace output to COPY_SOURCE for PostProcessPass
-			raytraceOutput.TransitionChecked(m_d3d12CommandList.Get(),
-				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-				D3D12_RESOURCE_STATE_COPY_SOURCE);
+		const bool accumulate   = g_accumulationEnabled.Get() != 0;
+		Texture& tonemapInput   = accumulate ? m_accumulationPass->GetDisplayBuffer() : raytraceOutput;
 
-			m_postProcessPass->Render(raytraceOutput, backBuffer, postProcessParams);
+		m_renderGraph.Reset();
+		const GraphResourceHandle raytraceOutputHandle = m_renderGraph.Import(raytraceOutput, "Raytrace Output");
+		const GraphResourceHandle tonemapInputHandle   = m_renderGraph.Import(tonemapInput, "Tonemap Input");
+		const GraphResourceHandle tonemapOutputHandle  = m_renderGraph.Import(m_postProcessPass->GetOutputBuffer(), "PostProcess Output");
+		const GraphResourceHandle backBufferHandle     = m_renderGraph.Import(backBuffer, "Back Buffer");
 
-			raytraceOutput.TransitionChecked(m_d3d12CommandList.Get(),
-				D3D12_RESOURCE_STATE_COPY_SOURCE,
-				D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		m_renderGraph.AddPass("Raytrace Technique",
+			[&](RenderGraphPassBuilder& pass) { pass.Write(raytraceOutputHandle, GraphAccess::ComputeWrite); },
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "Raytrace Technique");
+				m_raytracePass->Render();
+			});
+
+		if (accumulate)
+		{
+			m_renderGraph.AddPass("Accumulation",
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.Read(raytraceOutputHandle, GraphAccess::ComputeRead);
+					pass.Write(tonemapInputHandle, GraphAccess::ComputeWrite);
+				},
+				[this, &raytraceOutput]()
+				{
+					ScopedGpuMarker marker(m_d3d12CommandList.Get(), "Accumulation");
+					m_accumulationPass->Render(raytraceOutput);
+				});
 		}
+
+		m_renderGraph.AddPass("PostProcess",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(tonemapInputHandle, GraphAccess::ComputeRead);
+				pass.Write(tonemapOutputHandle, GraphAccess::ComputeWrite);
+			},
+			[this, &tonemapInput, postProcessParams]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "PostProcess");
+				m_postProcessPass->Dispatch(tonemapInput, postProcessParams);
+			});
+
+		m_renderGraph.AddPass("Present Copy",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(tonemapOutputHandle, GraphAccess::CopySource);
+				pass.Write(backBufferHandle, GraphAccess::CopyDestination);
+			},
+			[this, &backBuffer]() { m_postProcessPass->CopyToBackBuffer(backBuffer); });
+
+		// ImGui and the present transition still expect a render target.
+		m_renderGraph.AddPass("Back Buffer To Render Target",
+			[&](RenderGraphPassBuilder& pass) { pass.Write(backBufferHandle, GraphAccess::RenderTarget); },
+			nullptr);
+
+		m_renderGraph.Execute(CommandContext::Get());
 
 		// Restore main descriptor heap for ImGui (post-process pass may have changed it)
 		ID3D12DescriptorHeap* mainHeaps[] = { GlobalDescriptorHeap::Get().GetHeap() };

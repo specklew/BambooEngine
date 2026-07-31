@@ -345,10 +345,6 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootUnorderedAccessView(20, m_tileGuideQ->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(21, m_tileStrategyStats->GetGPUVirtualAddress());
 
-    m_outputResource->TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
     if (UseInlineRayQuery())
     {
         // Compute build (ADR 0011): identical bindings/root signature, one
@@ -395,11 +391,6 @@ void GuidedPathTracingPass::Render()
         m_tileGuideQ->UavBarrier(m_commandList.Get());
     }
 
-    m_outputResource->UavBarrierChecked(m_commandList.Get());
-
-    m_outputResource->TransitionChecked(m_commandList.Get(),
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 }
 
 REGISTER_RAYTRACE_TECHNIQUE("Guided Path Tracing (VXPG)", GuidedPathTracingPass)

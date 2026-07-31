@@ -18,15 +18,14 @@ public:
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList);
 
-    void Render(
-        Texture& input,
-        Texture& backBuffer,
-        const PostProcessParams& params = {});
+    // Two graph nodes: the tonemap dispatch, then the copy to the back buffer.
+    // Neither places barriers — the graph synthesizes them from the declarations.
+    void Dispatch(Texture& input, const PostProcessParams& params = {});
+    void CopyToBackBuffer(Texture& backBuffer);
 
     void OnResize();
 
     // Returns the post-process output texture (DXGI_FORMAT_R8G8B8A8_UNORM).
-    // In D3D12_RESOURCE_STATE_COPY_SOURCE after Render().
     Texture& GetOutputBuffer() const { return *m_outputBuffer; }
 
 private:
