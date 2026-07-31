@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShaderProgram.h"
+
 #include "Resources/RWStructuredBuffer.h"
 
 class VoxelizationPass;
@@ -63,9 +65,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource>                m_mask;                        // (mapX, mapY) R32_UINT
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_gatherPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_checkPso;
+    ComputeProgram* m_clearProgram = nullptr;
+    ComputeProgram* m_gatherProgram = nullptr;
+    ComputeProgram* m_checkProgram = nullptr;
 
     uint32_t m_width = 0;
     uint32_t m_height = 0;

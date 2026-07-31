@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShaderProgram.h"
+
 #include "Resources/RWStructuredBuffer.h"
 
 class Scene;
@@ -87,9 +89,9 @@ private:
     std::unique_ptr<RWStructuredBuffer<uint32_t>> m_bakedBoundMax;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_clearRootSig;     // per-frame accumulator clear
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
+    ComputeProgram* m_clearProgram = nullptr;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bakeClearRootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_bakeClearPso;
+    ComputeProgram* m_bakeClearProgram = nullptr;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bakeRootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_bakePso;
 

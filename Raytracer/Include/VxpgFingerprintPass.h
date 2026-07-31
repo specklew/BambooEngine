@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShaderProgram.h"
+
 #include "Resources/RWStructuredBuffer.h"
 
 class VoxelGuidingBuildPass;
@@ -59,8 +61,8 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_presampleRootSig;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_visibilityRootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_presamplePso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_visibilityPso;
+    ComputeProgram* m_presampleProgram = nullptr;
+    ComputeProgram* m_visibilityProgram = nullptr;
 
     // Dispatch-indirect signature for the visibility kernel (pure DISPATCH arg,
     // no root-argument changes, so pRootSignature is null and it is reusable).

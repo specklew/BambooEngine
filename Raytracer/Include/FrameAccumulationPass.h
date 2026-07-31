@@ -1,4 +1,6 @@
 #pragma once
+
+#include "ShaderProgram.h"
 #include "Resources/Texture.h"
 
 class FrameAccumulationPass
@@ -29,8 +31,7 @@ private:
     std::unique_ptr<Texture>                           m_accumulationBuffer;
     std::unique_ptr<Texture>                           m_displayBuffer;
     Microsoft::WRL::ComPtr<ID3D12RootSignature>        m_rootSignature;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState>        m_pso;
-    Microsoft::WRL::ComPtr<IDxcBlob>                   m_computeShaderBlob;
+    ComputeProgram*                                    m_program = nullptr;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>       m_descriptorHeap;  // For input texture SRV
 
     uint32_t m_frameCount      = 0;

@@ -109,17 +109,8 @@ void FrameAccumulationPass::CreatePSO()
 {
     spdlog::debug("Creating PSO for accumulation compute shader");
 
-    auto& rm = ResourceManager::Get();
-    auto shaderHandle = rm.GetOrLoadShader(AssetId("resources/shaders/accumulation.cs.shader"));
-    m_computeShaderBlob = rm.shaders.GetResource(shaderHandle).bytecode;
-
-    D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-    desc.pRootSignature = m_rootSignature.Get();
-    desc.CS = CD3DX12_SHADER_BYTECODE(m_computeShaderBlob->GetBufferPointer(), m_computeShaderBlob->GetBufferSize());
-    desc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
-
-    ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&m_pso)));
-    m_pso->SetName(L"FrameAccumulationPass PSO");
+    m_program = ShaderProgramCache::Get().GetOrCreateCompute(m_device.Get(), m_rootSignature.Get(),
+        "resources/shaders/accumulation.cs.shader", L"FrameAccumulationPass PSO");
 }
 
 void FrameAccumulationPass::Render(Texture& currentFrameOutput)
@@ -153,7 +144,7 @@ void FrameAccumulationPass::Render(Texture& currentFrameOutput)
 
     // Bind root signature and PSO
     m_commandList->SetComputeRootSignature(m_rootSignature.Get());
-    m_commandList->SetPipelineState(m_pso.Get());
+    m_commandList->SetPipelineState(m_program->GetPipelineState());
 
     // Set descriptor heap and bind descriptor table
     ID3D12DescriptorHeap* heaps[] = { m_descriptorHeap.Get() };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShaderProgram.h"
+
 // VXPG V2 Stage B: superpixel clustering (SLIC over the ShadingPoints G-buffer).
 // Per frame: InitSeedCenters -> N x [FindCenterAssociation -> SumCenter] ->
 // ClearCounter -> final FindCenterAssociation (gather). See docs/adr/0002.
@@ -46,10 +48,10 @@ private:
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_initPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_assocPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_sumPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
+    ComputeProgram* m_initProgram = nullptr;
+    ComputeProgram* m_assocProgram = nullptr;
+    ComputeProgram* m_sumProgram = nullptr;
+    ComputeProgram* m_clearProgram = nullptr;
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_privateHeap;
 

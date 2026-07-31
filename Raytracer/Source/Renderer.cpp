@@ -19,6 +19,7 @@
 #include "backends/imgui_impl_dx12.h"
 
 #include "InputElements.h"
+#include "ShaderProgram.h"
 #include "Resources/ResourceStateTracker.h"
 #include "SceneResources/ModelLoading.h"
 #include "SceneResources/Primitive.h"
@@ -1590,6 +1591,9 @@ void Renderer::OnShaderReload()
 
 	spdlog::info("Creating pipeline state for new shaders...");
 	CreatePipelineState();
+	// Every cached compute PSO at once — the VXPG passes hold pointer-stable
+	// programs, so none of them needs its own reload path.
+	ShaderProgramCache::Get().RebuildAll();
 	m_raytracePass->OnShaderReload();
 	if (m_vbufferPass)
 		m_vbufferPass->OnShaderReload();

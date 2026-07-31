@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShaderProgram.h"
+
 #include "Resources/RWStructuredBuffer.h"
 
 class VoxelizationPass;
@@ -62,9 +64,9 @@ private:
     ID3D12Resource* m_boundRepresentative = nullptr;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_reloadPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_compactPso;
+    ComputeProgram* m_clearProgram = nullptr;
+    ComputeProgram* m_reloadProgram = nullptr;
+    ComputeProgram* m_compactProgram = nullptr;
 
     bool m_initialized = false;
 };

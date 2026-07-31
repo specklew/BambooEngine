@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShaderProgram.h"
+
 #include "RaytracePass.h"
 #include "Resources/RWStructuredBuffer.h"
 
@@ -48,7 +50,7 @@ private:
     // lazily on first use; shares the global root signature and bindings.
     bool UseInlineRayQuery();
     void EnsureInlineRayQueryPso();
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_inlineRqPso;
+    ComputeProgram* m_inlineRqProgram = nullptr;
 
     // One-sample MIS adaptive q (ADR 0015): per-16x16-tile guide-selection
     // probability + this frame's per-strategy luminance stats, folded into q
@@ -57,7 +59,7 @@ private:
     void EnsureAdaptiveQUpdatePso();
     std::unique_ptr<RWStructuredBuffer<float>>    m_tileGuideQ;
     std::unique_ptr<RWStructuredBuffer<uint32_t>> m_tileStrategyStats;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState>   m_adaptiveQUpdatePso;
+    ComputeProgram* m_adaptiveQUpdateProgram = nullptr;
     uint32_t m_tileGridWidth  = 0;
     uint32_t m_tileGridHeight = 0;
 

@@ -204,23 +204,12 @@ void VoxelizationPass::CreatePSOs()
 {
     auto& rm = ResourceManager::Get();
 
-    auto createCsPso = [&](const char* assetPath, ID3D12RootSignature* rootSig,
-                           const wchar_t* name, ComPtr<ID3D12PipelineState>& out)
-    {
-        auto csh = rm.GetOrLoadShader(AssetId(assetPath));
-        auto csBlob = rm.shaders.GetResource(csh).bytecode;
+    auto& cache = ShaderProgramCache::Get();
 
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = rootSig;
-        desc.CS = CD3DX12_SHADER_BYTECODE(csBlob->GetBufferPointer(), csBlob->GetBufferSize());
-        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&out)));
-        out->SetName(name);
-    };
-
-    createCsPso("resources/shaders/clearVoxels.cs.shader", m_clearRootSig.Get(),
-        L"VoxelFrameClear PSO", m_clearPso);
-    createCsPso("resources/shaders/bakeClear.cs.shader", m_bakeClearRootSig.Get(),
-        L"VoxelBakeClear PSO", m_bakeClearPso);
+    m_clearProgram = cache.GetOrCreateCompute(m_device.Get(), m_clearRootSig.Get(),
+        "resources/shaders/clearVoxels.cs.shader", L"VoxelFrameClear PSO");
+    m_bakeClearProgram = cache.GetOrCreateCompute(m_device.Get(), m_bakeClearRootSig.Get(),
+        "resources/shaders/bakeClear.cs.shader", L"VoxelBakeClear PSO");
 
     // Bake PSO (graphics, UAV-only)
     {
@@ -366,7 +355,7 @@ void VoxelizationPass::DispatchFrameClear()
     ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetComputeRootSignature(m_clearRootSig.Get());
-    m_commandList->SetPipelineState(m_clearPso.Get());
+    m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
 
     uint32_t clearParams[4] = { m_gridDim, 0, 0, 0 };
     m_commandList->SetComputeRoot32BitConstants(0, 4, clearParams, 0);
@@ -391,7 +380,7 @@ void VoxelizationPass::DispatchBakeClear()
     ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetComputeRootSignature(m_bakeClearRootSig.Get());
-    m_commandList->SetPipelineState(m_bakeClearPso.Get());
+    m_commandList->SetPipelineState(m_bakeClearProgram->GetPipelineState());
 
     uint32_t clearParams[4] = { m_gridDim, 0, 0, 0 };
     m_commandList->SetComputeRoot32BitConstants(0, 4, clearParams, 0);

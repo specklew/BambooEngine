@@ -131,23 +131,14 @@ void VoxelGuidingBuildPass::CreateRootSignature()
 
 void VoxelGuidingBuildPass::CreatePSOs()
 {
-    auto& rm = ResourceManager::Get();
+    auto& cache = ShaderProgramCache::Get();
 
-    auto createCsPso = [&](const char* assetPath, const wchar_t* name, ComPtr<ID3D12PipelineState>& out)
-    {
-        auto handle = rm.GetOrLoadShader(AssetId(assetPath));
-        auto blob = rm.shaders.GetResource(handle).bytecode;
-
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = m_rootSig.Get();
-        desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
-        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&out)));
-        out->SetName(name);
-    };
-
-    createCsPso("resources/shaders/voxelGuidingBuild.clear.shader",   L"VoxelGuiding Clear PSO",   m_clearPso);
-    createCsPso("resources/shaders/voxelGuidingBuild.reload.shader",  L"VoxelGuiding Reload PSO",  m_reloadPso);
-    createCsPso("resources/shaders/voxelGuidingBuild.compact.shader", L"VoxelGuiding Compact PSO", m_compactPso);
+    m_clearProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/voxelGuidingBuild.clear.shader", L"VoxelGuiding Clear PSO");
+    m_reloadProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/voxelGuidingBuild.reload.shader", L"VoxelGuiding Reload PSO");
+    m_compactProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/voxelGuidingBuild.compact.shader", L"VoxelGuiding Compact PSO");
 }
 
 void VoxelGuidingBuildPass::Run(ID3D12Resource* representativeTex)
@@ -179,17 +170,17 @@ void VoxelGuidingBuildPass::Run(ID3D12Resource* representativeTex)
     auto* cmd = m_commandList.Get();
     const uint32_t groups = (gridDim + 7) / 8;
 
-    m_commandList->SetPipelineState(m_clearPso.Get());
+    m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
     m_commandList->Dispatch(1, 1, 1);
     m_counters->UavBarrier(cmd);
 
     // Reload baked bounds for lit voxels before compaction reads them.
-    m_commandList->SetPipelineState(m_reloadPso.Get());
+    m_commandList->SetPipelineState(m_reloadProgram->GetPipelineState());
     m_commandList->Dispatch(groups, groups, groups);
     m_liveBoundMin->UavBarrier(cmd);
     m_liveBoundMax->UavBarrier(cmd);
 
-    m_commandList->SetPipelineState(m_compactPso.Get());
+    m_commandList->SetPipelineState(m_compactProgram->GetPipelineState());
     m_commandList->Dispatch(groups, groups, groups);
     m_counters->UavBarrier(cmd);
     m_compactIds->UavBarrier(cmd);

@@ -115,27 +115,20 @@ void VxpgLightTreePass::CreateRootSignature()
 
 void VxpgLightTreePass::CreatePSOs()
 {
-    auto& rm = ResourceManager::Get();
+    auto& cache = ShaderProgramCache::Get();
 
-    auto createCsPso = [&](const char* assetPath, const wchar_t* name,
-                           ComPtr<ID3D12PipelineState>& out)
-    {
-        auto handle = rm.GetOrLoadShader(AssetId(assetPath));
-        auto blob = rm.shaders.GetResource(handle).bytecode;
-
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = m_rootSig.Get();
-        desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
-        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&out)));
-        out->SetName(name);
-    };
-
-    createCsPso("resources/shaders/vxpgLightTree.clearleaf.shader", L"LightTree Clear PSO",    m_clearPso);
-    createCsPso("resources/shaders/vxpgLightTree.encode.shader",    L"LightTree Encode PSO",   m_encodePso);
-    createCsPso("resources/shaders/vxpgLightTree.initial.shader",   L"LightTree Initial PSO",  m_initialPso);
-    createCsPso("resources/shaders/vxpgLightTree.internal.shader",  L"LightTree Internal PSO", m_internalPso);
-    createCsPso("resources/shaders/vxpgLightTree.merge.shader",     L"LightTree Merge PSO",    m_mergePso);
-    createCsPso("resources/shaders/vxpgLightTree.toplevel.shader",  L"LightTree TopLevel PSO", m_topLevelPso);
+    m_clearProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgLightTree.clearleaf.shader", L"LightTree Clear PSO");
+    m_encodeProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgLightTree.encode.shader", L"LightTree Encode PSO");
+    m_initialProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgLightTree.initial.shader", L"LightTree Initial PSO");
+    m_internalProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgLightTree.internal.shader", L"LightTree Internal PSO");
+    m_mergeProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgLightTree.merge.shader", L"LightTree Merge PSO");
+    m_topLevelProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgLightTree.toplevel.shader", L"LightTree TopLevel PSO");
 }
 
 void VxpgLightTreePass::OnResize(uint32_t width, uint32_t height)
@@ -190,13 +183,13 @@ void VxpgLightTreePass::Run()
 
     // Reset compact->leaf to -1 and NULL-pad the whole sort-key buffer (so the
     // fixed 65536 sort network's over-dispatch reads padding, not stale garbage).
-    cmd->SetPipelineState(m_clearPso.Get());
+    cmd->SetPipelineState(m_clearProgram->GetPipelineState());
     cmd->Dispatch(clearGroups, 1, 1);
     m_compactToLeaf->UavBarrier(cmd);
     m_sortKeys->UavBarrier(cmd);
 
     // Encode leaf sort keys + dispatch args (+ overflow flag).
-    cmd->SetPipelineState(m_encodePso.Get());
+    cmd->SetPipelineState(m_encodeProgram->GetPipelineState());
     cmd->Dispatch(leafGroups, 1, 1);
     m_sortKeys->UavBarrier(cmd);
     m_dispatchArgs->UavBarrier(cmd);
@@ -211,19 +204,19 @@ void VxpgLightTreePass::Run()
     bindRoots();
 
     // Initialize the 2N-1 node array (leaves get AABB / intensity / cluster).
-    cmd->SetPipelineState(m_initialPso.Get());
+    cmd->SetPipelineState(m_initialProgram->GetPipelineState());
     cmd->Dispatch(nodeGroups, 1, 1);
     m_nodes->UavBarrier(cmd);
     m_compactToLeaf->UavBarrier(cmd);
     m_clusterRoots->UavBarrier(cmd);
 
     // Build the Karras hierarchy (child + parent links).
-    cmd->SetPipelineState(m_internalPso.Get());
+    cmd->SetPipelineState(m_internalProgram->GetPipelineState());
     cmd->Dispatch(internalGroups, 1, 1);
     m_nodes->UavBarrier(cmd);
 
     // Merge bottom-up: AABB + intensity + per-cluster root detection.
-    cmd->SetPipelineState(m_mergePso.Get());
+    cmd->SetPipelineState(m_mergeProgram->GetPipelineState());
     cmd->Dispatch(leafGroups, 1, 1);
     m_nodes->UavBarrier(cmd);
     m_clusterRoots->UavBarrier(cmd);
@@ -246,7 +239,7 @@ void VxpgLightTreePass::Run()
 
         // One warp (32 lanes) per superpixel; 8 warps per group => ceil(mapX/8)
         // groups wide, mapY tall (SIByL dispatch (5,23) for its 40x23 map).
-        cmd->SetPipelineState(m_topLevelPso.Get());
+        cmd->SetPipelineState(m_topLevelProgram->GetPipelineState());
         cmd->Dispatch((m_mapX + 7) / 8, m_mapY, 1);
         m_spixelClusterHeap->UavBarrier(cmd);
     }

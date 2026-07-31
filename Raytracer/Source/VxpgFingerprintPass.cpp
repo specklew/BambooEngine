@@ -131,25 +131,12 @@ void VxpgFingerprintPass::CreateRootSignatures()
 
 void VxpgFingerprintPass::CreatePSOs()
 {
-    auto& rm = ResourceManager::Get();
+    auto& cache = ShaderProgramCache::Get();
 
-    auto createCsPso = [&](const char* assetPath, ID3D12RootSignature* rootSig,
-                           const wchar_t* name, ComPtr<ID3D12PipelineState>& out)
-    {
-        auto handle = rm.GetOrLoadShader(AssetId(assetPath));
-        auto blob = rm.shaders.GetResource(handle).bytecode;
-
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = rootSig;
-        desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
-        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&out)));
-        out->SetName(name);
-    };
-
-    createCsPso("resources/shaders/vxpgFingerprint.presample.shader",  m_presampleRootSig.Get(),
-                L"VxpgFingerprint Presample PSO",  m_presamplePso);
-    createCsPso("resources/shaders/vxpgFingerprint.visibility.shader", m_visibilityRootSig.Get(),
-                L"VxpgFingerprint Visibility PSO", m_visibilityPso);
+    m_presampleProgram = cache.GetOrCreateCompute(m_device.Get(), m_presampleRootSig.Get(),
+        "resources/shaders/vxpgFingerprint.presample.shader", L"VxpgFingerprint Presample PSO");
+    m_visibilityProgram = cache.GetOrCreateCompute(m_device.Get(), m_visibilityRootSig.Get(),
+        "resources/shaders/vxpgFingerprint.visibility.shader", L"VxpgFingerprint Visibility PSO");
 }
 
 void VxpgFingerprintPass::CreateCommandSignature()
@@ -200,7 +187,7 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
     cmd->SetComputeRootUnorderedAccessView(3, m_guidingDispatchArgs->GetGPUVirtualAddress());
     cmd->SetComputeRootUnorderedAccessView(4, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
 
-    cmd->SetPipelineState(m_presamplePso.Get());
+    cmd->SetPipelineState(m_presampleProgram->GetPipelineState());
     cmd->Dispatch(1, 1, 1); // one 16x8 group = 128 representatives
     m_screenRepresentativePoints->UavBarrier(cmd);
     m_guidingDispatchArgs->UavBarrier(cmd);
@@ -216,7 +203,7 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
     cmd->SetComputeRootUnorderedAccessView(2, m_buildPass->GetCompactVoxelLightPointsBuffer()->GetGPUVirtualAddress());
     cmd->SetComputeRootUnorderedAccessView(3, m_guidingDispatchArgs->GetGPUVirtualAddress());
     cmd->SetComputeRootUnorderedAccessView(4, m_voxelFingerprints->GetGPUVirtualAddress());
-    cmd->SetPipelineState(m_visibilityPso.Get());
+    cmd->SetPipelineState(m_visibilityProgram->GetPipelineState());
 
     // The args buffer was just written as a UAV; flip it to INDIRECT_ARGUMENT for
     // the ExecuteIndirect read, then back to UAV so the downstream cluster pass

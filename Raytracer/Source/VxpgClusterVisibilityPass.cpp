@@ -122,24 +122,14 @@ void VxpgClusterVisibilityPass::CreateRootSignature()
 
 void VxpgClusterVisibilityPass::CreatePSOs()
 {
-    auto& rm = ResourceManager::Get();
+    auto& cache = ShaderProgramCache::Get();
 
-    auto createCsPso = [&](const char* assetPath, const wchar_t* name,
-                           ComPtr<ID3D12PipelineState>& out)
-    {
-        auto handle = rm.GetOrLoadShader(AssetId(assetPath));
-        auto blob = rm.shaders.GetResource(handle).bytecode;
-
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = m_rootSig.Get();
-        desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
-        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&out)));
-        out->SetName(name);
-    };
-
-    createCsPso("resources/shaders/vxpgClusterVisibility.clear.shader",  L"Cvis Clear PSO",  m_clearPso);
-    createCsPso("resources/shaders/vxpgClusterVisibility.gather.shader", L"Cvis Gather PSO", m_gatherPso);
-    createCsPso("resources/shaders/vxpgClusterVisibility.check.shader",  L"Cvis Check PSO",  m_checkPso);
+    m_clearProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgClusterVisibility.clear.shader", L"Cvis Clear PSO");
+    m_gatherProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgClusterVisibility.gather.shader", L"Cvis Gather PSO");
+    m_checkProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgClusterVisibility.check.shader", L"Cvis Check PSO");
 }
 
 void VxpgClusterVisibilityPass::OnResize(uint32_t width, uint32_t height)
@@ -187,14 +177,14 @@ void VxpgClusterVisibilityPass::Run(uint32_t frameIndex)
     };
 
     // ---- Clear ----
-    cmd->SetPipelineState(m_clearPso.Get());
+    cmd->SetPipelineState(m_clearProgram->GetPipelineState());
     cmd->Dispatch((m_mapX + 15) / 16, (m_mapY + 15) / 16, 1);
     maskBarrier();
     m_clusterLightPointCounts->UavBarrier(cmd);
     m_avgVisibility->UavBarrier(cmd);
 
     // ---- Gather: file VPLs into cluster drawers + seed mask bits ----
-    cmd->SetPipelineState(m_gatherPso.Get());
+    cmd->SetPipelineState(m_gatherProgram->GetPipelineState());
     cmd->Dispatch((m_width + 15) / 16, (m_height + 15) / 16, 1);
     maskBarrier();
     m_clusterGatheredLightPoints->UavBarrier(cmd);
@@ -203,7 +193,7 @@ void VxpgClusterVisibilityPass::Run(uint32_t frameIndex)
     // ---- Check: shadow-ray probes -> soft avg-visibility + mask ----
     // Dispatch covers mapX superpixels wide (32 sample lanes each) and mapY*4
     // groups tall (8 clusters per group x 4 = 32 clusters per superpixel row).
-    cmd->SetPipelineState(m_checkPso.Get());
+    cmd->SetPipelineState(m_checkProgram->GetPipelineState());
     cmd->Dispatch(m_mapX, m_mapY * 4, 1);
     maskBarrier();
     m_avgVisibility->UavBarrier(cmd);

@@ -86,23 +86,12 @@ void VxpgClusterPass::CreateRootSignature()
 
 void VxpgClusterPass::CreatePSOs()
 {
-    auto& rm = ResourceManager::Get();
+    auto& cache = ShaderProgramCache::Get();
 
-    auto createCsPso = [&](const char* assetPath, const wchar_t* name,
-                           ComPtr<ID3D12PipelineState>& out)
-    {
-        auto handle = rm.GetOrLoadShader(AssetId(assetPath));
-        auto blob = rm.shaders.GetResource(handle).bytecode;
-
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = m_rootSig.Get();
-        desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
-        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&out)));
-        out->SetName(name);
-    };
-
-    createCsPso("resources/shaders/vxpgCluster.seed.shader",   L"VxpgCluster Seed PSO",   m_seedPso);
-    createCsPso("resources/shaders/vxpgCluster.assign.shader", L"VxpgCluster Assign PSO", m_assignPso);
+    m_seedProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgCluster.seed.shader", L"VxpgCluster Seed PSO");
+    m_assignProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgCluster.assign.shader", L"VxpgCluster Assign PSO");
 }
 
 void VxpgClusterPass::CreateCommandSignature()
@@ -142,7 +131,7 @@ void VxpgClusterPass::Run(uint32_t frameIndex)
     cmd->SetComputeRootUnorderedAccessView(7, m_voxelClusterAssignments->GetGPUVirtualAddress());
 
     // ---- Kernel 1: k-means++ seeding, one 1024-thread group ----
-    cmd->SetPipelineState(m_seedPso.Get());
+    cmd->SetPipelineState(m_seedProgram->GetPipelineState());
     cmd->Dispatch(1, 1, 1);
     m_clusterCenters->UavBarrier(cmd);
     m_clusterSeedCompactIds->UavBarrier(cmd);
@@ -151,7 +140,7 @@ void VxpgClusterPass::Run(uint32_t frameIndex)
     // Dispatched indirectly off gGuidingDispatchArgs[0] = (ceil(litVoxelCount/256),
     // 1, 1), replacing the worst-case ceil(CAPACITY/256)=512 fixed dispatch
     // (ADR 0003 option b). The fingerprint presample emitted the count this frame.
-    cmd->SetPipelineState(m_assignPso.Get());
+    cmd->SetPipelineState(m_assignProgram->GetPipelineState());
 
     // The args buffer (owned by the fingerprint pass) is currently a UAV; flip it
     // to INDIRECT_ARGUMENT for the ExecuteIndirect read, then back so the next

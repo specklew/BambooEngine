@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShaderProgram.h"
+
 #include "Resources/RWStructuredBuffer.h"
 #include "BitonicSortPass.h"
 
@@ -76,12 +78,12 @@ private:
     std::unique_ptr<RWStructuredBuffer<float>>                   m_spixelClusterHeap; // SIByL tltree (mapX*mapY*64)
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_clearPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_encodePso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_initialPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_internalPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_mergePso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_topLevelPso;
+    ComputeProgram* m_clearProgram = nullptr;
+    ComputeProgram* m_encodeProgram = nullptr;
+    ComputeProgram* m_initialProgram = nullptr;
+    ComputeProgram* m_internalProgram = nullptr;
+    ComputeProgram* m_mergeProgram = nullptr;
+    ComputeProgram* m_topLevelProgram = nullptr;
 
     uint32_t m_mapX = 0;
     uint32_t m_mapY = 0;

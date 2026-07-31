@@ -40,24 +40,14 @@ void BitonicSortPass::CreateRootSignature()
 
 void BitonicSortPass::CreatePSOs()
 {
-    auto& rm = ResourceManager::Get();
+    auto& cache = ShaderProgramCache::Get();
 
-    auto createCsPso = [&](const char* assetPath, const wchar_t* name,
-                           ComPtr<ID3D12PipelineState>& out)
-    {
-        auto handle = rm.GetOrLoadShader(AssetId(assetPath));
-        auto blob = rm.shaders.GetResource(handle).bytecode;
-
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = m_rootSig.Get();
-        desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
-        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&out)));
-        out->SetName(name);
-    };
-
-    createCsPso("resources/shaders/vxpgBitonicSort.presort.shader", L"BitonicSort Presort PSO", m_presortPso);
-    createCsPso("resources/shaders/vxpgBitonicSort.outer.shader",   L"BitonicSort Outer PSO",   m_outerPso);
-    createCsPso("resources/shaders/vxpgBitonicSort.inner.shader",   L"BitonicSort Inner PSO",   m_innerPso);
+    m_presortProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgBitonicSort.presort.shader", L"BitonicSort Presort PSO");
+    m_outerProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgBitonicSort.outer.shader", L"BitonicSort Outer PSO");
+    m_innerProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgBitonicSort.inner.shader", L"BitonicSort Inner PSO");
 }
 
 void BitonicSortPass::Sort(
@@ -91,7 +81,7 @@ void BitonicSortPass::Sort(
     };
 
     // Presort: sort each 2048-block into bitonic order.
-    cmd->SetPipelineState(m_presortPso.Get());
+    cmd->SetPipelineState(m_presortProgram->GetPipelineState());
     setConstants(0, 0);
     cmd->Dispatch(kGroups, 1, 1);
     keyBarrier();
@@ -101,12 +91,12 @@ void BitonicSortPass::Sort(
     {
         for (uint32_t j = k / 2; j >= 2048; j /= 2)
         {
-            cmd->SetPipelineState(m_outerPso.Get());
+            cmd->SetPipelineState(m_outerProgram->GetPipelineState());
             setConstants(k, j);
             cmd->Dispatch(kGroups, 1, 1);
             keyBarrier();
         }
-        cmd->SetPipelineState(m_innerPso.Get());
+        cmd->SetPipelineState(m_innerProgram->GetPipelineState());
         setConstants(k, 0);
         cmd->Dispatch(kGroups, 1, 1);
         keyBarrier();

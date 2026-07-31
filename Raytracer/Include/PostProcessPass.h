@@ -1,4 +1,6 @@
 #pragma once
+
+#include "ShaderProgram.h"
 #include "Resources/Texture.h"
 
 struct PostProcessParams
@@ -36,8 +38,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
     std::unique_ptr<Texture>                           m_outputBuffer;
     Microsoft::WRL::ComPtr<ID3D12RootSignature>        m_rootSignature;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState>        m_pso;
-    Microsoft::WRL::ComPtr<IDxcBlob>                   m_computeShaderBlob;
+    ComputeProgram*                                    m_program = nullptr;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>       m_descriptorHeap;
 
     bool m_initialized = false;

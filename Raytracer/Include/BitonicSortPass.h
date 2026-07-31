@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShaderProgram.h"
+
 // Reusable GPU bitonic sort over uint64 keys (MiniEngine-style, ported from
 // SIByL bitonicsort/). Sorts up to 65536 keys ascending. The valid element
 // count is read live from a caller-supplied counter buffer each dispatch, so
@@ -31,9 +33,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_presortPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_outerPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_innerPso;
+    ComputeProgram* m_presortProgram = nullptr;
+    ComputeProgram* m_outerProgram = nullptr;
+    ComputeProgram* m_innerProgram = nullptr;
 
     bool m_initialized = false;
 };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShaderProgram.h"
+
 #include "Resources/RWStructuredBuffer.h"
 
 class VoxelizationPass;
@@ -56,8 +58,8 @@ private:
     std::unique_ptr<RWStructuredBuffer<int32_t>>       m_voxelClusterAssignments; // SIByL u_Clusters
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_seedPso;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_assignPso;
+    ComputeProgram* m_seedProgram = nullptr;
+    ComputeProgram* m_assignProgram = nullptr;
 
     // Dispatch-indirect signature for the assign kernel (pure DISPATCH arg).
     Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchCommandSignature;

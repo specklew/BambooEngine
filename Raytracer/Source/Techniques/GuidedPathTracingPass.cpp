@@ -62,18 +62,11 @@ bool GuidedPathTracingPass::UseInlineRayQuery()
 
 void GuidedPathTracingPass::EnsureInlineRayQueryPso()
 {
-    if (m_inlineRqPso)
+    if (m_inlineRqProgram)
         return;
 
-    auto& rm = ResourceManager::Get();
-    auto handle = rm.GetOrLoadShader(AssetId("resources/shaders/guidedPathTracing.rq.shader"));
-    auto blob = rm.shaders.GetResource(handle).bytecode;
-
-    D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-    desc.pRootSignature = m_globalRootSignature.Get();
-    desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
-    ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&m_inlineRqPso)));
-    m_inlineRqPso->SetName(L"GuidedPathTracing InlineRQ PSO");
+    m_inlineRqProgram = ShaderProgramCache::Get().GetOrCreateCompute(m_device.Get(), m_globalRootSignature.Get(),
+        "resources/shaders/guidedPathTracing.rq.shader", L"GuidedPathTracing InlineRQ PSO");
     spdlog::info("GuidedPathTracingPass: inline-RayQuery compute PSO created");
 }
 
@@ -275,11 +268,11 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_globalRootSignature)));
     m_globalRootSignature->SetName(L"GuidedPathTracing GlobalRootSig");
 
-    // Compute PSOs are validated against the root signature they were created
-    // with; a rebuilt signature (variant reload) must invalidate them or a
-    // later dispatch pairs a stale-layout PSO with the new signature.
-    m_inlineRqPso.Reset();
-    m_adaptiveQUpdatePso.Reset();
+    // Compute programs are keyed on the root signature they were created with;
+    // a rebuilt signature (variant reload) must drop them or a later dispatch
+    // pairs a stale-layout PSO with the new signature.
+    m_inlineRqProgram        = nullptr;
+    m_adaptiveQUpdateProgram = nullptr;
 }
 
 void GuidedPathTracingPass::EnsureAdaptiveQResources(uint32_t width, uint32_t height)
@@ -302,18 +295,11 @@ void GuidedPathTracingPass::EnsureAdaptiveQResources(uint32_t width, uint32_t he
 
 void GuidedPathTracingPass::EnsureAdaptiveQUpdatePso()
 {
-    if (m_adaptiveQUpdatePso)
+    if (m_adaptiveQUpdateProgram)
         return;
 
-    auto& rm = ResourceManager::Get();
-    auto handle = rm.GetOrLoadShader(AssetId("resources/shaders/vxpgAdaptiveQ.update.shader"));
-    auto blob = rm.shaders.GetResource(handle).bytecode;
-
-    D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-    desc.pRootSignature = m_globalRootSignature.Get();
-    desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
-    ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&m_adaptiveQUpdatePso)));
-    m_adaptiveQUpdatePso->SetName(L"GuidedPT AdaptiveQ Update PSO");
+    m_adaptiveQUpdateProgram = ShaderProgramCache::Get().GetOrCreateCompute(m_device.Get(), m_globalRootSignature.Get(),
+        "resources/shaders/vxpgAdaptiveQ.update.shader", L"GuidedPT AdaptiveQ Update PSO");
 }
 
 void GuidedPathTracingPass::Render()
@@ -367,7 +353,7 @@ void GuidedPathTracingPass::Render()
         // Compute build (ADR 0011): identical bindings/root signature, one
         // thread per pixel, no SBT.
         EnsureInlineRayQueryPso();
-        m_commandList->SetPipelineState(m_inlineRqPso.Get());
+        m_commandList->SetPipelineState(m_inlineRqProgram->GetPipelineState());
         const uint32_t width  = Window::Get().GetWidth();
         const uint32_t height = Window::Get().GetHeight();
         m_commandList->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
@@ -402,7 +388,7 @@ void GuidedPathTracingPass::Render()
     {
         EnsureAdaptiveQUpdatePso();
         m_tileStrategyStats->UavBarrier(m_commandList.Get());
-        m_commandList->SetPipelineState(m_adaptiveQUpdatePso.Get());
+        m_commandList->SetPipelineState(m_adaptiveQUpdateProgram->GetPipelineState());
         const uint32_t tileCount = m_tileGridWidth * m_tileGridHeight;
         m_commandList->Dispatch((tileCount + 63) / 64, 1, 1);
         m_tileGuideQ->UavBarrier(m_commandList.Get());

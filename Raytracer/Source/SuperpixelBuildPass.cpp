@@ -72,24 +72,16 @@ void SuperpixelBuildPass::CreateRootSignature()
 
 void SuperpixelBuildPass::CreatePSOs()
 {
-    auto& rm = ResourceManager::Get();
+    auto& cache = ShaderProgramCache::Get();
 
-    auto createCsPso = [&](const char* assetPath, const wchar_t* name, ComPtr<ID3D12PipelineState>& out)
-    {
-        auto handle = rm.GetOrLoadShader(AssetId(assetPath));
-        auto blob = rm.shaders.GetResource(handle).bytecode;
-
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = m_rootSig.Get();
-        desc.CS = CD3DX12_SHADER_BYTECODE(blob->GetBufferPointer(), blob->GetBufferSize());
-        ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&out)));
-        out->SetName(name);
-    };
-
-    createCsPso("resources/shaders/superpixelBuild.initSeed.shader",     L"Superpixel InitSeed PSO",     m_initPso);
-    createCsPso("resources/shaders/superpixelBuild.findAssoc.shader",    L"Superpixel FindAssoc PSO",    m_assocPso);
-    createCsPso("resources/shaders/superpixelBuild.sumCenter.shader",    L"Superpixel SumCenter PSO",    m_sumPso);
-    createCsPso("resources/shaders/superpixelBuild.clearCounter.shader", L"Superpixel ClearCounter PSO", m_clearPso);
+    m_initProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/superpixelBuild.initSeed.shader", L"Superpixel InitSeed PSO");
+    m_assocProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/superpixelBuild.findAssoc.shader", L"Superpixel FindAssoc PSO");
+    m_sumProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/superpixelBuild.sumCenter.shader", L"Superpixel SumCenter PSO");
+    m_clearProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/superpixelBuild.clearCounter.shader", L"Superpixel ClearCounter PSO");
 }
 
 void SuperpixelBuildPass::CreateBuffers()
@@ -249,7 +241,7 @@ void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float
 
     // Seed centers from tile middle pixels.
     setConstants();
-    cmd->SetPipelineState(m_initPso.Get());
+    cmd->SetPipelineState(m_initProgram->GetPipelineState());
     cmd->Dispatch(mapGroupsX, mapGroupsY, 1);
     uavBarrier(m_center.Get());
 
@@ -258,24 +250,24 @@ void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float
     {
         c.writeGather = 0;
         setConstants();
-        cmd->SetPipelineState(m_assocPso.Get());
+        cmd->SetPipelineState(m_assocProgram->GetPipelineState());
         cmd->Dispatch(imgGroupsX, imgGroupsY, 1);
         uavBarrier(m_index.Get());
 
-        cmd->SetPipelineState(m_sumPso.Get());
+        cmd->SetPipelineState(m_sumProgram->GetPipelineState());
         cmd->Dispatch(m_mapX, m_mapY, 1);
         uavBarrier(m_center.Get());
     }
 
     // Clear the counter, then a final association that also emits gather lists,
     // consistent with the converged centers.
-    cmd->SetPipelineState(m_clearPso.Get());
+    cmd->SetPipelineState(m_clearProgram->GetPipelineState());
     cmd->Dispatch(mapGroupsX, mapGroupsY, 1);
     uavBarrier(m_counter.Get());
 
     c.writeGather = 1;
     setConstants();
-    cmd->SetPipelineState(m_assocPso.Get());
+    cmd->SetPipelineState(m_assocProgram->GetPipelineState());
     cmd->Dispatch(imgGroupsX, imgGroupsY, 1);
     uavBarrier(m_index.Get());
     uavBarrier(m_counter.Get());
