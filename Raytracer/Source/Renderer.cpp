@@ -1442,6 +1442,30 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	const GraphResourceHandle shadingPointsHandle = m_lightInjectionPass
 		? m_renderGraph.ImportRaw(m_lightInjectionPass->GetShadingPointsTexture().Get(), "VXPG ShadingPoints")
 		: InvalidGraphResource;
+	const GraphResourceHandle representativeHandle = m_lightInjectionPass
+		? m_renderGraph.ImportRaw(m_lightInjectionPass->GetVoxelRepresentativeTexture().Get(), "VXPG VoxelRepresentative")
+		: InvalidGraphResource;
+	const GraphResourceHandle vplPositionHandle = m_lightInjectionPass
+		? m_renderGraph.ImportRaw(m_lightInjectionPass->GetVplPositionTexture().Get(), "VXPG VplPosition")
+		: InvalidGraphResource;
+	const GraphResourceHandle irradianceHandle =
+		m_renderGraph.ImportRaw(m_voxelizationPass->GetIrradianceTexture().Get(), "VXPG VoxelIrradiance");
+	const GraphResourceHandle vplCountHandle =
+		m_renderGraph.ImportRaw(m_voxelizationPass->GetVplCountTexture().Get(), "VXPG VoxelVplCount");
+
+	// Every injection output is declared, so the pass no longer places its own
+	// tail barriers — the readers below carry the dependency instead.
+	auto declareInjectionOutputs = [&](RenderGraphPassBuilder& pass)
+	{
+		if (shadingPointsHandle != InvalidGraphResource)
+			pass.Write(shadingPointsHandle, GraphAccess::ComputeWrite);
+		if (representativeHandle != InvalidGraphResource)
+			pass.Write(representativeHandle, GraphAccess::ComputeWrite);
+		if (vplPositionHandle != InvalidGraphResource)
+			pass.Write(vplPositionHandle, GraphAccess::ComputeWrite);
+		pass.Write(irradianceHandle, GraphAccess::ComputeWrite);
+		pass.Write(vplCountHandle, GraphAccess::ComputeWrite);
+	};
 
 	if (stage >= VxpgStage::Inject && m_vbufferPass)
 	{
@@ -1460,7 +1484,7 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 			{
 				if (vbufferHandle != InvalidGraphResource)
 					pass.Read(vbufferHandle, GraphAccess::UnorderedAccessRead);
-				pass.Write(shadingPointsHandle, GraphAccess::ComputeWrite);
+				declareInjectionOutputs(pass);
 			},
 			[this]()
 			{
@@ -1473,9 +1497,20 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	// (reload baked bounds -> compact -> CDF).
 	if (stage >= VxpgStage::GuidingBuild && m_voxelGuidingBuildPass)
 	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG GuidingBuild");
-		m_voxelGuidingBuildPass->Run(
-			m_lightInjectionPass ? m_lightInjectionPass->GetVoxelRepresentativeTexture().Get() : nullptr);
+		m_renderGraph.AddPass("VXPG GuidingBuild",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(irradianceHandle, GraphAccess::UnorderedAccessRead);
+				pass.Read(vplCountHandle, GraphAccess::UnorderedAccessRead);
+				if (representativeHandle != InvalidGraphResource)
+					pass.Read(representativeHandle, GraphAccess::UnorderedAccessRead);
+			},
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG GuidingBuild");
+				m_voxelGuidingBuildPass->Run(
+					m_lightInjectionPass ? m_lightInjectionPass->GetVoxelRepresentativeTexture().Get() : nullptr);
+			});
 	}
 
 	// Stage 4: fingerprint every lit voxel (128 stratified screen representatives
@@ -1500,8 +1535,13 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	// Stage 5: k-means++ cluster the fingerprinted voxels into 32 supervoxels.
 	if (stage >= VxpgStage::Cluster && m_clusterPass)
 	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Cluster");
-		m_clusterPass->Run(m_passConstants->data.frameIndex);
+		m_renderGraph.AddPass("VXPG Cluster",
+			[](RenderGraphPassBuilder&) {}, // buffers still hand-barriered inside the pass
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Cluster");
+				m_clusterPass->Run(m_passConstants->data.frameIndex);
+			});
 	}
 
 	// Stage 6: SLIC superpixel clustering over the ShadingPoints G-buffer.
@@ -1525,24 +1565,49 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	// Stage 7: per-superpixel x per-cluster soft visibility (cvis).
 	if (stage >= VxpgStage::ClusterVisibility && m_clusterVisibilityPass)
 	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG ClusterVisibility");
-		m_clusterVisibilityPass->Run(m_passConstants->data.frameIndex);
+		m_renderGraph.AddPass("VXPG ClusterVisibility",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				if (vplPositionHandle != InvalidGraphResource)
+					pass.Read(vplPositionHandle, GraphAccess::UnorderedAccessRead);
+				if (vbufferHandle != InvalidGraphResource)
+					pass.Read(vbufferHandle, GraphAccess::UnorderedAccessRead);
+			},
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG ClusterVisibility");
+				m_clusterVisibilityPass->Run(m_passConstants->data.frameIndex);
+			});
 	}
 
 	// Stage 8: bottom light tree (Karras LBVH over lit voxels: encode -> sort ->
 	// initial -> internal -> merge).
 	if (stage >= VxpgStage::LightTree && m_lightTreePass)
 	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightTree");
-		m_lightTreePass->Run();
+		m_renderGraph.AddPass("VXPG LightTree",
+			[](RenderGraphPassBuilder&) {}, // tree buffers still hand-barriered inside the pass
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightTree");
+				m_lightTreePass->Run();
+			});
 	}
 
 	// Reuse config (ADR 0009): the build above consumed last frame's VPL data;
 	// wipe the accumulators now so the guided GI raygen refills them fresh.
 	if (reuseGiVpl)
 	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG InjectionClear");
-		m_voxelizationPass->DispatchFrameClear();
+		m_renderGraph.AddPass("VXPG InjectionClear",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Write(irradianceHandle, GraphAccess::ComputeWrite);
+				pass.Write(vplCountHandle, GraphAccess::ComputeWrite);
+			},
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG InjectionClear");
+				m_voxelizationPass->DispatchFrameClear();
+			});
 	}
 }
 

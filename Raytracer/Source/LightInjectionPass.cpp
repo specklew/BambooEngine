@@ -315,11 +315,7 @@ void LightInjectionPass::Render()
     m_commandList->SetPipelineState1(m_rtStateObject.Get());
     CommandContext::Get().DispatchRays(desc);
 
-    // ShadingPoints is declared on the graph, so its consumers get that barrier
-    // synthesized; the rest are still hand-placed until their readers declare too.
-    CommandContext& context = CommandContext::Get();
-    context.UavBarrierRaw(m_voxelPass->GetIrradianceTexture().Get());
-    context.UavBarrierRaw(m_voxelPass->GetVplCountTexture().Get());
-    context.UavBarrierRaw(m_voxelRepresentativeTex.Get());
-    context.UavBarrierRaw(m_vplPositionTex.Get());
+    // No tail barriers: every output this pass writes (ShadingPoints, irradiance,
+    // VPL count, representative, VPL position) is declared on the graph, which
+    // emits the barrier where a reader actually needs it.
 }
