@@ -183,9 +183,7 @@ void VoxelGuidingBuildPass::Run(ID3D12Resource* representativeTex)
 
     m_commandList->SetPipelineState(m_compactProgram->GetPipelineState());
     CommandContext::Get().Dispatch(groups, groups, groups);
-    m_counters->UavBarrier(cmd);
-    m_compactIds->UavBarrier(cmd);
-    m_inverseIndex->UavBarrier(cmd);
-    m_compactVoxelLightPoints->UavBarrier(cmd);
-    m_premulIrradiance->UavBarrier(cmd);
+
+    // No tail barriers: every buffer this pass produces is declared on the graph,
+    // so the reader's declaration is what triggers them.
 }

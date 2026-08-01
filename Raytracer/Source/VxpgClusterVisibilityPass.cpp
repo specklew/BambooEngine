@@ -195,6 +195,8 @@ void VxpgClusterVisibilityPass::Run(uint32_t frameIndex)
     // groups tall (8 clusters per group x 4 = 32 clusters per superpixel row).
     cmd->SetPipelineState(m_checkProgram->GetPipelineState());
     CommandContext::Get().Dispatch(m_mapX, m_mapY * 4, 1);
-    maskBarrier();
-    m_avgVisibility->UavBarrier(cmd);
+
+    // No tail barriers: the mask and avg-visibility buffers are declared on the
+    // graph, so the light tree's and the integrator's reads trigger them. The
+    // barriers above stay — those hazards are between this pass's own kernels.
 }

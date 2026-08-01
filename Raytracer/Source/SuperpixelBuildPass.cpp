@@ -269,9 +269,8 @@ void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float
     setConstants();
     cmd->SetPipelineState(m_assocProgram->GetPipelineState());
     CommandContext::Get().Dispatch(imgGroupsX, imgGroupsY, 1);
-    uavBarrier(m_index.Get());
-    uavBarrier(m_counter.Get());
-    uavBarrier(m_gathered.Get());
-    uavBarrier(m_fuzzyWeight.Get());
-    uavBarrier(m_fuzzyIndex.Get());
+
+    // No tail barriers: every output is declared on the graph, so the
+    // cluster-visibility pass's and the integrator's reads trigger them. The
+    // barriers above stay — those order this pass's own SLIC iterations.
 }

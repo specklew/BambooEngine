@@ -240,8 +240,9 @@ void VxpgLightTreePass::Run()
 
         // One warp (32 lanes) per superpixel; 8 warps per group => ceil(mapX/8)
         // groups wide, mapY tall (SIByL dispatch (5,23) for its 40x23 map).
+        // No tail barrier: the heap is declared on the graph, so the integrator's
+        // read is what triggers it.
         cmd->SetPipelineState(m_topLevelProgram->GetPipelineState());
         CommandContext::Get().Dispatch((m_mapX + 7) / 8, m_mapY, 1);
-        m_spixelClusterHeap->UavBarrier(cmd);
     }
 }
