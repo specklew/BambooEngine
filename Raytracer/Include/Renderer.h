@@ -186,6 +186,9 @@ private:
 		GraphResourceHandle lightTreeNodes       = InvalidGraphResource;
 		GraphResourceHandle lightTreeCompactToLeaf = InvalidGraphResource;
 		GraphResourceHandle lightTreeClusterRoots  = InvalidGraphResource;
+		GraphResourceHandle lightTreeSortKeys      = InvalidGraphResource;
+		GraphResourceHandle lightTreeDispatchArgs  = InvalidGraphResource;
+		GraphResourceHandle lightTreeNodeVisited   = InvalidGraphResource;
 		GraphResourceHandle superpixelClusterHeap  = InvalidGraphResource;
 	};
 	VxpgGraphHandles m_vxpg;

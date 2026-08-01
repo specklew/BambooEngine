@@ -29,7 +29,15 @@ public:
     // Sizes the per-superpixel importance heap (mapX*mapY*64 floats).
     void OnResize(uint32_t width, uint32_t height);
 
-    void Run();
+    // One graph node per stage: the ordering between them comes from the
+    // declarations rather than hand-placed barriers.
+    void RunClear();
+    void RunEncode();
+    void RunSort();
+    void RunInitial();
+    void RunInternal();
+    void RunMerge();
+    void RunTopLevel();
 
     // GPU-only opaque node record; >= the HLSL LightTreeNode structured-buffer
     // stride (32 B). Never read on the CPU — sized generously so the shader's
@@ -59,8 +67,14 @@ public:
     RWStructuredBuffer<int32_t>* GetCompactToLeafBuffer() const { return m_compactToLeaf.get(); }
     RWStructuredBuffer<int32_t>* GetClusterRootsBuffer() const { return m_clusterRoots.get(); }
     RWStructuredBuffer<float>* GetSuperpixelClusterHeapBuffer() const { return m_spixelClusterHeap.get(); }
+    RWStructuredBuffer<uint64_t>* GetSortKeysBuffer() const { return m_sortKeys.get(); }
+    RWStructuredBuffer<TreeBuildDispatchArgsGpu>* GetDispatchArgsBuffer() const { return m_dispatchArgs.get(); }
+    RWStructuredBuffer<uint32_t>* GetNodeVisitedBuffer() const { return m_nodeVisited.get(); }
 
 private:
+    // Shared heap + tree root signature + every root resource. False = cannot run.
+    bool BindRoots();
+
     void CreateBuffers();
     void CreateRootSignature();
     void CreatePSOs();

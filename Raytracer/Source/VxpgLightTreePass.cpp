@@ -141,108 +141,125 @@ void VxpgLightTreePass::OnResize(uint32_t width, uint32_t height)
         m_device, std::max(1u, m_mapX * m_mapY * 64u), L"LightTree SpixelClusterHeap");
 }
 
-void VxpgLightTreePass::Run()
+// Binds the shared heap, the tree root signature and every root resource. Called
+// by each kernel node: the bitonic sort swaps in its own root signature, and
+// separate nodes may have barriers placed between them, so none of them may
+// inherit another's root state.
+bool VxpgLightTreePass::BindRoots()
 {
     if (!m_initialized || !m_voxelPass || !m_buildPass || !m_clusterPass)
-        return;
+        return false;
 
     auto* cmd = m_commandList.Get();
 
-    // Bind the shared heap up front: it stays bound through the bitonic sort
-    // (which uses only root descriptors) and is needed by the top-level tree's
-    // mask descriptor table at the tail.
+    // The top-level tree's mask descriptor table needs the shared heap bound.
     ID3D12DescriptorHeap* heaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
-    // Binds the tree root sig + all resources (re-called after the sort swaps in
-    // its own root signature).
-    auto bindRoots = [&]()
-    {
-        cmd->SetComputeRootSignature(m_rootSig.Get());
-        cmd->SetComputeRootConstantBufferView(0, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(1, m_sortKeys->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(2, m_nodes->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(3, m_leafRanges->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(4, m_compactToLeaf->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(5, m_clusterRoots->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(6, m_dispatchArgs->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(7, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(8, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(9, m_buildPass->GetPremulIrradianceBuffer()->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(10, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(11, m_nodeVisited->GetGPUVirtualAddress());
-    };
+    cmd->SetComputeRootSignature(m_rootSig.Get());
+    cmd->SetComputeRootConstantBufferView(0, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(1, m_sortKeys->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(2, m_nodes->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(3, m_leafRanges->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(4, m_compactToLeaf->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(5, m_clusterRoots->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(6, m_dispatchArgs->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(7, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(8, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(9, m_buildPass->GetPremulIrradianceBuffer()->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(10, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(11, m_nodeVisited->GetGPUVirtualAddress());
 
-    bindRoots();
+    return true;
+}
 
-    // Fixed worst-case dispatches sized to the uint16 leaf cap (ExecuteIndirect
-    // deferred, ADR 0003 option b); in-shader guards early-out past the count.
-    const uint32_t clearGroups    = (kCompactCapacity + 255) / 256; // 512
-    const uint32_t leafGroups     = (kMaxLeaves + 255) / 256;       // 128
-    const uint32_t nodeGroups     = (kNodeCapacity + 255) / 256;    // 256
-    const uint32_t internalGroups = (kMaxLeaves - 1 + 255) / 256;   // 128
+// Reset compact->leaf to -1 and NULL-pad the whole sort-key buffer (so the fixed
+// 65536 sort network's over-dispatch reads padding, not stale garbage).
+void VxpgLightTreePass::RunClear()
+{
+    if (!BindRoots())
+        return;
 
-    // Reset compact->leaf to -1 and NULL-pad the whole sort-key buffer (so the
-    // fixed 65536 sort network's over-dispatch reads padding, not stale garbage).
-    cmd->SetPipelineState(m_clearProgram->GetPipelineState());
-    CommandContext::Get().Dispatch(clearGroups, 1, 1);
-    m_compactToLeaf->UavBarrier(cmd);
-    m_sortKeys->UavBarrier(cmd);
+    m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
+    CommandContext::Get().Dispatch((kCompactCapacity + 255) / 256, 1, 1);
+}
 
-    // Encode leaf sort keys + dispatch args (+ overflow flag).
-    cmd->SetPipelineState(m_encodeProgram->GetPipelineState());
-    CommandContext::Get().Dispatch(leafGroups, 1, 1);
-    m_sortKeys->UavBarrier(cmd);
-    m_dispatchArgs->UavBarrier(cmd);
+// Encode leaf sort keys + dispatch args (+ overflow flag).
+void VxpgLightTreePass::RunEncode()
+{
+    if (!BindRoots())
+        return;
 
-    // Sort the keys so each cluster is a contiguous Morton run (swaps root sig).
+    m_commandList->SetPipelineState(m_encodeProgram->GetPipelineState());
+    CommandContext::Get().Dispatch((kMaxLeaves + 255) / 256, 1, 1);
+}
+
+// Sort the keys so each cluster is a contiguous Morton run. Swaps in the sort's
+// own root signature, which is why every node re-binds.
+void VxpgLightTreePass::RunSort()
+{
+    if (!BindRoots())
+        return;
+
     m_sort.Sort(m_sortKeys->GetUnderlyingResource().Get(),
                 m_sortKeys->GetGPUVirtualAddress(),
                 m_dispatchArgs->GetGPUVirtualAddress(),
                 kCounterByteOffset);
-    m_sortKeys->UavBarrier(cmd);
+}
 
-    bindRoots();
+// Initialize the 2N-1 node array (leaves get AABB / intensity / cluster).
+void VxpgLightTreePass::RunInitial()
+{
+    if (!BindRoots())
+        return;
 
-    // Initialize the 2N-1 node array (leaves get AABB / intensity / cluster).
-    cmd->SetPipelineState(m_initialProgram->GetPipelineState());
-    CommandContext::Get().Dispatch(nodeGroups, 1, 1);
-    m_nodes->UavBarrier(cmd);
-    m_compactToLeaf->UavBarrier(cmd);
-    m_clusterRoots->UavBarrier(cmd);
+    m_commandList->SetPipelineState(m_initialProgram->GetPipelineState());
+    CommandContext::Get().Dispatch((kNodeCapacity + 255) / 256, 1, 1);
+}
 
-    // Build the Karras hierarchy (child + parent links).
-    cmd->SetPipelineState(m_internalProgram->GetPipelineState());
-    CommandContext::Get().Dispatch(internalGroups, 1, 1);
-    m_nodes->UavBarrier(cmd);
+// Build the Karras hierarchy (child + parent links).
+void VxpgLightTreePass::RunInternal()
+{
+    if (!BindRoots())
+        return;
 
-    // Merge bottom-up: AABB + intensity + per-cluster root detection.
-    cmd->SetPipelineState(m_mergeProgram->GetPipelineState());
-    CommandContext::Get().Dispatch(leafGroups, 1, 1);
-    m_nodes->UavBarrier(cmd);
-    m_clusterRoots->UavBarrier(cmd);
+    m_commandList->SetPipelineState(m_internalProgram->GetPipelineState());
+    CommandContext::Get().Dispatch((kMaxLeaves - 1 + 255) / 256, 1, 1);
+}
 
-    // Top-level tree: per-superpixel implicit heap of the 32 clusters' view-
-    // weighted importance. Consumes the just-built cluster roots + node
-    // intensities and the cluster-visibility pass's mask / avg buffers.
+// Merge bottom-up: AABB + intensity + per-cluster root detection.
+void VxpgLightTreePass::RunMerge()
+{
+    if (!BindRoots())
+        return;
+
+    m_commandList->SetPipelineState(m_mergeProgram->GetPipelineState());
+    CommandContext::Get().Dispatch((kMaxLeaves + 255) / 256, 1, 1);
+}
+
+// Top-level tree: per-superpixel implicit heap of the 32 clusters' view-weighted
+// importance. Consumes the just-built cluster roots + node intensities and the
+// cluster-visibility pass's mask / avg buffers.
+void VxpgLightTreePass::RunTopLevel()
+{
     auto* avgVisibility = m_clusterVisibilityPass ? m_clusterVisibilityPass->GetAvgVisibilityBuffer() : nullptr;
-    if (m_spixelClusterHeap && avgVisibility && m_mapX > 0)
-    {
-        const uint32_t constants[4] = {
-            m_mapX, m_mapY,
-            static_cast<uint32_t>(g_topLevelUseAvgVisibility.Get() != 0),
-            0u
-        };
-        cmd->SetComputeRoot32BitConstants(12, 4, constants, 0);
-        cmd->SetComputeRootUnorderedAccessView(13, avgVisibility->GetGPUVirtualAddress());
-        cmd->SetComputeRootUnorderedAccessView(14, m_spixelClusterHeap->GetGPUVirtualAddress());
-        cmd->SetComputeRootDescriptorTable(15, GlobalDescriptorHeap::Get().GpuStart());
+    if (!m_spixelClusterHeap || !avgVisibility || m_mapX == 0 || !BindRoots())
+        return;
 
-        // One warp (32 lanes) per superpixel; 8 warps per group => ceil(mapX/8)
-        // groups wide, mapY tall (SIByL dispatch (5,23) for its 40x23 map).
-        // No tail barrier: the heap is declared on the graph, so the integrator's
-        // read is what triggers it.
-        cmd->SetPipelineState(m_topLevelProgram->GetPipelineState());
-        CommandContext::Get().Dispatch((m_mapX + 7) / 8, m_mapY, 1);
-    }
+    auto* cmd = m_commandList.Get();
+
+    const uint32_t constants[4] = {
+        m_mapX, m_mapY,
+        static_cast<uint32_t>(g_topLevelUseAvgVisibility.Get() != 0),
+        0u
+    };
+    cmd->SetComputeRoot32BitConstants(12, 4, constants, 0);
+    cmd->SetComputeRootUnorderedAccessView(13, avgVisibility->GetGPUVirtualAddress());
+    cmd->SetComputeRootUnorderedAccessView(14, m_spixelClusterHeap->GetGPUVirtualAddress());
+    cmd->SetComputeRootDescriptorTable(15, GlobalDescriptorHeap::Get().GpuStart());
+
+    // One warp (32 lanes) per superpixel; 8 warps per group => ceil(mapX/8)
+    // groups wide, mapY tall (SIByL dispatch (5,23) for its 40x23 map).
+    cmd->SetPipelineState(m_topLevelProgram->GetPipelineState());
+    CommandContext::Get().Dispatch((m_mapX + 7) / 8, m_mapY, 1);
 }

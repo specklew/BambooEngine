@@ -1559,6 +1559,9 @@ void Renderer::BuildVxpgGraph()
 		m_vxpg.lightTreeNodes         = importBuffer(m_lightTreePass->GetNodesBuffer(), "VXPG LightTreeNodes");
 		m_vxpg.lightTreeCompactToLeaf = importBuffer(m_lightTreePass->GetCompactToLeafBuffer(), "VXPG LightTreeCompactToLeaf");
 		m_vxpg.lightTreeClusterRoots  = importBuffer(m_lightTreePass->GetClusterRootsBuffer(), "VXPG LightTreeClusterRoots");
+		m_vxpg.lightTreeSortKeys      = importBuffer(m_lightTreePass->GetSortKeysBuffer(), "VXPG LightTreeSortKeys");
+		m_vxpg.lightTreeDispatchArgs  = importBuffer(m_lightTreePass->GetDispatchArgsBuffer(), "VXPG LightTreeDispatchArgs");
+		m_vxpg.lightTreeNodeVisited   = importBuffer(m_lightTreePass->GetNodeVisitedBuffer(), "VXPG LightTreeNodeVisited");
 		m_vxpg.superpixelClusterHeap  = importBuffer(m_lightTreePass->GetSuperpixelClusterHeapBuffer(), "VXPG SuperpixelClusterHeap");
 	}
 
@@ -1766,25 +1769,80 @@ void Renderer::BuildVxpgGraph()
 			[this, frame]() { m_clusterVisibilityPass->RunCheck(frame); });
 	}
 
-	// Stage 8: bottom light tree (Karras LBVH over lit voxels: encode -> sort ->
-	// initial -> internal -> merge).
+	// Stage 8: bottom light tree (Karras LBVH over lit voxels), one node per stage:
+	// clear -> encode -> sort -> initial -> internal -> merge -> top level.
 	if (m_lightTreePass)
 	{
-		m_renderGraph.AddPass("VXPG LightTree",
+		m_renderGraph.AddPass("VXPG LightTree Clear",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				pass.Read(m_vxpg.clusterAssignments, kUavRead);
+				pass.Write(m_vxpg.lightTreeCompactToLeaf, kUavWrite);
+				pass.Write(m_vxpg.lightTreeSortKeys, kUavWrite);
+				pass.Write(m_vxpg.lightTreeNodeVisited, kUavWrite);
+			},
+			[this]() { m_lightTreePass->RunClear(); });
+
+		m_renderGraph.AddPass("VXPG LightTree Encode",
+			[&](RenderGraphPassBuilder& pass)
+			{
 				pass.Read(m_vxpg.counters, kUavRead);
 				pass.Read(m_vxpg.compactIds, kUavRead);
 				pass.Read(m_vxpg.compactLightPoints, kUavRead);
 				pass.Read(m_vxpg.premulIrradiance, kUavRead);
-				pass.Read(m_vxpg.avgVisibility, kUavRead);
+				pass.Read(m_vxpg.clusterAssignments, kUavRead);
+				pass.Write(m_vxpg.lightTreeSortKeys, kUavWrite);
+				pass.Write(m_vxpg.lightTreeDispatchArgs, kUavWrite);
+			},
+			[this]() { m_lightTreePass->RunEncode(); });
+
+		m_renderGraph.AddPass("VXPG LightTree Sort",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(m_vxpg.lightTreeDispatchArgs, kUavRead);
+				pass.Write(m_vxpg.lightTreeSortKeys, kUavWrite);
+			},
+			[this]() { m_lightTreePass->RunSort(); });
+
+		m_renderGraph.AddPass("VXPG LightTree Initial",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(m_vxpg.lightTreeSortKeys, kUavRead);
+				pass.Read(m_vxpg.compactIds, kUavRead);
+				pass.Read(m_vxpg.premulIrradiance, kUavRead);
+				pass.Read(m_vxpg.clusterAssignments, kUavRead);
 				pass.Write(m_vxpg.lightTreeNodes, kUavWrite);
 				pass.Write(m_vxpg.lightTreeCompactToLeaf, kUavWrite);
 				pass.Write(m_vxpg.lightTreeClusterRoots, kUavWrite);
+			},
+			[this]() { m_lightTreePass->RunInitial(); });
+
+		m_renderGraph.AddPass("VXPG LightTree Internal",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(m_vxpg.lightTreeSortKeys, kUavRead);
+				pass.Write(m_vxpg.lightTreeNodes, kUavWrite);
+			},
+			[this]() { m_lightTreePass->RunInternal(); });
+
+		m_renderGraph.AddPass("VXPG LightTree Merge",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(m_vxpg.lightTreeNodeVisited, kUavRead);
+				pass.Write(m_vxpg.lightTreeNodes, kUavWrite);
+				pass.Write(m_vxpg.lightTreeClusterRoots, kUavWrite);
+			},
+			[this]() { m_lightTreePass->RunMerge(); });
+
+		m_renderGraph.AddPass("VXPG LightTree TopLevel",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(m_vxpg.lightTreeNodes, kUavRead);
+				pass.Read(m_vxpg.lightTreeClusterRoots, kUavRead);
+				pass.Read(m_vxpg.avgVisibility, kUavRead);
+				pass.Read(m_vxpg.clusterVisibilityMask, kUavRead);
 				pass.Write(m_vxpg.superpixelClusterHeap, kUavWrite);
 			},
-			[this]() { m_lightTreePass->Run(); });
+			[this]() { m_lightTreePass->RunTopLevel(); });
 	}
 
 	// Reuse config (ADR 0009): the build above consumed last frame's VPL data;
