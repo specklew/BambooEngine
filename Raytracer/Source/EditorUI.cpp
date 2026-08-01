@@ -154,6 +154,23 @@ void EditorUI::DrawRenderGraphSection()
 	if (ImGui::Checkbox("Measure nodes on the GPU", &timingsEnabled))
 		CVarSystem::Get()->SetCVarInt(timingsCVar, timingsEnabled ? 1 : 0);
 
+	if (m_renderGraphPasses && m_setRenderGraphPassEnabled && ImGui::TreeNode("Nodes"))
+	{
+		for (const auto& pass : m_renderGraphPasses())
+		{
+			bool enabled = !pass.disabled;
+			if (ImGui::Checkbox(pass.name.c_str(), &enabled))
+				m_setRenderGraphPassEnabled(pass.name, enabled);
+
+			if (pass.culled)
+			{
+				ImGui::SameLine();
+				ImGui::TextDisabled(pass.disabled ? "(off)" : "(culled)");
+			}
+		}
+		ImGui::TreePop();
+	}
+
 	const auto& timings = m_renderGraphTimings();
 	if (!timingsEnabled || timings.empty())
 	{

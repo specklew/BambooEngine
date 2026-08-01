@@ -39,6 +39,14 @@ public:
 	{
 		m_renderGraphTimings = std::move(getter);
 	}
+	void SetRenderGraphPassGetter(std::function<std::vector<RenderGraph::PassInfo>()> getter)
+	{
+		m_renderGraphPasses = std::move(getter);
+	}
+	void SetRenderGraphPassToggle(std::function<void(const std::string&, bool)> setter)
+	{
+		m_setRenderGraphPassEnabled = std::move(setter);
+	}
 	int  GetCurrentTechniqueIndex() const { return m_currentTechniqueIndex; }
 
 private:
@@ -62,6 +70,8 @@ private:
 	std::function<void(float, std::string, std::string)> m_onScreenshotRequest;
 	std::function<bool()>      m_isScreenshotPending;
 	std::function<const std::vector<RenderGraph::PassTiming>&()> m_renderGraphTimings;
+	std::function<std::vector<RenderGraph::PassInfo>()>          m_renderGraphPasses;
+	std::function<void(const std::string&, bool)>                m_setRenderGraphPassEnabled;
 	float m_screenshotSeconds = 1.0f;
 
 	std::shared_ptr<StatesManager> m_statesManager;

@@ -1289,6 +1289,10 @@ void Renderer::InitializeEditorUI()
 	m_editorUI->SetRenderGraphTimingsGetter([this]() -> const std::vector<RenderGraph::PassTiming>& {
 		return m_renderGraph.GetTimings();
 	});
+	m_editorUI->SetRenderGraphPassGetter([this]() { return m_renderGraph.GetPassInfo(); });
+	m_editorUI->SetRenderGraphPassToggle([this](const std::string& name, bool enabled) {
+		m_renderGraph.SetPassEnabled(name, enabled);
+	});
 	m_editorUI->SetScreenshotPendingGetter([this]() {
 		return m_screenshotManager->IsPending();
 	});

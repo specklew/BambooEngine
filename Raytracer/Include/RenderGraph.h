@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -122,6 +123,19 @@ public:
     };
     [[nodiscard]] const std::vector<PassTiming>& GetTimings() const { return m_timings; }
 
+    // Pass toggles. Disabling a node drops it and re-culls, so its producers go
+    // too if nothing else reads them — the debug view becomes "a pass you don't
+    // add" rather than a branch inside a shader. Consumers still run and read
+    // whatever the disabled node last left behind; that staleness is the point.
+    struct PassInfo
+    {
+        std::string name;
+        bool        culled;
+        bool        disabled;
+    };
+    [[nodiscard]] std::vector<PassInfo> GetPassInfo() const;
+    void SetPassEnabled(const std::string& name, bool enabled);
+
     // Barrier attribution for a perf delta (ADR 0017: this exists to explain a
     // regression, not to gate on byte-identical output).
     [[nodiscard]] std::string DumpBarriers() const;
@@ -156,6 +170,7 @@ private:
         GraphQueue                                       queue     = GraphQueue::Direct;
         bool                                             neverCull = false;
         bool                                             culled    = false;
+        bool                                             disabled  = false;
     };
 
     struct GraphBarrier
@@ -183,6 +198,9 @@ private:
 
     std::vector<ImportedResource> m_resources;
     std::vector<PassNode>         m_passes;
+    // User state, not frame state: survives Reset so a toggle sticks while the
+    // graph is rebuilt every frame.
+    std::set<std::string>         m_disabledPasses;
     std::vector<CompiledPass>     m_compiled;
     std::vector<std::string>      m_barrierLog;
     bool                          m_logBarriers = false;

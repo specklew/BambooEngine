@@ -114,7 +114,25 @@ void RenderGraph::AddPass(const char* name,
     pass.execute      = std::move(execute);
     pass.queue        = builder.m_queue;
     pass.neverCull    = builder.m_neverCull;
+    pass.disabled     = m_disabledPasses.count(pass.name) != 0;
     m_passes.push_back(std::move(pass));
+}
+
+std::vector<RenderGraph::PassInfo> RenderGraph::GetPassInfo() const
+{
+    std::vector<PassInfo> info;
+    info.reserve(m_passes.size());
+    for (const PassNode& pass : m_passes)
+        info.push_back({pass.name, pass.culled, pass.disabled});
+    return info;
+}
+
+void RenderGraph::SetPassEnabled(const std::string& name, bool enabled)
+{
+    if (enabled)
+        m_disabledPasses.erase(name);
+    else
+        m_disabledPasses.insert(name);
 }
 
 // Backward reachability over the declaration order: a pass survives if it is a
@@ -131,6 +149,14 @@ void RenderGraph::Cull()
     for (size_t index = m_passes.size(); index-- > 0;)
     {
         PassNode& pass = m_passes[index];
+
+        // A disabled node is culled outright, and because its reads never mark
+        // anything needed, whatever fed only it is culled with it.
+        if (pass.disabled)
+        {
+            pass.culled = true;
+            continue;
+        }
 
         bool alive = pass.neverCull;
         if (!alive)
