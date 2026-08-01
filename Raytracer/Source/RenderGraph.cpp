@@ -86,11 +86,15 @@ void RenderGraph::Execute(CommandContext& context)
             ImportedResource& imported = m_resources[declaration.resource];
             const D3D12_RESOURCE_STATES required = ToResourceState(declaration.access);
 
-            // Hazards a transition cannot express: another UAV access after a UAV
-            // write — whether the next access reads or writes — needs a UAV barrier.
+            // Hazards a transition cannot express. Read-after-write and
+            // write-after-write are the obvious ones; write-after-read needs the
+            // barrier too, or the writer can overwrite while readers are still in
+            // flight (the injection-clear vs guiding-build edge).
+            const bool afterWrite = imported.writtenSinceLastRead;
+            const bool afterRead  = imported.readSinceLastWrite && declaration.isWrite;
             const bool needsUavBarrier = required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS &&
                                          imported.hasStateInGraph &&
-                                         imported.writtenSinceLastRead;
+                                         (afterWrite || afterRead);
 
             if (needsUavBarrier)
             {
@@ -118,6 +122,7 @@ void RenderGraph::Execute(CommandContext& context)
             imported.stateInGraph         = required;
             imported.hasStateInGraph      = true;
             imported.writtenSinceLastRead = declaration.isWrite;
+            imported.readSinceLastWrite   = !declaration.isWrite;
         }
 
         if (pass.execute)
@@ -135,6 +140,32 @@ void RenderGraph::Reset()
         imported.hasStateInGraph      = false;
         imported.writtenSinceLastRead = false;
     }
+}
+
+std::string RenderGraph::DumpPasses() const
+{
+    static const char* accessNames[] = {
+        "ComputeRead", "ComputeWrite", "UnorderedAccessRead", "PixelRead",
+        "RenderTarget", "DepthWrite", "IndirectArgument", "CopySource",
+        "CopyDestination", "Present"
+    };
+
+    std::string dump;
+    for (const PassNode& pass : m_passes)
+    {
+        dump += pass.m_name;
+        dump += '\n';
+        for (const auto& declaration : pass.declarations)
+        {
+            dump += "    ";
+            dump += declaration.isWrite ? "writes " : "reads  ";
+            dump += m_resources[declaration.resource].debugName;
+            dump += " (";
+            dump += accessNames[static_cast<uint32_t>(declaration.access)];
+            dump += ")\n";
+        }
+    }
+    return dump;
 }
 
 std::string RenderGraph::DumpBarriers() const

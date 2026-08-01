@@ -96,6 +96,9 @@ static AutoCVarInt g_raygenCleanVariant("renderer.raygenCleanVariant", "1 = comp
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);
+// One-shot: set to 1 to log the next frame's graph (nodes, declarations, the
+// barriers they synthesized), then it clears itself.
+static AutoCVarInt   g_dumpRenderGraph("rdg.dump", "Log the next frame's render graph and its synthesized barriers", 0, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_exposure("renderer.postprocess.exposure","Exposure multiplier applied before display", 1.0f, CVarFlags::EditDrag, 0.0f, 10.0f);
 static AutoCVarFloat g_contrast("renderer.postprocess.contrast", "Pre-ACES contrast power curve", 1.0f, CVarFlags::EditDrag, 0.1f, 3.0f);
 static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES saturation", 1.0f, CVarFlags::EditDrag, 0.0f, 2.0f);
@@ -559,6 +562,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		// Raster draws are not graph nodes yet (phase 5), so the VXPG subgraph
 		// they read from has to run first.
 		m_renderGraph.Execute(CommandContext::Get());
+		DumpRenderGraphIfRequested();
 
 		ID3D12DescriptorHeap* descriptorHeaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
 
@@ -666,6 +670,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			nullptr);
 
 		m_renderGraph.Execute(CommandContext::Get());
+		DumpRenderGraphIfRequested();
 
 		// Restore main descriptor heap for ImGui (post-process pass may have changed it)
 		ID3D12DescriptorHeap* mainHeaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
@@ -1609,6 +1614,16 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 				m_voxelizationPass->DispatchFrameClear();
 			});
 	}
+}
+
+void Renderer::DumpRenderGraphIfRequested()
+{
+	if (g_dumpRenderGraph.Get() == 0)
+		return;
+
+	spdlog::info("[RDG] frame passes:\n{}", m_renderGraph.DumpPasses());
+	spdlog::info("[RDG] synthesized barriers:\n{}", m_renderGraph.DumpBarriers());
+	g_dumpRenderGraph.Set(0); // one-shot: a per-frame dump is unreadable
 }
 
 void Renderer::WriteVoxelUavsToGlobalHeap()

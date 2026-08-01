@@ -74,6 +74,10 @@ public:
     // regression, not to gate on byte-identical output).
     [[nodiscard]] std::string DumpBarriers() const;
 
+    // Node list with each node's declarations, whether or not it emitted a
+    // barrier — the "what does the frame actually consist of" view.
+    [[nodiscard]] std::string DumpPasses() const;
+
 private:
     struct ImportedResource
     {
@@ -83,6 +87,7 @@ private:
         D3D12_RESOURCE_STATES stateInGraph = D3D12_RESOURCE_STATE_COMMON;
         bool                  hasStateInGraph = false;
         bool                  writtenSinceLastRead = false;
+        bool                  readSinceLastWrite   = false;
     };
 
     struct PassNode
