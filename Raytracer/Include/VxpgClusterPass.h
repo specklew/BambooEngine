@@ -27,7 +27,9 @@ public:
         std::shared_ptr<VoxelGuidingBuildPass>             buildPass,
         std::shared_ptr<VxpgFingerprintPass>               fingerprintPass);
 
-    void Run(uint32_t frameIndex);
+    // One graph node per kernel; the dispatch-args state flip is declared.
+    void RunSeed(uint32_t frameIndex);
+    void RunAssign(uint32_t frameIndex);
 
     // SIByL svoxel_info: the descriptor each voxel is compared against.
     struct ClusterCenter
@@ -42,6 +44,10 @@ public:
     RWStructuredBuffer<int32_t>*       GetVoxelClusterAssignmentsBuffer() const { return m_voxelClusterAssignments.get(); }
 
 private:
+    // Both kernels share one root signature but separate nodes may have barriers
+    // between them, so each re-binds. False = cannot run.
+    bool BindCommon(uint32_t frameIndex);
+
     void CreateBuffers();
     void CreateRootSignature();
     void CreatePSOs();

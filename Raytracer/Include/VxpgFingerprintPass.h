@@ -32,13 +32,19 @@ public:
     void OnResize(uint32_t width, uint32_t height);
 
     // tlasVa = the scene TLAS result buffer for the inline visibility rays.
-    void Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIndex);
+    // One graph node per kernel. The dispatch-args buffer's
+    // UNORDERED_ACCESS <-> INDIRECT_ARGUMENT flip is declared, not hand-placed.
+    void RunPresample(uint32_t frameIndex);
+    void RunVisibility(D3D12_GPU_VIRTUAL_ADDRESS tlasVa);
 
     RWStructuredBuffer<DirectX::XMFLOAT4>* GetScreenRepresentativePointsBuffer() const { return m_screenRepresentativePoints.get(); }
     RWStructuredBuffer<uint32_t>*          GetVoxelFingerprintsBuffer() const { return m_voxelFingerprints.get(); }
     RWStructuredBuffer<DirectX::XMUINT4>*  GetGuidingDispatchArgsBuffer() const { return m_guidingDispatchArgs.get(); }
 
 private:
+    // Rebinds the ShadingPoints UAV if injection recreated it; false = cannot run.
+    bool IsRunnable();
+
     void CreateBuffers();
     void CreatePrivateHeap();
     void RebindShadingPointsIfChanged();

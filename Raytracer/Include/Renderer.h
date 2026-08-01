@@ -168,8 +168,11 @@ private:
 		GraphResourceHandle liveBoundMin         = InvalidGraphResource;
 		GraphResourceHandle liveBoundMax         = InvalidGraphResource;
 		GraphResourceHandle voxelFingerprints    = InvalidGraphResource;
+		GraphResourceHandle screenRepresentatives = InvalidGraphResource;
+		GraphResourceHandle guidingDispatchArgs   = InvalidGraphResource;
 		GraphResourceHandle clusterAssignments   = InvalidGraphResource;
 		GraphResourceHandle clusterSeedCompactIds = InvalidGraphResource;
+		GraphResourceHandle clusterCenters        = InvalidGraphResource;
 		GraphResourceHandle superpixelIndex      = InvalidGraphResource;
 		GraphResourceHandle superpixelCenter     = InvalidGraphResource;
 		GraphResourceHandle superpixelCounter    = InvalidGraphResource;

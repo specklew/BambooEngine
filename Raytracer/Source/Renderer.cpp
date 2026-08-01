@@ -1527,11 +1527,16 @@ void Renderer::BuildVxpgGraph()
 		m_vxpg.liveBoundMax       = importBuffer(m_voxelGuidingBuildPass->GetLiveBoundMaxBuffer(), "VXPG LiveBoundMax");
 	}
 	if (m_fingerprintPass)
-		m_vxpg.voxelFingerprints = importBuffer(m_fingerprintPass->GetVoxelFingerprintsBuffer(), "VXPG VoxelFingerprints");
+	{
+		m_vxpg.voxelFingerprints    = importBuffer(m_fingerprintPass->GetVoxelFingerprintsBuffer(), "VXPG VoxelFingerprints");
+		m_vxpg.screenRepresentatives = importBuffer(m_fingerprintPass->GetScreenRepresentativePointsBuffer(), "VXPG ScreenRepresentatives");
+		m_vxpg.guidingDispatchArgs   = importBuffer(m_fingerprintPass->GetGuidingDispatchArgsBuffer(), "VXPG GuidingDispatchArgs");
+	}
 	if (m_clusterPass)
 	{
 		m_vxpg.clusterAssignments    = importBuffer(m_clusterPass->GetVoxelClusterAssignmentsBuffer(), "VXPG ClusterAssignments");
 		m_vxpg.clusterSeedCompactIds = importBuffer(m_clusterPass->GetClusterSeedCompactIdsBuffer(), "VXPG ClusterSeedCompactIds");
+		m_vxpg.clusterCenters        = importBuffer(m_clusterPass->GetClusterCentersBuffer(), "VXPG ClusterCenters");
 	}
 	if (m_superpixelBuildPass)
 	{
@@ -1632,37 +1637,70 @@ void Renderer::BuildVxpgGraph()
 
 	// Stage 4: fingerprint every lit voxel (128 stratified screen representatives
 	// -> per-voxel visibility mask via inline shadow rays).
+	// The dispatch-args buffer alternates between UNORDERED_ACCESS (written by the
+	// presample kernel, read as a root UAV by the cluster seeding) and
+	// INDIRECT_ARGUMENT (read by the two ExecuteIndirect calls). Declaring both
+	// accesses is what makes the graph synthesize the flips the passes used to
+	// place by hand.
 	if (m_fingerprintPass && m_scene)
 	{
-		m_renderGraph.AddPass("VXPG Fingerprint",
+		const uint32_t frame = m_passConstants->data.frameIndex;
+
+		m_renderGraph.AddPass("VXPG Fingerprint Presample",
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Read(m_vxpg.shadingPoints, kUavRead);
 				pass.Read(m_vxpg.counters, kUavRead);
+				pass.Write(m_vxpg.screenRepresentatives, kUavWrite);
+				pass.Write(m_vxpg.guidingDispatchArgs, kUavWrite);
+			},
+			[this, frame]() { m_fingerprintPass->RunPresample(frame); });
+
+		m_renderGraph.AddPass("VXPG Fingerprint Visibility",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(m_vxpg.screenRepresentatives, kUavRead);
 				pass.Read(m_vxpg.compactLightPoints, kUavRead);
+				pass.Read(m_vxpg.guidingDispatchArgs, GraphAccess::IndirectArgument);
 				pass.Write(m_vxpg.voxelFingerprints, kUavWrite);
 			},
 			[this]()
 			{
 				auto tlas = m_scene->GetAccelerationStructures()->GetTopLevelAS().p_result;
-				m_fingerprintPass->Run(tlas ? tlas->GetGPUVirtualAddress() : 0,
-					m_passConstants->data.frameIndex);
+				m_fingerprintPass->RunVisibility(tlas ? tlas->GetGPUVirtualAddress() : 0);
 			});
 	}
 
-	// Stage 5: k-means++ cluster the fingerprinted voxels into 32 supervoxels.
+	// Stage 5: k-means++ cluster the fingerprinted voxels into 32 supervoxels,
+	// one node per kernel (seed -> assign).
 	if (m_clusterPass)
 	{
-		m_renderGraph.AddPass("VXPG Cluster",
+		const uint32_t frame = m_passConstants->data.frameIndex;
+
+		m_renderGraph.AddPass("VXPG Cluster Seed",
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Read(m_vxpg.voxelFingerprints, kUavRead);
 				pass.Read(m_vxpg.compactIds, kUavRead);
 				pass.Read(m_vxpg.premulIrradiance, kUavRead);
-				pass.Write(m_vxpg.clusterAssignments, kUavWrite);
+				// Reads the lit-voxel count as a root UAV, so it needs the args
+				// buffer back out of INDIRECT_ARGUMENT.
+				pass.Read(m_vxpg.guidingDispatchArgs, kUavRead);
 				pass.Write(m_vxpg.clusterSeedCompactIds, kUavWrite);
+				pass.Write(m_vxpg.clusterCenters, kUavWrite);
 			},
-			[this]() { m_clusterPass->Run(m_passConstants->data.frameIndex); });
+			[this, frame]() { m_clusterPass->RunSeed(frame); });
+
+		m_renderGraph.AddPass("VXPG Cluster Assign",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(m_vxpg.voxelFingerprints, kUavRead);
+				pass.Read(m_vxpg.clusterSeedCompactIds, kUavRead);
+				pass.Read(m_vxpg.clusterCenters, kUavRead);
+				pass.Read(m_vxpg.guidingDispatchArgs, GraphAccess::IndirectArgument);
+				pass.Write(m_vxpg.clusterAssignments, kUavWrite);
+			},
+			[this, frame]() { m_clusterPass->RunAssign(frame); });
 	}
 
 	// Stage 6: SLIC superpixel clustering over the ShadingPoints G-buffer.

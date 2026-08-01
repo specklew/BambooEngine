@@ -163,14 +163,20 @@ void VxpgFingerprintPass::OnResize(uint32_t width, uint32_t height)
     m_height = height;
 }
 
-void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIndex)
+bool VxpgFingerprintPass::IsRunnable()
 {
-    if (!m_initialized || !m_buildPass || !m_injectionPass || tlasVa == 0 ||
-        m_width == 0 || m_height == 0)
-        return;
+    if (!m_initialized || !m_buildPass || !m_injectionPass || m_width == 0 || m_height == 0)
+        return false;
 
     RebindShadingPointsIfChanged();
-    if (!m_boundShadingPoints)
+    return m_boundShadingPoints != nullptr;
+}
+
+// Kernel 1: pick 128 stratified screen representatives and emit the dispatch args
+// the visibility kernel and the cluster pass are then dispatched off.
+void VxpgFingerprintPass::RunPresample(uint32_t frameIndex)
+{
+    if (!IsRunnable())
         return;
 
     auto* cmd = m_commandList.Get();
@@ -178,7 +184,6 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
     ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
-    // ---- Kernel 1: pick 128 screen representatives + emit dispatch args ----
     cmd->SetComputeRootSignature(m_presampleRootSig.Get());
     uint32_t presampleConstants[4] = { m_width, m_height,
         PcgHash(frameIndex), 0u };
@@ -190,14 +195,27 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
 
     cmd->SetPipelineState(m_presampleProgram->GetPipelineState());
     CommandContext::Get().Dispatch(1, 1, 1); // one 16x8 group = 128 representatives
-    m_screenRepresentativePoints->UavBarrier(cmd);
-    m_guidingDispatchArgs->UavBarrier(cmd);
+}
 
-    // ---- Kernel 2: fingerprint every lit voxel via inline shadow rays ----
-    // Dispatched indirectly off gGuidingDispatchArgs[2] = (4, ceil(litVoxelCount/8),
-    // 1): X = 4 groups of 32 = 128 representatives; Y sized to the live lit-voxel
-    // count. Replaces the worst-case (4, ceil(CAPACITY/8)=16384, 1) fixed dispatch
-    // (ADR 0003 option b). The presample kernel emitted the count this frame.
+// Kernel 2: fingerprint every lit voxel via inline shadow rays. Dispatched
+// indirectly off gGuidingDispatchArgs[2] = (4, ceil(litVoxelCount/8), 1): X = 4
+// groups of 32 = 128 representatives; Y sized to the live lit-voxel count.
+// Replaces the worst-case (4, ceil(CAPACITY/8)=16384, 1) fixed dispatch
+// (ADR 0003 option b).
+//
+// The args buffer's UNORDERED_ACCESS <-> INDIRECT_ARGUMENT flip is no longer done
+// here: this node declares the buffer as IndirectArgument and the presample node
+// declares it as a write, so the graph synthesizes both transitions.
+void VxpgFingerprintPass::RunVisibility(D3D12_GPU_VIRTUAL_ADDRESS tlasVa)
+{
+    if (!IsRunnable() || tlasVa == 0)
+        return;
+
+    auto* cmd = m_commandList.Get();
+
+    ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
+    cmd->SetDescriptorHeaps(_countof(heaps), heaps);
+
     cmd->SetComputeRootSignature(m_visibilityRootSig.Get());
     cmd->SetComputeRootShaderResourceView(0, tlasVa);
     cmd->SetComputeRootUnorderedAccessView(1, m_screenRepresentativePoints->GetGPUVirtualAddress());
@@ -206,19 +224,7 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
     cmd->SetComputeRootUnorderedAccessView(4, m_voxelFingerprints->GetGPUVirtualAddress());
     cmd->SetPipelineState(m_visibilityProgram->GetPipelineState());
 
-    // The args buffer was just written as a UAV; flip it to INDIRECT_ARGUMENT for
-    // the ExecuteIndirect read, then back to UAV so the downstream cluster pass
-    // and next frame's presample see it as a UAV again.
-    m_guidingDispatchArgs->TransitionChecked(cmd,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-
     constexpr uint32_t kVisibilityArgsOffset = 2 * sizeof(DirectX::XMUINT4); // entry [2]
     CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
         m_guidingDispatchArgs->GetUnderlyingResource().Get(), kVisibilityArgsOffset);
-
-    m_guidingDispatchArgs->TransitionChecked(cmd,
-        D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
-    // No tail barrier: gVoxelFingerprints is declared on the graph, so the
-    // cluster pass's read is what triggers it.
 }

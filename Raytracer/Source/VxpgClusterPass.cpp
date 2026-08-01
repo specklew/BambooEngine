@@ -110,10 +110,10 @@ void VxpgClusterPass::CreateCommandSignature()
     m_dispatchCommandSignature->SetName(L"VxpgCluster DispatchCommandSignature");
 }
 
-void VxpgClusterPass::Run(uint32_t frameIndex)
+bool VxpgClusterPass::BindCommon(uint32_t frameIndex)
 {
     if (!m_initialized || !m_voxelPass || !m_buildPass || !m_fingerprintPass)
-        return;
+        return false;
 
     auto* cmd = m_commandList.Get();
 
@@ -131,31 +131,30 @@ void VxpgClusterPass::Run(uint32_t frameIndex)
     cmd->SetComputeRootUnorderedAccessView(6, m_buildPass->GetPremulIrradianceBuffer()->GetGPUVirtualAddress());
     cmd->SetComputeRootUnorderedAccessView(7, m_voxelClusterAssignments->GetGPUVirtualAddress());
 
-    // ---- Kernel 1: k-means++ seeding, one 1024-thread group ----
-    cmd->SetPipelineState(m_seedProgram->GetPipelineState());
+    return true;
+}
+
+// Kernel 1: k-means++ seeding, one 1024-thread group.
+void VxpgClusterPass::RunSeed(uint32_t frameIndex)
+{
+    if (!BindCommon(frameIndex))
+        return;
+
+    m_commandList->SetPipelineState(m_seedProgram->GetPipelineState());
     CommandContext::Get().Dispatch(1, 1, 1);
-    m_clusterCenters->UavBarrier(cmd);
-    m_clusterSeedCompactIds->UavBarrier(cmd);
+}
 
-    // ---- Kernel 2: nearest-center assignment for every compact voxel ----
-    // Dispatched indirectly off gGuidingDispatchArgs[0] = (ceil(litVoxelCount/256),
-    // 1, 1), replacing the worst-case ceil(CAPACITY/256)=512 fixed dispatch
-    // (ADR 0003 option b). The fingerprint presample emitted the count this frame.
-    cmd->SetPipelineState(m_assignProgram->GetPipelineState());
+// Kernel 2: nearest-center assignment for every compact voxel. Dispatched
+// indirectly off gGuidingDispatchArgs[0] = (ceil(litVoxelCount/256), 1, 1),
+// replacing the worst-case ceil(CAPACITY/256)=512 fixed dispatch (ADR 0003
+// option b). The fingerprint presample emitted the count this frame; the args
+// buffer's state flip is declared on this node rather than hand-placed here.
+void VxpgClusterPass::RunAssign(uint32_t frameIndex)
+{
+    if (!BindCommon(frameIndex))
+        return;
 
-    // The args buffer (owned by the fingerprint pass) is currently a UAV; flip it
-    // to INDIRECT_ARGUMENT for the ExecuteIndirect read, then back so the next
-    // frame's presample writes it as a UAV again.
-    auto& argsBuffer = *m_fingerprintPass->GetGuidingDispatchArgsBuffer();
-    argsBuffer.TransitionChecked(cmd,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-
+    m_commandList->SetPipelineState(m_assignProgram->GetPipelineState());
     CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
-        argsBuffer.GetUnderlyingResource().Get(), 0); // entry [0]
-
-    argsBuffer.TransitionChecked(cmd,
-        D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-
-    // No tail barrier: gVoxelClusterAssignments is declared on the graph, so the
-    // cvis and light-tree reads trigger it.
+        m_fingerprintPass->GetGuidingDispatchArgsBuffer()->GetUnderlyingResource().Get(), 0); // entry [0]
 }
