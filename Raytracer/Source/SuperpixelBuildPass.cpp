@@ -193,22 +193,32 @@ void SuperpixelBuildPass::WriteFuzzyIndexUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest)
     m_device->CreateUnorderedAccessView(m_fuzzyIndex.Get(), nullptr, &uav, dest);
 }
 
-void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float posNormalizer)
+void SuperpixelBuildPass::SetFrameInputs(ID3D12Resource* shadingPoints, float weight, float posNormalizer)
+{
+    m_shadingPoints = shadingPoints;
+    m_weight        = weight;
+    m_posNormalizer = posNormalizer;
+}
+
+// Binds the private heap, root signature and constants. Every kernel calls it:
+// separate nodes may have barriers placed between them, so none may inherit
+// another's root state. writeGather selects the association variant.
+bool SuperpixelBuildPass::BindCommon(bool writeGather)
 {
     if (!m_initialized || !m_privateHeap)
-        return;
+        return false;
 
     // Injection may have recreated ShadingPoints (resize / scene change / shader
     // reload); re-point private-heap slot 0 so its descriptor never dangles. Only
     // happens at flush points, so overwriting the live descriptor is safe.
-    if (shadingPoints && shadingPoints != m_boundShadingPoints)
+    if (m_shadingPoints && m_shadingPoints != m_boundShadingPoints)
     {
         D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
         uav.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
         uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        m_device->CreateUnorderedAccessView(shadingPoints, nullptr, &uav,
+        m_device->CreateUnorderedAccessView(m_shadingPoints, nullptr, &uav,
             m_privateHeap->GetCPUDescriptorHandleForHeapStart()); // slot 0 = u_input
-        m_boundShadingPoints = shadingPoints;
+        m_boundShadingPoints = m_shadingPoints;
     }
 
     auto* cmd = m_commandList.Get();
@@ -224,53 +234,51 @@ void SuperpixelBuildPass::Run(ID3D12Resource* shadingPoints, float weight, float
     c.imgW = static_cast<int32_t>(m_width);
     c.imgH = static_cast<int32_t>(m_height);
     c.spixelSize   = static_cast<int32_t>(SP);
-    c.weight       = weight;
+    c.weight       = m_weight;
     c.maxXyDist    = ComputeMaxXyDistSquared();
-    c.maxColorDist = posNormalizer;
-    c.writeGather  = 0;
+    c.maxColorDist = m_posNormalizer;
+    c.writeGather  = writeGather ? 1u : 0u;
+    cmd->SetComputeRoot32BitConstants(0, 12, &c, 0);
 
-    auto setConstants = [&]() { cmd->SetComputeRoot32BitConstants(0, 12, &c, 0); };
-    auto uavBarrier = [&](ID3D12Resource* r) {
-        CommandContext::Get().UavBarrierRaw(r);
-    };
+    return true;
+}
 
-    const uint32_t mapGroupsX = (m_mapX + 7) / 8;
-    const uint32_t mapGroupsY = (m_mapY + 7) / 8;
-    const uint32_t imgGroupsX = (m_width  + 15) / 16;
-    const uint32_t imgGroupsY = (m_height + 15) / 16;
+// Seed centers from tile middle pixels.
+void SuperpixelBuildPass::RunInitSeeds()
+{
+    if (!BindCommon(false))
+        return;
 
-    // Seed centers from tile middle pixels.
-    setConstants();
-    cmd->SetPipelineState(m_initProgram->GetPipelineState());
-    CommandContext::Get().Dispatch(mapGroupsX, mapGroupsY, 1);
-    uavBarrier(m_center.Get());
+    m_commandList->SetPipelineState(m_initProgram->GetPipelineState());
+    CommandContext::Get().Dispatch((m_mapX + 7) / 8, (m_mapY + 7) / 8, 1);
+}
 
-    // Iterate: associate (no gather), then average-update centers.
-    for (uint32_t iter = 0; iter < Constants::Graphics::SUPERPIXEL_ITERATIONS; ++iter)
-    {
-        c.writeGather = 0;
-        setConstants();
-        cmd->SetPipelineState(m_assocProgram->GetPipelineState());
-        CommandContext::Get().Dispatch(imgGroupsX, imgGroupsY, 1);
-        uavBarrier(m_index.Get());
+// Assign each pixel to its nearest center. The final pass sets writeGather so it
+// also emits the per-superpixel pixel lists, consistent with converged centers.
+void SuperpixelBuildPass::RunAssociate(bool writeGather)
+{
+    if (!BindCommon(writeGather))
+        return;
 
-        cmd->SetPipelineState(m_sumProgram->GetPipelineState());
-        CommandContext::Get().Dispatch(m_mapX, m_mapY, 1);
-        uavBarrier(m_center.Get());
-    }
+    m_commandList->SetPipelineState(m_assocProgram->GetPipelineState());
+    CommandContext::Get().Dispatch((m_width + 15) / 16, (m_height + 15) / 16, 1);
+}
 
-    // Clear the counter, then a final association that also emits gather lists,
-    // consistent with the converged centers.
-    cmd->SetPipelineState(m_clearProgram->GetPipelineState());
-    CommandContext::Get().Dispatch(mapGroupsX, mapGroupsY, 1);
-    uavBarrier(m_counter.Get());
+// Average-update the centers from the current assignment.
+void SuperpixelBuildPass::RunSumCenters()
+{
+    if (!BindCommon(false))
+        return;
 
-    c.writeGather = 1;
-    setConstants();
-    cmd->SetPipelineState(m_assocProgram->GetPipelineState());
-    CommandContext::Get().Dispatch(imgGroupsX, imgGroupsY, 1);
+    m_commandList->SetPipelineState(m_sumProgram->GetPipelineState());
+    CommandContext::Get().Dispatch(m_mapX, m_mapY, 1);
+}
 
-    // No tail barriers: every output is declared on the graph, so the
-    // cluster-visibility pass's and the integrator's reads trigger them. The
-    // barriers above stay — those order this pass's own SLIC iterations.
+void SuperpixelBuildPass::RunClearCounter()
+{
+    if (!BindCommon(false))
+        return;
+
+    m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
+    CommandContext::Get().Dispatch((m_mapX + 7) / 8, (m_mapY + 7) / 8, 1);
 }

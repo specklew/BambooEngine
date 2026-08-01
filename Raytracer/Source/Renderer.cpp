@@ -1706,26 +1706,62 @@ void Renderer::BuildVxpgGraph()
 			[this, frame]() { m_clusterPass->RunAssign(frame); });
 	}
 
-	// Stage 6: SLIC superpixel clustering over the ShadingPoints G-buffer.
+	// Stage 6: SLIC superpixel clustering over the ShadingPoints G-buffer, one node
+	// per kernel. The iteration count is a constant, so the loop is unrolled into
+	// nodes and each iteration gets its own timing row.
 	if (m_superpixelBuildPass)
 	{
-		m_renderGraph.AddPass("VXPG Superpixel",
+		m_superpixelBuildPass->SetFrameInputs(
+			m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
+			g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
+
+		m_renderGraph.AddPass("VXPG Superpixel InitSeeds",
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Read(m_vxpg.shadingPoints, kUavRead);
-				pass.Write(m_vxpg.superpixelIndex, kUavWrite);
 				pass.Write(m_vxpg.superpixelCenter, kUavWrite);
+			},
+			[this]() { m_superpixelBuildPass->RunInitSeeds(); });
+
+		for (uint32_t iteration = 0; iteration < Constants::Graphics::SUPERPIXEL_ITERATIONS; ++iteration)
+		{
+			m_renderGraph.AddPass(("VXPG Superpixel Associate " + std::to_string(iteration)).c_str(),
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.Read(m_vxpg.shadingPoints, kUavRead);
+					pass.Read(m_vxpg.superpixelCenter, kUavRead);
+					pass.Write(m_vxpg.superpixelIndex, kUavWrite);
+				},
+				[this]() { m_superpixelBuildPass->RunAssociate(/*writeGather*/ false); });
+
+			m_renderGraph.AddPass(("VXPG Superpixel SumCenters " + std::to_string(iteration)).c_str(),
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.Read(m_vxpg.shadingPoints, kUavRead);
+					pass.Read(m_vxpg.superpixelIndex, kUavRead);
+					pass.Write(m_vxpg.superpixelCenter, kUavWrite);
+				},
+				[this]() { m_superpixelBuildPass->RunSumCenters(); });
+		}
+
+		m_renderGraph.AddPass("VXPG Superpixel ClearCounter",
+			[&](RenderGraphPassBuilder& pass) { pass.Write(m_vxpg.superpixelCounter, kUavWrite); },
+			[this]() { m_superpixelBuildPass->RunClearCounter(); });
+
+		// Final association against the converged centers, this one also emitting
+		// the per-superpixel pixel lists and the fuzzy 4-nearest blend.
+		m_renderGraph.AddPass("VXPG Superpixel Gather",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(m_vxpg.shadingPoints, kUavRead);
+				pass.Read(m_vxpg.superpixelCenter, kUavRead);
+				pass.Write(m_vxpg.superpixelIndex, kUavWrite);
 				pass.Write(m_vxpg.superpixelCounter, kUavWrite);
 				pass.Write(m_vxpg.superpixelGathered, kUavWrite);
 				pass.Write(m_vxpg.superpixelFuzzyWeight, kUavWrite);
 				pass.Write(m_vxpg.superpixelFuzzyIndex, kUavWrite);
 			},
-			[this]()
-			{
-				m_superpixelBuildPass->Run(
-					m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
-					g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
-			});
+			[this]() { m_superpixelBuildPass->RunAssociate(/*writeGather*/ true); });
 	}
 
 	// Stage 7: per-superpixel x per-cluster soft visibility (cvis), one node per

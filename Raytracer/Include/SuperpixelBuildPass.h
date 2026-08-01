@@ -19,9 +19,17 @@ public:
     // the injection ShadingPoints UAV). Call after LightInjectionPass::OnResize.
     void OnResize(uint32_t width, uint32_t height, ID3D12Resource* shadingPoints);
 
-    // shadingPoints is re-pointed into the private heap if it changed since the last
-    // call (injection recreates it on resize/scene change/shader reload).
-    void Run(ID3D12Resource* shadingPoints, float weight, float posNormalizer);
+    // Frame inputs, set once before the nodes are added. shadingPoints is
+    // re-pointed into the private heap if it changed since the last call
+    // (injection recreates it on resize/scene change/shader reload).
+    void SetFrameInputs(ID3D12Resource* shadingPoints, float weight, float posNormalizer);
+
+    // One graph node per SLIC kernel: init -> N x (associate, sum) -> clear
+    // counter -> final associate with gather.
+    void RunInitSeeds();
+    void RunAssociate(bool writeGather);
+    void RunSumCenters();
+    void RunClearCounter();
 
     // Debug views read these from the main heap; Renderer writes the UAVs on resize.
     void WriteIndexUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
@@ -42,6 +50,9 @@ public:
     uint32_t GetMapY() const { return m_mapY; }
 
 private:
+    // Binds heap + root signature + constants; false = cannot run.
+    bool BindCommon(bool writeGather);
+
     void CreateRootSignature();
     void CreatePSOs();
     void CreateBuffers();
@@ -66,6 +77,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_fuzzyIndex;   // screen    RGBA32_SINT
 
     ID3D12Resource* m_boundShadingPoints = nullptr; // raw: lifetime owned by injection
+    ID3D12Resource* m_shadingPoints      = nullptr; // this frame's input
+    float           m_weight             = 0.0f;
+    float           m_posNormalizer      = 0.0f;
 
     uint32_t m_width  = 0;
     uint32_t m_height = 0;
