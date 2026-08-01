@@ -175,5 +175,5 @@ void VBufferPass::Render()
     m_commandList->SetPipelineState1(m_rtStateObject.Get());
     CommandContext::Get().DispatchRays(desc);
 
-    CommandContext::Get().UavBarrierRaw(m_vbufferTex.Get());
+    // No tail barrier: the graph emits it from the consumer's declaration.
 }

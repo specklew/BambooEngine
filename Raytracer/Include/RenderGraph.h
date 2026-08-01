@@ -18,8 +18,10 @@ inline constexpr GraphResourceHandle InvalidGraphResource = ~0u;
 // barrier needs; a Write followed by a Read is the edge that orders two passes.
 enum class GraphAccess
 {
-    ComputeRead,      // NON_PIXEL_SHADER_RESOURCE
-    ComputeWrite,     // UNORDERED_ACCESS
+    ComputeRead,          // NON_PIXEL_SHADER_RESOURCE
+    ComputeWrite,         // UNORDERED_ACCESS
+    UnorderedAccessRead,  // read through a UAV binding — same state, still needs
+                          // a UAV barrier after a writer (the VXPG textures)
     PixelRead,        // PIXEL_SHADER_RESOURCE
     RenderTarget,
     DepthWrite,

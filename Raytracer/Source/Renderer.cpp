@@ -514,6 +514,9 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	const VxpgStage vxpgStage = m_rasterize
 		? StageFor(g_rasterizationDebugMode.Get())
 		: (m_raytracePass ? m_raytracePass->RequiredVxpgStage() : VxpgStage::None);
+	// The frame's graph starts here: VXPG nodes first, then (in raytracing mode)
+	// the integrator and present chain appended below.
+	m_renderGraph.Reset();
 	RunVxpgPipelineUpTo(vxpgStage);
 
 	SetViewport();
@@ -553,6 +556,10 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	
 	if (m_rasterize)
 	{
+		// Raster draws are not graph nodes yet (phase 5), so the VXPG subgraph
+		// they read from has to run first.
+		m_renderGraph.Execute(CommandContext::Get());
+
 		ID3D12DescriptorHeap* descriptorHeaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
 
 		m_d3d12CommandList->SetPipelineState(m_pipelineStateObject.Get());
@@ -605,7 +612,6 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		const bool accumulate   = g_accumulationEnabled.Get() != 0;
 		Texture& tonemapInput   = accumulate ? m_accumulationPass->GetDisplayBuffer() : raytraceOutput;
 
-		m_renderGraph.Reset();
 		const GraphResourceHandle raytraceOutputHandle = m_renderGraph.Import(raytraceOutput, "Raytrace Output");
 		const GraphResourceHandle tonemapInputHandle   = m_renderGraph.Import(tonemapInput, "Tonemap Input");
 		const GraphResourceHandle tonemapOutputHandle  = m_renderGraph.Import(m_postProcessPass->GetOutputBuffer(), "PostProcess Output");
@@ -1428,16 +1434,39 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 
 	// Stage 2: shared VBuffer (one jittered primary per pixel, ADR 0004), then
 	// light injection reconstructing its first vertex from it (also emits the
-	// ShadingPoints G-buffer).
+	// ShadingPoints G-buffer). Both are graph nodes: the VBuffer -> injection and
+	// injection -> superpixel/fingerprint hazards come from the declarations.
+	const GraphResourceHandle vbufferHandle = m_vbufferPass
+		? m_renderGraph.ImportRaw(m_vbufferPass->GetVBufferTexture().Get(), "VXPG VBuffer")
+		: InvalidGraphResource;
+	const GraphResourceHandle shadingPointsHandle = m_lightInjectionPass
+		? m_renderGraph.ImportRaw(m_lightInjectionPass->GetShadingPointsTexture().Get(), "VXPG ShadingPoints")
+		: InvalidGraphResource;
+
 	if (stage >= VxpgStage::Inject && m_vbufferPass)
 	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG VBuffer");
-		m_vbufferPass->Render();
+		m_renderGraph.AddPass("VXPG VBuffer",
+			[&](RenderGraphPassBuilder& pass) { pass.Write(vbufferHandle, GraphAccess::ComputeWrite); },
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG VBuffer");
+				m_vbufferPass->Render();
+			});
 	}
 	if (stage >= VxpgStage::Inject && m_lightInjectionPass)
 	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightInjection");
-		m_lightInjectionPass->Render();
+		m_renderGraph.AddPass("VXPG LightInjection",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				if (vbufferHandle != InvalidGraphResource)
+					pass.Read(vbufferHandle, GraphAccess::UnorderedAccessRead);
+				pass.Write(shadingPointsHandle, GraphAccess::ComputeWrite);
+			},
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightInjection");
+				m_lightInjectionPass->Render();
+			});
 	}
 
 	// Stage 3: build the guiding distribution from the injected voxels
@@ -1453,10 +1482,19 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	// -> per-voxel visibility mask via inline shadow rays).
 	if (stage >= VxpgStage::Fingerprint && m_fingerprintPass && m_scene)
 	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Fingerprint");
-		auto tlas = m_scene->GetAccelerationStructures()->GetTopLevelAS().p_result;
-		m_fingerprintPass->Run(tlas ? tlas->GetGPUVirtualAddress() : 0,
-			m_passConstants->data.frameIndex);
+		m_renderGraph.AddPass("VXPG Fingerprint",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				if (shadingPointsHandle != InvalidGraphResource)
+					pass.Read(shadingPointsHandle, GraphAccess::UnorderedAccessRead);
+			},
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Fingerprint");
+				auto tlas = m_scene->GetAccelerationStructures()->GetTopLevelAS().p_result;
+				m_fingerprintPass->Run(tlas ? tlas->GetGPUVirtualAddress() : 0,
+					m_passConstants->data.frameIndex);
+			});
 	}
 
 	// Stage 5: k-means++ cluster the fingerprinted voxels into 32 supervoxels.
@@ -1469,10 +1507,19 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	// Stage 6: SLIC superpixel clustering over the ShadingPoints G-buffer.
 	if (stage >= VxpgStage::Superpixel && m_superpixelBuildPass)
 	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Superpixel");
-		m_superpixelBuildPass->Run(
-			m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
-			g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
+		m_renderGraph.AddPass("VXPG Superpixel",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				if (shadingPointsHandle != InvalidGraphResource)
+					pass.Read(shadingPointsHandle, GraphAccess::UnorderedAccessRead);
+			},
+			[this]()
+			{
+				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Superpixel");
+				m_superpixelBuildPass->Run(
+					m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
+					g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
+			});
 	}
 
 	// Stage 7: per-superpixel x per-cluster soft visibility (cvis).

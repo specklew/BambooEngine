@@ -19,8 +19,9 @@ D3D12_RESOURCE_STATES RenderGraph::ToResourceState(GraphAccess access)
 {
     switch (access)
     {
-    case GraphAccess::ComputeRead:      return D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-    case GraphAccess::ComputeWrite:     return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    case GraphAccess::ComputeRead:        return D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    case GraphAccess::ComputeWrite:
+    case GraphAccess::UnorderedAccessRead: return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     case GraphAccess::PixelRead:        return D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
     case GraphAccess::RenderTarget:     return D3D12_RESOURCE_STATE_RENDER_TARGET;
     case GraphAccess::DepthWrite:       return D3D12_RESOURCE_STATE_DEPTH_WRITE;
@@ -85,11 +86,10 @@ void RenderGraph::Execute(CommandContext& context)
             ImportedResource& imported = m_resources[declaration.resource];
             const D3D12_RESOURCE_STATES required = ToResourceState(declaration.access);
 
-            // Write-after-write on the same state is a hazard the transition
-            // cannot express: consecutive UAV writers need a UAV barrier.
+            // Hazards a transition cannot express: another UAV access after a UAV
+            // write — whether the next access reads or writes — needs a UAV barrier.
             const bool needsUavBarrier = required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS &&
                                          imported.hasStateInGraph &&
-                                         imported.stateInGraph == required &&
                                          imported.writtenSinceLastRead;
 
             if (needsUavBarrier)
