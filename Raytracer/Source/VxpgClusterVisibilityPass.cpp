@@ -142,11 +142,11 @@ void VxpgClusterVisibilityPass::OnResize(uint32_t width, uint32_t height)
     CreateResolutionBuffers();
 }
 
-void VxpgClusterVisibilityPass::Run(uint32_t frameIndex)
+bool VxpgClusterVisibilityPass::BindCommon(uint32_t frameIndex)
 {
     if (!m_initialized || !m_scene || !m_voxelPass || !m_buildPass ||
         !m_clusterPass || !m_superpixelPass || m_mapX == 0)
-        return;
+        return false;
 
     auto* cmd = m_commandList.Get();
 
@@ -172,31 +172,37 @@ void VxpgClusterVisibilityPass::Run(uint32_t frameIndex)
     cmd->SetComputeRootUnorderedAccessView(8, m_clusterLightPointCounts->GetGPUVirtualAddress());
     cmd->SetComputeRootUnorderedAccessView(9, m_avgVisibility->GetGPUVirtualAddress());
 
-    auto maskBarrier = [&]() {
-        CommandContext::Get().UavBarrierRaw(m_mask.Get());
-    };
+    return true;
+}
 
-    // ---- Clear ----
-    cmd->SetPipelineState(m_clearProgram->GetPipelineState());
+void VxpgClusterVisibilityPass::RunClear(uint32_t frameIndex)
+{
+    if (!BindCommon(frameIndex))
+        return;
+
+    m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
     CommandContext::Get().Dispatch((m_mapX + 15) / 16, (m_mapY + 15) / 16, 1);
-    maskBarrier();
-    m_clusterLightPointCounts->UavBarrier(cmd);
-    m_avgVisibility->UavBarrier(cmd);
+}
 
-    // ---- Gather: file VPLs into cluster drawers + seed mask bits ----
-    cmd->SetPipelineState(m_gatherProgram->GetPipelineState());
+// File each pixel's VPL into its cluster drawer and seed the mask bits for the
+// connections it already proves.
+void VxpgClusterVisibilityPass::RunGather(uint32_t frameIndex)
+{
+    if (!BindCommon(frameIndex))
+        return;
+
+    m_commandList->SetPipelineState(m_gatherProgram->GetPipelineState());
     CommandContext::Get().Dispatch((m_width + 15) / 16, (m_height + 15) / 16, 1);
-    maskBarrier();
-    m_clusterGatheredLightPoints->UavBarrier(cmd);
-    m_clusterLightPointCounts->UavBarrier(cmd);
+}
 
-    // ---- Check: shadow-ray probes -> soft avg-visibility + mask ----
-    // Dispatch covers mapX superpixels wide (32 sample lanes each) and mapY*4
-    // groups tall (8 clusters per group x 4 = 32 clusters per superpixel row).
-    cmd->SetPipelineState(m_checkProgram->GetPipelineState());
+// Shadow-ray probes -> soft avg-visibility + mask. The dispatch covers mapX
+// superpixels wide (32 sample lanes each) and mapY*4 groups tall (8 clusters per
+// group x 4 = 32 clusters per superpixel row).
+void VxpgClusterVisibilityPass::RunCheck(uint32_t frameIndex)
+{
+    if (!BindCommon(frameIndex))
+        return;
+
+    m_commandList->SetPipelineState(m_checkProgram->GetPipelineState());
     CommandContext::Get().Dispatch(m_mapX, m_mapY * 4, 1);
-
-    // No tail barriers: the mask and avg-visibility buffers are declared on the
-    // graph, so the light tree's and the integrator's reads trigger them. The
-    // barriers above stay — those hazards are between this pass's own kernels.
 }

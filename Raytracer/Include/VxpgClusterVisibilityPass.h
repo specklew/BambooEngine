@@ -38,17 +38,27 @@ public:
 
     void OnResize(uint32_t width, uint32_t height);
 
-    void Run(uint32_t frameIndex);
+    // One graph node per kernel: the clear -> gather -> check ordering comes from
+    // the declarations rather than hand-placed barriers.
+    void RunClear(uint32_t frameIndex);
+    void RunGather(uint32_t frameIndex);
+    void RunCheck(uint32_t frameIndex);
 
     // Mask read by guided PT debug view 10 (Renderer writes its global-heap UAV).
     ID3D12Resource* GetMaskResource() const { return m_mask.Get(); }
     RWStructuredBuffer<float>* GetAvgVisibilityBuffer() const { return m_avgVisibility.get(); }
+    RWStructuredBuffer<DirectX::XMFLOAT4>* GetClusterGatheredLightPointsBuffer() const { return m_clusterGatheredLightPoints.get(); }
+    RWStructuredBuffer<uint32_t>* GetClusterLightPointCountsBuffer() const { return m_clusterLightPointCounts.get(); }
 
 private:
     void CreateFixedBuffers();
     void CreateResolutionBuffers();
     void CreateRootSignature();
     void CreatePSOs();
+
+    // Every kernel re-binds: separate nodes may have barriers placed between
+    // them, so none may inherit another's root state. False = cannot run.
+    bool BindCommon(uint32_t frameIndex);
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;

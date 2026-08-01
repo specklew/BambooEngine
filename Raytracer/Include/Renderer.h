@@ -178,6 +178,8 @@ private:
 		GraphResourceHandle superpixelFuzzyIndex  = InvalidGraphResource;
 		GraphResourceHandle clusterVisibilityMask = InvalidGraphResource;
 		GraphResourceHandle avgVisibility        = InvalidGraphResource;
+		GraphResourceHandle clusterGatheredLightPoints = InvalidGraphResource;
+		GraphResourceHandle clusterLightPointCounts    = InvalidGraphResource;
 		GraphResourceHandle lightTreeNodes       = InvalidGraphResource;
 		GraphResourceHandle lightTreeCompactToLeaf = InvalidGraphResource;
 		GraphResourceHandle lightTreeClusterRoots  = InvalidGraphResource;

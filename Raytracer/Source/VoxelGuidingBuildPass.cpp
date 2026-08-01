@@ -142,12 +142,12 @@ void VoxelGuidingBuildPass::CreatePSOs()
         "resources/shaders/voxelGuidingBuild.compact.shader", L"VoxelGuiding Compact PSO");
 }
 
-void VoxelGuidingBuildPass::Run(ID3D12Resource* representativeTex)
+bool VoxelGuidingBuildPass::BindCommon()
 {
     if (!m_initialized || !m_voxelPass)
-        return;
+        return false;
 
-    RebindDescriptorsIfChanged(representativeTex);
+    RebindDescriptorsIfChanged(m_representativeTex);
 
     const uint32_t gridDim = m_voxelPass->GetGridDim();
 
@@ -168,22 +168,35 @@ void VoxelGuidingBuildPass::Run(ID3D12Resource* representativeTex)
     m_commandList->SetComputeRootUnorderedAccessView(9,  m_voxelPass->GetBakedBoundMinBuffer()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootUnorderedAccessView(10, m_voxelPass->GetBakedBoundMaxBuffer()->GetGPUVirtualAddress());
 
-    auto* cmd = m_commandList.Get();
-    const uint32_t groups = (gridDim + 7) / 8;
+    return true;
+}
+
+void VoxelGuidingBuildPass::RunClear()
+{
+    if (!BindCommon())
+        return;
 
     m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
     CommandContext::Get().Dispatch(1, 1, 1);
-    m_counters->UavBarrier(cmd);
+}
 
-    // Reload baked bounds for lit voxels before compaction reads them.
+// Reload baked bounds for lit voxels before compaction reads them.
+void VoxelGuidingBuildPass::RunReload()
+{
+    if (!BindCommon())
+        return;
+
+    const uint32_t groups = (m_voxelPass->GetGridDim() + 7) / 8;
     m_commandList->SetPipelineState(m_reloadProgram->GetPipelineState());
     CommandContext::Get().Dispatch(groups, groups, groups);
-    m_liveBoundMin->UavBarrier(cmd);
-    m_liveBoundMax->UavBarrier(cmd);
+}
 
+void VoxelGuidingBuildPass::RunCompact()
+{
+    if (!BindCommon())
+        return;
+
+    const uint32_t groups = (m_voxelPass->GetGridDim() + 7) / 8;
     m_commandList->SetPipelineState(m_compactProgram->GetPipelineState());
     CommandContext::Get().Dispatch(groups, groups, groups);
-
-    // No tail barriers: every buffer this pass produces is declared on the graph,
-    // so the reader's declaration is what triggers them.
 }

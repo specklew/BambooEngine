@@ -20,9 +20,15 @@ public:
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
         std::shared_ptr<VoxelizationPass>                  voxelPass);
 
-    // representativeTex = injection's per-voxel representative VPL Texture3D;
-    // re-bound into the private heap when it changes (recreated on resize).
-    void Run(ID3D12Resource* representativeTex);
+    // One graph node per kernel, so the hazards between them come from the
+    // declarations instead of hand-placed barriers. representativeTex is the
+    // injection pass's per-voxel representative VPL Texture3D, re-bound into the
+    // private heap when it changes (recreated on resize); the renderer hands it
+    // over once per frame and every kernel binds from there.
+    void SetRepresentativeTexture(ID3D12Resource* representativeTex) { m_representativeTex = representativeTex; }
+    void RunClear();
+    void RunReload();
+    void RunCompact();
 
     // Recreates the grid-sized buffers after a voxel-grid resize. Caller must
     // have flushed the GPU first (the old buffers may be in flight).
@@ -45,6 +51,11 @@ private:
     void CreateRootSignature();
     void CreatePSOs();
 
+    // Every kernel re-binds: separate nodes may be reordered or have barriers
+    // placed between them, so none of them may inherit another's root state.
+    // Returns false when the pass cannot run this frame.
+    bool BindCommon();
+
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
     std::shared_ptr<VoxelizationPass>                  m_voxelPass;
@@ -62,6 +73,7 @@ private:
     ID3D12Resource* m_boundIrradiance     = nullptr; // raw: change detection only
     ID3D12Resource* m_boundVplCount       = nullptr;
     ID3D12Resource* m_boundRepresentative = nullptr;
+    ID3D12Resource* m_representativeTex   = nullptr; // owned by the injection pass
 
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
     ComputeProgram* m_clearProgram = nullptr;

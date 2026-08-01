@@ -1546,6 +1546,8 @@ void Renderer::BuildVxpgGraph()
 	{
 		m_vxpg.clusterVisibilityMask = importRaw(m_clusterVisibilityPass->GetMaskResource(), "VXPG ClusterVisibilityMask");
 		m_vxpg.avgVisibility         = importBuffer(m_clusterVisibilityPass->GetAvgVisibilityBuffer(), "VXPG AvgVisibility");
+		m_vxpg.clusterGatheredLightPoints = importBuffer(m_clusterVisibilityPass->GetClusterGatheredLightPointsBuffer(), "VXPG ClusterGatheredLightPoints");
+		m_vxpg.clusterLightPointCounts    = importBuffer(m_clusterVisibilityPass->GetClusterLightPointCountsBuffer(), "VXPG ClusterLightPointCounts");
 	}
 	if (m_lightTreePass)
 	{
@@ -1587,29 +1589,45 @@ void Renderer::BuildVxpgGraph()
 			[this]() { m_lightInjectionPass->Render(); });
 	}
 
-	// Stage 3: build the guiding distribution from the injected voxels
-	// (reload baked bounds -> compact -> CDF).
+	// Stage 3: build the guiding distribution from the injected voxels. One node
+	// per kernel (clear -> reload baked bounds -> compact), so the ordering
+	// between them comes from these declarations rather than hand-placed barriers.
 	if (m_voxelGuidingBuildPass)
 	{
-		m_renderGraph.AddPass("VXPG GuidingBuild",
+		m_voxelGuidingBuildPass->SetRepresentativeTexture(
+			m_lightInjectionPass ? m_lightInjectionPass->GetVoxelRepresentativeTexture().Get() : nullptr);
+
+		m_renderGraph.AddPass("VXPG GuidingBuild Clear",
+			[&](RenderGraphPassBuilder& pass) { pass.Write(m_vxpg.counters, kUavWrite); },
+			[this]() { m_voxelGuidingBuildPass->RunClear(); });
+
+		m_renderGraph.AddPass("VXPG GuidingBuild Reload",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(m_vxpg.voxelIrradiance, kUavRead);
+				pass.Read(m_vxpg.voxelVplCount, kUavRead);
+				pass.Write(m_vxpg.liveBoundMin, kUavWrite);
+				pass.Write(m_vxpg.liveBoundMax, kUavWrite);
+			},
+			[this]() { m_voxelGuidingBuildPass->RunReload(); });
+
+		m_renderGraph.AddPass("VXPG GuidingBuild Compact",
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Read(m_vxpg.voxelIrradiance, kUavRead);
 				pass.Read(m_vxpg.voxelVplCount, kUavRead);
 				pass.Read(m_vxpg.voxelRepresentative, kUavRead);
+				pass.Read(m_vxpg.liveBoundMin, kUavRead);
+				pass.Read(m_vxpg.liveBoundMax, kUavRead);
+				// Appends through the counter the clear node zeroed, so the write
+				// declaration is what orders it against that node.
 				pass.Write(m_vxpg.counters, kUavWrite);
 				pass.Write(m_vxpg.compactIds, kUavWrite);
 				pass.Write(m_vxpg.inverseIndex, kUavWrite);
 				pass.Write(m_vxpg.compactLightPoints, kUavWrite);
 				pass.Write(m_vxpg.premulIrradiance, kUavWrite);
-				pass.Write(m_vxpg.liveBoundMin, kUavWrite);
-				pass.Write(m_vxpg.liveBoundMax, kUavWrite);
 			},
-			[this]()
-			{
-				m_voxelGuidingBuildPass->Run(
-					m_lightInjectionPass ? m_lightInjectionPass->GetVoxelRepresentativeTexture().Get() : nullptr);
-			});
+			[this]() { m_voxelGuidingBuildPass->RunCompact(); });
 	}
 
 	// Stage 4: fingerprint every lit voxel (128 stratified screen representatives
@@ -1669,22 +1687,45 @@ void Renderer::BuildVxpgGraph()
 			});
 	}
 
-	// Stage 7: per-superpixel x per-cluster soft visibility (cvis).
+	// Stage 7: per-superpixel x per-cluster soft visibility (cvis), one node per
+	// kernel (clear -> gather -> check).
 	if (m_clusterVisibilityPass)
 	{
-		m_renderGraph.AddPass("VXPG ClusterVisibility",
+		const uint32_t frame = m_passConstants->data.frameIndex;
+
+		m_renderGraph.AddPass("VXPG ClusterVisibility Clear",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Write(m_vxpg.clusterVisibilityMask, kUavWrite);
+				pass.Write(m_vxpg.clusterLightPointCounts, kUavWrite);
+				pass.Write(m_vxpg.avgVisibility, kUavWrite);
+			},
+			[this, frame]() { m_clusterVisibilityPass->RunClear(frame); });
+
+		m_renderGraph.AddPass("VXPG ClusterVisibility Gather",
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Read(m_vxpg.vplPosition, kUavRead);
 				pass.Read(m_vxpg.vbuffer, kUavRead);
 				pass.Read(m_vxpg.clusterAssignments, kUavRead);
 				pass.Read(m_vxpg.superpixelIndex, kUavRead);
+				pass.Write(m_vxpg.clusterVisibilityMask, kUavWrite);
+				pass.Write(m_vxpg.clusterGatheredLightPoints, kUavWrite);
+				pass.Write(m_vxpg.clusterLightPointCounts, kUavWrite);
+			},
+			[this, frame]() { m_clusterVisibilityPass->RunGather(frame); });
+
+		m_renderGraph.AddPass("VXPG ClusterVisibility Check",
+			[&](RenderGraphPassBuilder& pass)
+			{
 				pass.Read(m_vxpg.superpixelGathered, kUavRead);
 				pass.Read(m_vxpg.superpixelCounter, kUavRead);
+				pass.Read(m_vxpg.clusterGatheredLightPoints, kUavRead);
+				pass.Read(m_vxpg.clusterLightPointCounts, kUavRead);
 				pass.Write(m_vxpg.clusterVisibilityMask, kUavWrite);
 				pass.Write(m_vxpg.avgVisibility, kUavWrite);
 			},
-			[this]() { m_clusterVisibilityPass->Run(m_passConstants->data.frameIndex); });
+			[this, frame]() { m_clusterVisibilityPass->RunCheck(frame); });
 	}
 
 	// Stage 8: bottom light tree (Karras LBVH over lit voxels: encode -> sort ->
