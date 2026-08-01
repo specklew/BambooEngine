@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 
+#include "RenderGraph.h"
 #include "StatesPanel.h"
 
 class Camera;
@@ -34,10 +35,15 @@ public:
 	void SetScreenshotRequestCallback(std::function<void(float, std::string, std::string)> callback) { m_onScreenshotRequest = std::move(callback); }
 	void SetScreenshotPendingGetter(std::function<bool()> getter)          { m_isScreenshotPending = std::move(getter); }
 	void SetStatesManager(std::shared_ptr<StatesManager> mgr) { m_statesManager = std::move(mgr); }
+	void SetRenderGraphTimingsGetter(std::function<const std::vector<RenderGraph::PassTiming>&()> getter)
+	{
+		m_renderGraphTimings = std::move(getter);
+	}
 	int  GetCurrentTechniqueIndex() const { return m_currentTechniqueIndex; }
 
 private:
 	void DrawDebugPanel();
+	void DrawRenderGraphSection();
 	void DrawLightsPanel();
 	void DrawSkyboxSection();
 	void DrawSceneSection();
@@ -55,6 +61,7 @@ private:
 	int m_currentTechniqueIndex = 0;
 	std::function<void(float, std::string, std::string)> m_onScreenshotRequest;
 	std::function<bool()>      m_isScreenshotPending;
+	std::function<const std::vector<RenderGraph::PassTiming>&()> m_renderGraphTimings;
 	float m_screenshotSeconds = 1.0f;
 
 	std::shared_ptr<StatesManager> m_statesManager;

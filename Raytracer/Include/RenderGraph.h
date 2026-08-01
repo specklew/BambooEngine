@@ -108,6 +108,20 @@ public:
     // Off by default — building the strings costs an allocation per barrier.
     void SetBarrierLogging(bool enabled) { m_logBarriers = enabled; }
 
+    // Per-pass GPU timing. Two timestamps per surviving node plus one
+    // ResolveQueryData per frame, so it stays opt-in: benchmark runs must not pay
+    // for it. Call ResolveTimings() once the GPU has finished the frame.
+    void InitializeTimers(ID3D12Device* device, ID3D12CommandQueue* queue);
+    void SetTimingEnabled(bool enabled) { m_timingEnabled = enabled && m_timerQueryHeap != nullptr; }
+    void ResolveTimings();
+
+    struct PassTiming
+    {
+        std::string name;
+        float       milliseconds;
+    };
+    [[nodiscard]] const std::vector<PassTiming>& GetTimings() const { return m_timings; }
+
     // Barrier attribution for a perf delta (ADR 0017: this exists to explain a
     // regression, not to gate on byte-identical output).
     [[nodiscard]] std::string DumpBarriers() const;
@@ -164,9 +178,20 @@ private:
 
     void Cull();
 
+    // Two timestamps per node; the cap is the node budget one frame may time.
+    static constexpr uint32_t kMaxTimedPasses = 64;
+
     std::vector<ImportedResource> m_resources;
     std::vector<PassNode>         m_passes;
     std::vector<CompiledPass>     m_compiled;
     std::vector<std::string>      m_barrierLog;
     bool                          m_logBarriers = false;
+
+    Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timerQueryHeap;
+    Microsoft::WRL::ComPtr<ID3D12Resource>  m_timerReadback;
+    uint64_t                                m_timerFrequency = 0;
+    bool                                    m_timingEnabled  = false;
+    uint32_t                                m_timedPassCount = 0;
+    std::vector<std::string>                m_timedPassNames;
+    std::vector<PassTiming>                 m_timings;
 };

@@ -99,6 +99,9 @@ static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enab
 // One-shot: set to 1 to log the next frame's graph (nodes, declarations, the
 // barriers they synthesized), then it clears itself.
 static AutoCVarInt   g_dumpRenderGraph("rdg.dump", "Log the next frame's render graph and its synthesized barriers", 0, CVarFlags::EditCheckbox);
+// Off by default: two timestamps per node plus a resolve is real per-frame cost,
+// and benchmark runs must measure the renderer, not the instrumentation.
+static AutoCVarInt   g_renderGraphTimings("rdg.timings", "Measure each render-graph node on the GPU (ImGui: Render Graph)", 0, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_exposure("renderer.postprocess.exposure","Exposure multiplier applied before display", 1.0f, CVarFlags::EditDrag, 0.0f, 10.0f);
 static AutoCVarFloat g_contrast("renderer.postprocess.contrast", "Pre-ACES contrast power curve", 1.0f, CVarFlags::EditDrag, 0.1f, 3.0f);
 static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES saturation", 1.0f, CVarFlags::EditDrag, 0.0f, 2.0f);
@@ -200,7 +203,9 @@ void Renderer::Initialize()
 
 	CreateCommandList();
 	ResetCommandList();
-	
+
+	m_renderGraph.InitializeTimers(g_device.Get(), m_graphicsDevice->GetCommandQueue().Get());
+
 	CreateRTVDescriptorHeap();
 	CreateRenderTargetViews();
 
@@ -517,6 +522,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	// actually run is decided by culling, from what the frame's consumer declares.
 	m_renderGraph.Reset();
 	m_renderGraph.SetBarrierLogging(g_dumpRenderGraph.Get() != 0);
+	m_renderGraph.SetTimingEnabled(g_renderGraphTimings.Get() != 0);
 	BuildVxpgGraph();
 
 	SetViewport();
@@ -574,7 +580,6 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 		m_renderGraph.Compile();
 		m_renderGraph.Execute(CommandContext::Get());
-		DumpRenderGraphIfRequested();
 
 		ID3D12DescriptorHeap* descriptorHeaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
 
@@ -703,7 +708,6 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 		m_renderGraph.Compile();
 		m_renderGraph.Execute(CommandContext::Get());
-		DumpRenderGraphIfRequested();
 
 		// Restore main descriptor heap for ImGui (post-process pass may have changed it)
 		ID3D12DescriptorHeap* mainHeaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
@@ -729,6 +733,12 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	FlushCommandQueue();
 	ResetCommandList();
+
+	// Same guarantee the screenshot readback relies on: the GPU is done, so the
+	// timestamp readback buffer holds this frame's values. The dump runs after it
+	// so a single one-shot dump carries the node costs of the frame it describes.
+	m_renderGraph.ResolveTimings();
+	DumpRenderGraphIfRequested();
 
 	// Map readback buffer and write PNG; GPU is guaranteed done after FlushCommandQueue
 	if (m_screenshotManager->IsCaptureDue())
@@ -1276,6 +1286,9 @@ void Renderer::InitializeEditorUI()
 	m_editorUI->SetScreenshotRequestCallback([this](float seconds, std::string modelName, std::string placeName) {
 		ArmScreenshot(seconds, modelName, placeName, "", "");
 	});
+	m_editorUI->SetRenderGraphTimingsGetter([this]() -> const std::vector<RenderGraph::PassTiming>& {
+		return m_renderGraph.GetTimings();
+	});
 	m_editorUI->SetScreenshotPendingGetter([this]() {
 		return m_screenshotManager->IsPending();
 	});
@@ -1783,6 +1796,15 @@ void Renderer::DumpRenderGraphIfRequested()
 
 	spdlog::info("[RDG] frame passes:\n{}", m_renderGraph.DumpPasses());
 	spdlog::info("[RDG] synthesized barriers:\n{}", m_renderGraph.DumpBarriers());
+
+	// Last resolved frame's node costs, when rdg.timings is on — the same numbers
+	// the ImGui table shows, so a headless run can attribute a regression too.
+	std::string timings;
+	for (const auto& timing : m_renderGraph.GetTimings())
+		timings += fmt::format("    {:<32} {:.3f} ms\n", timing.name, timing.milliseconds);
+	if (!timings.empty())
+		spdlog::info("[RDG] node GPU cost:\n{}", timings);
+
 	g_dumpRenderGraph.Set(0); // one-shot: a per-frame dump is unreadable
 }
 

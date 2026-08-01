@@ -135,7 +135,59 @@ void EditorUI::DrawDebugPanel()
 	// Skybox
 	DrawSkyboxSection();
 
+	// Per-node GPU cost
+	DrawRenderGraphSection();
+
 	ImGui::End();
+}
+
+void EditorUI::DrawRenderGraphSection()
+{
+	if (!m_renderGraphTimings)
+		return;
+
+	ImGui::SeparatorText("Render Graph");
+
+	const StringId timingsCVar("rdg.timings");
+	const int32_t* enabledCVar = CVarSystem::Get()->GetIntCVar(timingsCVar);
+	bool timingsEnabled = enabledCVar && *enabledCVar != 0;
+	if (ImGui::Checkbox("Measure nodes on the GPU", &timingsEnabled))
+		CVarSystem::Get()->SetCVarInt(timingsCVar, timingsEnabled ? 1 : 0);
+
+	const auto& timings = m_renderGraphTimings();
+	if (!timingsEnabled || timings.empty())
+	{
+		ImGui::TextDisabled("No measurements this frame.");
+		return;
+	}
+
+	float total = 0.0f;
+	for (const auto& timing : timings)
+		total += timing.milliseconds;
+
+	if (ImGui::BeginTable("rdg_timings", 3,
+		ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp))
+	{
+		ImGui::TableSetupColumn("Node");
+		ImGui::TableSetupColumn("ms");
+		ImGui::TableSetupColumn("%");
+		ImGui::TableHeadersRow();
+
+		for (const auto& timing : timings)
+		{
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn(); ImGui::TextUnformatted(timing.name.c_str());
+			ImGui::TableNextColumn(); ImGui::Text("%.3f", timing.milliseconds);
+			ImGui::TableNextColumn();
+			ImGui::Text("%.1f", total > 0.0f ? 100.0f * timing.milliseconds / total : 0.0f);
+		}
+
+		ImGui::TableNextRow();
+		ImGui::TableNextColumn(); ImGui::TextUnformatted("Total");
+		ImGui::TableNextColumn(); ImGui::Text("%.3f", total);
+		ImGui::TableNextColumn(); ImGui::TextUnformatted("");
+		ImGui::EndTable();
+	}
 }
 
 void EditorUI::DrawLightsPanel()

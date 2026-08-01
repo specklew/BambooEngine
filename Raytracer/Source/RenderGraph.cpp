@@ -233,6 +233,9 @@ void RenderGraph::Compile()
 
 void RenderGraph::Execute(CommandContext& context)
 {
+    m_timedPassCount = 0;
+    m_timedPassNames.clear();
+
     for (const CompiledPass& compiled : m_compiled)
     {
         PassNode& pass = m_passes[compiled.passIndex];
@@ -243,13 +246,87 @@ void RenderGraph::Execute(CommandContext& context)
         // PIX event per node, named from the declaration — no opt-in, every pass.
         ScopedGpuMarker marker(context.GetCommandListUnflushed(), pass.name.c_str());
 
+        // The opening timestamp goes after the barriers so a node is charged for
+        // its own work, not for the wait its predecessor made necessary.
+        const bool timed = m_timingEnabled && m_timedPassCount < kMaxTimedPasses;
+        const uint32_t timerSlot = m_timedPassCount * 2;
+        if (timed)
+        {
+            context.FlushBarriers();
+            context.GetCommandListUnflushed()->EndQuery(m_timerQueryHeap.Get(),
+                D3D12_QUERY_TYPE_TIMESTAMP, timerSlot);
+        }
+
         if (pass.execute)
             pass.execute();
         else
             context.FlushBarriers(); // transition-only node: nothing to flush it
+
+        if (timed)
+        {
+            context.FlushBarriers();
+            context.GetCommandListUnflushed()->EndQuery(m_timerQueryHeap.Get(),
+                D3D12_QUERY_TYPE_TIMESTAMP, timerSlot + 1);
+            m_timedPassNames.push_back(pass.name);
+            ++m_timedPassCount;
+        }
     }
 
     context.FlushBarriers();
+
+    if (m_timedPassCount > 0)
+    {
+        context.GetCommandListUnflushed()->ResolveQueryData(m_timerQueryHeap.Get(),
+            D3D12_QUERY_TYPE_TIMESTAMP, 0, m_timedPassCount * 2, m_timerReadback.Get(), 0);
+    }
+}
+
+void RenderGraph::InitializeTimers(ID3D12Device* device, ID3D12CommandQueue* queue)
+{
+    if (!device || !queue || FAILED(queue->GetTimestampFrequency(&m_timerFrequency)))
+        return;
+
+    D3D12_QUERY_HEAP_DESC heapDesc = {};
+    heapDesc.Type  = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    heapDesc.Count = kMaxTimedPasses * 2;
+    if (FAILED(device->CreateQueryHeap(&heapDesc, IID_PPV_ARGS(&m_timerQueryHeap))))
+        return;
+    m_timerQueryHeap->SetName(L"RenderGraph Timestamps");
+
+    const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
+    const auto bufferDesc     = CD3DX12_RESOURCE_DESC::Buffer(heapDesc.Count * sizeof(uint64_t));
+    if (FAILED(device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+                                               D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                               IID_PPV_ARGS(&m_timerReadback))))
+    {
+        m_timerQueryHeap.Reset();
+        return;
+    }
+    m_timerReadback->SetName(L"RenderGraph Timestamp Readback");
+}
+
+void RenderGraph::ResolveTimings()
+{
+    if (m_timedPassCount == 0 || !m_timerReadback || m_timerFrequency == 0)
+        return;
+
+    const D3D12_RANGE readRange{0, m_timedPassCount * 2 * sizeof(uint64_t)};
+    uint64_t* ticks = nullptr;
+    if (FAILED(m_timerReadback->Map(0, &readRange, reinterpret_cast<void**>(&ticks))))
+        return;
+
+    m_timings.clear();
+    const double msPerTick = 1000.0 / static_cast<double>(m_timerFrequency);
+    for (uint32_t i = 0; i < m_timedPassCount; ++i)
+    {
+        const uint64_t begin = ticks[i * 2];
+        const uint64_t end   = ticks[i * 2 + 1];
+        const uint64_t span  = (end > begin) ? end - begin : 0;
+        m_timings.push_back({m_timedPassNames[i], static_cast<float>(span * msPerTick)});
+    }
+
+    const D3D12_RANGE writeRange{0, 0};
+    m_timerReadback->Unmap(0, &writeRange);
 }
 
 void RenderGraph::Reset()
