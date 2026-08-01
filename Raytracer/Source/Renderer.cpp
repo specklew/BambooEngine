@@ -622,7 +622,14 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		const GraphResourceHandle backBufferHandle     = m_renderGraph.Import(backBuffer, "Back Buffer");
 
 		m_renderGraph.AddPass("Raytrace Technique",
-			[&](RenderGraphPassBuilder& pass) { pass.Write(raytraceOutputHandle, GraphAccess::ComputeWrite); },
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Write(raytraceOutputHandle, GraphAccess::ComputeWrite);
+				// A guiding technique reads the VXPG products; declaring them here
+				// is what lets their producers drop the tail barriers (and what
+				// culling will read once the whole chain declares).
+				DeclareGuidingReads(pass);
+			},
 			[this]()
 			{
 				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "Raytrace Technique");
@@ -1611,9 +1618,38 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 			[this]()
 			{
 				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG InjectionClear");
-				m_voxelizationPass->DispatchFrameClear();
+				m_voxelizationPass->DispatchFrameClear(/*emitTailBarriers*/ false);
 			});
 	}
+}
+
+void Renderer::DeclareGuidingReads(RenderGraphPassBuilder& pass)
+{
+	// Only a guiding technique touches these; a plain path tracer declares nothing
+	// and the VXPG nodes have no reader at all.
+	if (!m_raytracePass || m_raytracePass->RequiredVxpgStage() == VxpgStage::None)
+		return;
+
+	auto readRaw = [&](ID3D12Resource* resource, const char* debugName)
+	{
+		if (resource)
+			pass.Read(m_renderGraph.ImportRaw(resource, debugName), GraphAccess::UnorderedAccessRead);
+	};
+
+	if (m_voxelizationPass)
+	{
+		readRaw(m_voxelizationPass->GetIrradianceTexture().Get(), "VXPG VoxelIrradiance");
+		readRaw(m_voxelizationPass->GetVplCountTexture().Get(), "VXPG VoxelVplCount");
+	}
+	if (m_lightInjectionPass)
+	{
+		readRaw(m_lightInjectionPass->GetVoxelRepresentativeTexture().Get(), "VXPG VoxelRepresentative");
+		readRaw(m_lightInjectionPass->GetShadingPointsTexture().Get(), "VXPG ShadingPoints");
+	}
+	if (m_vbufferPass)
+		readRaw(m_vbufferPass->GetVBufferTexture().Get(), "VXPG VBuffer");
+	if (m_clusterVisibilityPass)
+		readRaw(m_clusterVisibilityPass->GetMaskResource(), "VXPG ClusterVisibilityMask");
 }
 
 void Renderer::DumpRenderGraphIfRequested()

@@ -45,7 +45,7 @@ public:
     // Called by the renderer: before injection in the faithful config, or
     // after the guiding build when VPL data is reused from last frame's GI
     // (ADR 0009) — the build passes must read before the wipe.
-    void DispatchFrameClear();
+    void DispatchFrameClear(bool emitTailBarriers = true);
 
     Microsoft::WRL::ComPtr<ID3D12Resource> GetOccupancyTexture() const { return m_occupancyTex; }
     Microsoft::WRL::ComPtr<ID3D12Resource> GetIrradianceTexture() const { return m_irradianceTex; }

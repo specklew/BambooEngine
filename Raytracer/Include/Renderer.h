@@ -137,6 +137,7 @@ private:
 
 	void OnShaderReload();
 	void LoadSkybox(const std::wstring& path);
+	void DeclareGuidingReads(RenderGraphPassBuilder& pass);
 	void DumpRenderGraphIfRequested();
 	void WriteVoxelUavsToGlobalHeap();
 	void WriteSuperpixelUavsToGlobalHeap();

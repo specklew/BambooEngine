@@ -351,7 +351,11 @@ void VoxelizationPass::WriteGridConstantsCB()
     std::memcpy(m_gridConstantsCBMapped, &m_gridConstants, sizeof(VoxelGridConstants));
 }
 
-void VoxelizationPass::DispatchFrameClear()
+// emitTailBarriers=false when this runs as a graph node: the node declares both
+// textures as writes, so the reader's declaration carries the barrier. The eager
+// pre-injection clear (stage 1, which runs before the graph is built because a
+// grid resize can recreate these textures) still emits its own.
+void VoxelizationPass::DispatchFrameClear(bool emitTailBarriers)
 {
     ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
@@ -370,8 +374,11 @@ void VoxelizationPass::DispatchFrameClear()
     const uint32_t groups = (m_gridDim + 7) / 8;
     CommandContext::Get().Dispatch(groups, groups, groups);
 
-    CommandContext::Get().UavBarrierRaw(m_irradianceTex.Get());
-    CommandContext::Get().UavBarrierRaw(m_vplCountTex.Get());
+    if (emitTailBarriers)
+    {
+        CommandContext::Get().UavBarrierRaw(m_irradianceTex.Get());
+        CommandContext::Get().UavBarrierRaw(m_vplCountTex.Get());
+    }
 }
 
 void VoxelizationPass::DispatchBakeClear()
