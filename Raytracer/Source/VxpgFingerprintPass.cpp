@@ -219,5 +219,6 @@ void VxpgFingerprintPass::Run(D3D12_GPU_VIRTUAL_ADDRESS tlasVa, uint32_t frameIn
     m_guidingDispatchArgs->TransitionChecked(cmd,
         D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-    m_voxelFingerprints->UavBarrier(cmd);
+    // No tail barrier: gVoxelFingerprints is declared on the graph, so the
+    // cluster pass's read is what triggers it.
 }

@@ -1464,6 +1464,15 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 		m_renderGraph.ImportRaw(m_voxelizationPass->GetIrradianceTexture().Get(), "VXPG VoxelIrradiance");
 	const GraphResourceHandle vplCountHandle =
 		m_renderGraph.ImportRaw(m_voxelizationPass->GetVplCountTexture().Get(), "VXPG VoxelVplCount");
+	// Cross-pass structured buffers: fingerprint -> cluster -> cvis/light tree.
+	// (Buffers each pass only touches internally stay hand-barriered — those
+	// hazards are between kernels of one pass, which one node cannot express.)
+	const GraphResourceHandle fingerprintsHandle = m_fingerprintPass
+		? m_renderGraph.Import(*m_fingerprintPass->GetVoxelFingerprintsBuffer(), "VXPG VoxelFingerprints")
+		: InvalidGraphResource;
+	const GraphResourceHandle clusterAssignmentsHandle = m_clusterPass
+		? m_renderGraph.Import(*m_clusterPass->GetVoxelClusterAssignmentsBuffer(), "VXPG ClusterAssignments")
+		: InvalidGraphResource;
 
 	// Every injection output is declared, so the pass no longer places its own
 	// tail barriers — the readers below carry the dependency instead.
@@ -1534,6 +1543,8 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 			{
 				if (shadingPointsHandle != InvalidGraphResource)
 					pass.Read(shadingPointsHandle, GraphAccess::UnorderedAccessRead);
+				if (fingerprintsHandle != InvalidGraphResource)
+					pass.Write(fingerprintsHandle, GraphAccess::ComputeWrite);
 			},
 			[this]()
 			{
@@ -1548,7 +1559,13 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	if (stage >= VxpgStage::Cluster && m_clusterPass)
 	{
 		m_renderGraph.AddPass("VXPG Cluster",
-			[](RenderGraphPassBuilder&) {}, // buffers still hand-barriered inside the pass
+			[&](RenderGraphPassBuilder& pass)
+			{
+				if (fingerprintsHandle != InvalidGraphResource)
+					pass.Read(fingerprintsHandle, GraphAccess::UnorderedAccessRead);
+				if (clusterAssignmentsHandle != InvalidGraphResource)
+					pass.Write(clusterAssignmentsHandle, GraphAccess::ComputeWrite);
+			},
 			[this]()
 			{
 				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Cluster");
@@ -1584,6 +1601,8 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 					pass.Read(vplPositionHandle, GraphAccess::UnorderedAccessRead);
 				if (vbufferHandle != InvalidGraphResource)
 					pass.Read(vbufferHandle, GraphAccess::UnorderedAccessRead);
+				if (clusterAssignmentsHandle != InvalidGraphResource)
+					pass.Read(clusterAssignmentsHandle, GraphAccess::UnorderedAccessRead);
 			},
 			[this]()
 			{
@@ -1597,7 +1616,12 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	if (stage >= VxpgStage::LightTree && m_lightTreePass)
 	{
 		m_renderGraph.AddPass("VXPG LightTree",
-			[](RenderGraphPassBuilder&) {}, // tree buffers still hand-barriered inside the pass
+			[&](RenderGraphPassBuilder& pass)
+			{
+				// Its own tree buffers stay hand-barriered (intra-pass kernels).
+				if (clusterAssignmentsHandle != InvalidGraphResource)
+					pass.Read(clusterAssignmentsHandle, GraphAccess::UnorderedAccessRead);
+			},
 			[this]()
 			{
 				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightTree");

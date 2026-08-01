@@ -156,5 +156,6 @@ void VxpgClusterPass::Run(uint32_t frameIndex)
     argsBuffer.TransitionChecked(cmd,
         D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-    m_voxelClusterAssignments->UavBarrier(cmd);
+    // No tail barrier: gVoxelClusterAssignments is declared on the graph, so the
+    // cvis and light-tree reads trigger it.
 }
