@@ -36,7 +36,12 @@ void GraphicsDevice::Initialize(bool enableDebugLayer)
 
 #ifdef _DEBUG
 	ComPtr<ID3D12Debug> debugController;
-	D3D12GetDebugInterface(IID_PPV_ARGS(&debugController));
+	const bool debugInterfaceAvailable = SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
+	if (m_enableDebugLayer && !debugInterfaceAvailable)
+	{
+		spdlog::warn("D3D12 debug interface unavailable (graphics tools not installed?); running without the debug layer.");
+		m_enableDebugLayer = false;
+	}
 	if (m_enableDebugLayer)
 		debugController->EnableDebugLayer();
 

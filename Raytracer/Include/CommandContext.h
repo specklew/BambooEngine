@@ -26,6 +26,11 @@ public:
     // Flushes pending barriers so raw work cannot slip in ahead of them.
     ID3D12GraphicsCommandList4* GetCommandList();
 
+    // For recording that issues no GPU work and therefore needs no barrier flush
+    // (PIX markers). Keeps a queued batch intact so it can still merge with the
+    // work that follows.
+    [[nodiscard]] ID3D12GraphicsCommandList4* GetCommandListUnflushed() const { return m_commandList; }
+
     // Barriers — tracked resources go through the phase-0 checked path.
     void Transition(Resource& resource, D3D12_RESOURCE_STATES expectedBefore, D3D12_RESOURCE_STATES after);
     void UavBarrier(Resource& resource);
@@ -33,6 +38,10 @@ public:
     // they carry no tracked state, so nothing is checked.
     void TransitionRaw(ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after);
     void UavBarrierRaw(ID3D12Resource* resource);
+
+    // Already-built barrier from the render graph's compiled plan. The graph
+    // updated the tracker when it built it, so nothing is checked again here.
+    void EnqueueBarrier(const D3D12_RESOURCE_BARRIER& barrier, ID3D12Resource* resource);
 
     void FlushBarriers();
     [[nodiscard]] bool HasPendingBarriers() const { return !m_pendingBarriers.empty(); }
@@ -48,6 +57,8 @@ public:
     void DrawIndexedInstanced(uint32_t indexCount, uint32_t instanceCount, uint32_t startIndex,
                               int32_t baseVertex, uint32_t startInstance);
     void CopyResource(ID3D12Resource* destination, ID3D12Resource* source);
+    void CopyTextureRegion(const D3D12_TEXTURE_COPY_LOCATION& destination,
+                           const D3D12_TEXTURE_COPY_LOCATION& source);
 
     void Close();
 

@@ -7,7 +7,7 @@
 #include "RenderGraph.h"
 #include "Headless.h" // HeadlessConfig
 #include "InputElements.h"
-#include "RasterDebugMode.h" // VxpgStage
+#include "RasterDebugMode.h"
 #include "SceneResources/LightData.h"
 #include "Keyboard.h"
 #include "SimpleMath.h"
@@ -138,14 +138,52 @@ private:
 	void OnShaderReload();
 	void LoadSkybox(const std::wstring& path);
 	void DeclareGuidingReads(RenderGraphPassBuilder& pass);
+	void DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass);
 	void DumpRenderGraphIfRequested();
 	void WriteVoxelUavsToGlobalHeap();
 	void WriteSuperpixelUavsToGlobalHeap();
 	void WriteClusterVisibilityUavsToGlobalHeap();
 	void WireGuidingResources();
-	// Runs the linear VXPG pipeline (voxelize -> inject -> guiding build ->
-	// fingerprint -> cluster) up to and including the requested stage.
-	void RunVxpgPipelineUpTo(VxpgStage stage);
+	// Adds every VXPG stage to the frame's graph. Which of them survive is the
+	// graph's decision: a stage nothing reads is culled.
+	void BuildVxpgGraph();
+	bool FrameUsesVoxelGuiding() const;
+
+	// Handles for this frame's VXPG resources, refreshed by BuildVxpgGraph.
+	// Imports last one frame, so these are re-acquired every Render().
+	struct VxpgGraphHandles
+	{
+		GraphResourceHandle vbuffer              = InvalidGraphResource;
+		GraphResourceHandle shadingPoints        = InvalidGraphResource;
+		GraphResourceHandle voxelRepresentative  = InvalidGraphResource;
+		GraphResourceHandle vplPosition          = InvalidGraphResource;
+		GraphResourceHandle voxelOccupancy       = InvalidGraphResource;
+		GraphResourceHandle voxelIrradiance      = InvalidGraphResource;
+		GraphResourceHandle voxelVplCount        = InvalidGraphResource;
+		GraphResourceHandle counters             = InvalidGraphResource;
+		GraphResourceHandle compactIds           = InvalidGraphResource;
+		GraphResourceHandle inverseIndex         = InvalidGraphResource;
+		GraphResourceHandle compactLightPoints   = InvalidGraphResource;
+		GraphResourceHandle premulIrradiance     = InvalidGraphResource;
+		GraphResourceHandle liveBoundMin         = InvalidGraphResource;
+		GraphResourceHandle liveBoundMax         = InvalidGraphResource;
+		GraphResourceHandle voxelFingerprints    = InvalidGraphResource;
+		GraphResourceHandle clusterAssignments   = InvalidGraphResource;
+		GraphResourceHandle clusterSeedCompactIds = InvalidGraphResource;
+		GraphResourceHandle superpixelIndex      = InvalidGraphResource;
+		GraphResourceHandle superpixelCenter     = InvalidGraphResource;
+		GraphResourceHandle superpixelCounter    = InvalidGraphResource;
+		GraphResourceHandle superpixelGathered   = InvalidGraphResource;
+		GraphResourceHandle superpixelFuzzyWeight = InvalidGraphResource;
+		GraphResourceHandle superpixelFuzzyIndex  = InvalidGraphResource;
+		GraphResourceHandle clusterVisibilityMask = InvalidGraphResource;
+		GraphResourceHandle avgVisibility        = InvalidGraphResource;
+		GraphResourceHandle lightTreeNodes       = InvalidGraphResource;
+		GraphResourceHandle lightTreeCompactToLeaf = InvalidGraphResource;
+		GraphResourceHandle lightTreeClusterRoots  = InvalidGraphResource;
+		GraphResourceHandle superpixelClusterHeap  = InvalidGraphResource;
+	};
+	VxpgGraphHandles m_vxpg;
 
 	std::shared_ptr<RaytracePass> m_raytracePass;
 	std::shared_ptr<VBufferPass> m_vbufferPass;

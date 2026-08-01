@@ -398,8 +398,8 @@ void VoxelizationPass::DispatchBakeClear()
     CommandContext::Get().Dispatch(groups, groups, groups);
 
     CommandContext::Get().UavBarrierRaw(m_occupancyTex.Get());
-    CommandContext::Get().UavBarrierRaw(m_bakedBoundMin->GetUnderlyingResource().Get());
-    CommandContext::Get().UavBarrierRaw(m_bakedBoundMax->GetUnderlyingResource().Get());
+    m_bakedBoundMin->UavBarrier(m_commandList.Get());
+    m_bakedBoundMax->UavBarrier(m_commandList.Get());
 }
 
 void VoxelizationPass::DispatchBake(const Scene& scene)
@@ -457,8 +457,8 @@ void VoxelizationPass::DispatchBake(const Scene& scene)
     }
 
     CommandContext::Get().UavBarrierRaw(m_occupancyTex.Get());
-    CommandContext::Get().UavBarrierRaw(m_bakedBoundMin->GetUnderlyingResource().Get());
-    CommandContext::Get().UavBarrierRaw(m_bakedBoundMax->GetUnderlyingResource().Get());
+    m_bakedBoundMin->UavBarrier(m_commandList.Get());
+    m_bakedBoundMax->UavBarrier(m_commandList.Get());
 }
 
 void VoxelizationPass::RunFrame(const Scene& scene, uint32_t requestedGridDim, bool bakeUseCompact, bool bakeClipping)

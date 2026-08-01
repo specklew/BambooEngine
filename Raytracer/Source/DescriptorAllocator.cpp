@@ -116,6 +116,19 @@ void DescriptorAllocator::CreateNullShaderResourceView(uint32_t index, DXGI_FORM
     m_device->CreateShaderResourceView(nullptr, &desc, GetHandle(index).cpu);
 }
 
+void DescriptorAllocator::CreateNullShaderResourceView(uint32_t index,
+                                                       const D3D12_SHADER_RESOURCE_VIEW_DESC& desc)
+{
+    m_device->CreateShaderResourceView(nullptr, &desc, GetHandle(index).cpu);
+}
+
+void DescriptorAllocator::CreateNullConstantBufferView(uint32_t index)
+{
+    // BufferLocation 0 is the documented null CBV: reads return zero.
+    const D3D12_CONSTANT_BUFFER_VIEW_DESC desc = {};
+    m_device->CreateConstantBufferView(&desc, GetHandle(index).cpu);
+}
+
 void DescriptorAllocator::CreateNullUnorderedAccessView(uint32_t index, DXGI_FORMAT format,
                                                         D3D12_UAV_DIMENSION dimension)
 {

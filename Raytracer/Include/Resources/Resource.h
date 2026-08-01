@@ -11,7 +11,6 @@ struct ResourceState
     bool tracked            = false; // false: upload/readback heap — fixed state, never barriered
     bool isBuffer           = false;
     bool simultaneousAccess = false;
-    bool promotedReadOnly   = false; // state reached via implicit promotion to a read-only state
 
     static constexpr D3D12_RESOURCE_STATES ReadOnlyStatesMask =
         D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER |
@@ -50,10 +49,15 @@ struct ResourceState
         return (target & ~promotableTextureStates) == 0;
     }
 
-    // Implicit decay to COMMON at every ExecuteCommandLists completion.
+    // Implicit decay to COMMON at every ExecuteCommandLists completion. D3D12 also
+    // decays a texture that reached a read-only state by *promotion*, but the
+    // tracker never observes those: it only ever sees explicit barriers, and a
+    // texture it has not been told about is still recorded as COMMON — which is
+    // exactly where the decay would leave it. So the promoted-read-only case
+    // cannot produce a divergence here and needs no separate flag.
     bool DecaysAtExecuteCompletion() const
     {
-        return isBuffer || simultaneousAccess || promotedReadOnly;
+        return isBuffer || simultaneousAccess;
     }
 };
 

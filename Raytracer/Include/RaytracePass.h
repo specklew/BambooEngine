@@ -2,7 +2,7 @@
 #include "Resources/StructuredBuffer.h"
 #include "Resources/Texture.h"
 #include "Techniques/TechniqueDescriptor.h"
-#include "RasterDebugMode.h" // VxpgStage
+#include "RasterDebugMode.h"
 
 class PassConstants;
 class Renderer;
@@ -26,7 +26,10 @@ public:
 
     // Furthest VXPG pipeline stage this technique needs run before it dispatches.
     // Default None: most techniques (vanilla path tracing, AO) use no VXPG data.
-    virtual VxpgStage RequiredVxpgStage() const { return VxpgStage::None; }
+    // Whether this technique samples the VXPG subgraph at all. Which of its
+    // stages run is derived by the render graph from the reads the technique
+    // declares, not from a stage order maintained here.
+    virtual bool UsesVoxelGuiding() const { return false; }
 
     void Update(double elapsedTime, double totalTime);
     void OnResize();

@@ -35,6 +35,9 @@ public:
     ID3D12Resource* GetGatheredResource() const { return m_gathered.Get(); }
     ID3D12Resource* GetCounterResource() const { return m_counter.Get(); }
     ID3D12Resource* GetIndexResource() const { return m_index.Get(); }
+    ID3D12Resource* GetCenterResource() const { return m_center.Get(); }
+    ID3D12Resource* GetFuzzyWeightResource() const { return m_fuzzyWeight.Get(); }
+    ID3D12Resource* GetFuzzyIndexResource() const { return m_fuzzyIndex.Get(); }
     uint32_t GetMapX() const { return m_mapX; }
     uint32_t GetMapY() const { return m_mapY; }
 

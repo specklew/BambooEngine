@@ -3,7 +3,6 @@
 #pragma once
 
 #include "DebugViewDoc.h"
-#include "VxpgStage.h"
 
 enum class RasterDebugMode : int
 {
@@ -45,23 +44,24 @@ inline constexpr DebugViewDoc kRasterDebugModeDocs[] = {
 	{"SuperpixelPass (SLIC)", "mosaic of direction colors, one normal per cell", "paints each pixel with its superpixel's representative normal"},
 };
 
-// The furthest VXPG stage a raster debug view needs to read its data.
-inline VxpgStage StageFor(RasterDebugMode mode)
+// A raster debug view is the only raster consumer of the VXPG subgraph; this says
+// whether the active view reads any of it at all. Which stages actually run is
+// derived by the render graph from the reads the view declares (Renderer's
+// "Raster Debug View" node), not from a hand-maintained stage order.
+inline bool RasterDebugViewUsesVoxelGuiding(RasterDebugMode mode)
 {
 	switch (mode)
 	{
-	case RasterDebugMode::VoxelOccupancy:   // reads occupancy
-	case RasterDebugMode::Supervoxels:      // reads occupancy (supervoxel id is analytic)
-		return VxpgStage::Voxelize;
-	case RasterDebugMode::SuperpixelId:            // reads u_index
-	case RasterDebugMode::SuperpixelRepresentative: // reads u_index + u_center
-		return VxpgStage::Superpixel;
-	case RasterDebugMode::VoxelIrradiance:  // reads injected irradiance
+	case RasterDebugMode::VoxelOccupancy:
+	case RasterDebugMode::Supervoxels:
+	case RasterDebugMode::SuperpixelId:
+	case RasterDebugMode::SuperpixelRepresentative:
+	case RasterDebugMode::VoxelIrradiance:
 	case RasterDebugMode::ShadingPointsNormal:
-	case RasterDebugMode::ShadingPointsPos: // read the injection G-buffer
-		return VxpgStage::Inject;
+	case RasterDebugMode::ShadingPointsPos:
+		return true;
 	default:
-		return VxpgStage::None;
+		return false;
 	}
 }
 

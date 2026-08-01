@@ -392,7 +392,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	// OnShaderReload path (flush + pipeline/SBT rebuild), same as F2 — rare.
 	if (!m_rasterize)
 	{
-		const bool viewActive = m_raytracePass->RequiredVxpgStage() != VxpgStage::None
+		const bool viewActive = m_raytracePass->UsesVoxelGuiding()
 			? g_guidingDebugView.Get() != GuidingDebugView::None
 			: g_raytraceDebugMode.Get() != RaytraceDebugMode::None;
 		const bool wantsDebugViews = viewActive || g_raygenCleanVariant.Get() == 0;
@@ -512,15 +512,12 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		m_editorUI->EndFrame();
 	}
 
-	// In raster mode the active debug view decides how far the VXPG pipeline must
-	// run; in raytracing mode the active technique declares its own need.
-	const VxpgStage vxpgStage = m_rasterize
-		? StageFor(g_rasterizationDebugMode.Get())
-		: (m_raytracePass ? m_raytracePass->RequiredVxpgStage() : VxpgStage::None);
-	// The frame's graph starts here: VXPG nodes first, then (in raytracing mode)
-	// the integrator and present chain appended below.
+	// The frame's graph starts here: every VXPG node is added, then (in raytracing
+	// mode) the integrator and present chain are appended below. Which VXPG stages
+	// actually run is decided by culling, from what the frame's consumer declares.
 	m_renderGraph.Reset();
-	RunVxpgPipelineUpTo(vxpgStage);
+	m_renderGraph.SetBarrierLogging(g_dumpRenderGraph.Get() != 0);
+	BuildVxpgGraph();
 
 	SetViewport();
 	SetScissorRect();
@@ -541,16 +538,22 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
 			frameIndex,
 			m_rtvDescriptorSize);
-		
-		CommandContext::Get().GetCommandList()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-		CommandContext::Get().GetCommandList()->ClearDepthStencilView(
-			m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-			D3D12_CLEAR_FLAG_DEPTH,
-			1.0f,
-			0,
-			0,
-			nullptr);
-		
+
+		// Raytracing overwrites the whole back buffer with the present copy and
+		// draws no geometry, so both clears are dead bandwidth there (measured
+		// 2026-08-01, ABeautifulGame 3 s Debug: PT 3151 -> 3276 frames).
+		if (m_rasterize)
+		{
+			CommandContext::Get().GetCommandList()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+			CommandContext::Get().GetCommandList()->ClearDepthStencilView(
+				m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+				D3D12_CLEAR_FLAG_DEPTH,
+				1.0f,
+				0,
+				0,
+				nullptr);
+		}
+
 		m_d3d12CommandList->OMSetRenderTargets(1,
 		&rtvHandle,
 		true,
@@ -559,8 +562,17 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	
 	if (m_rasterize)
 	{
-		// Raster draws are not graph nodes yet (phase 5), so the VXPG subgraph
-		// they read from has to run first.
+		// Raster draws are not graph nodes yet (phase 5). This sink stands in for
+		// them so culling keeps exactly the VXPG stages the active debug view reads.
+		m_renderGraph.AddPass("Raster Debug View",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.NeverCull();
+				DeclareRasterDebugViewReads(pass);
+			},
+			nullptr);
+
+		m_renderGraph.Compile();
 		m_renderGraph.Execute(CommandContext::Get());
 		DumpRenderGraphIfRequested();
 
@@ -621,20 +633,18 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		const GraphResourceHandle tonemapOutputHandle  = m_renderGraph.Import(m_postProcessPass->GetOutputBuffer(), "PostProcess Output");
 		const GraphResourceHandle backBufferHandle     = m_renderGraph.Import(backBuffer, "Back Buffer");
 
+		// The presented image is the graph's sink: culling walks backwards from here.
+		m_renderGraph.MarkExternallyRead(backBufferHandle);
+
 		m_renderGraph.AddPass("Raytrace Technique",
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Write(raytraceOutputHandle, GraphAccess::ComputeWrite);
-				// A guiding technique reads the VXPG products; declaring them here
-				// is what lets their producers drop the tail barriers (and what
-				// culling will read once the whole chain declares).
+				// A guiding technique reads the VXPG products; this declaration is
+				// what keeps their producers alive through culling.
 				DeclareGuidingReads(pass);
 			},
-			[this]()
-			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "Raytrace Technique");
-				m_raytracePass->Render();
-			});
+			[this]() { m_raytracePass->Render(); });
 
 		if (accumulate)
 		{
@@ -644,11 +654,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 					pass.Read(raytraceOutputHandle, GraphAccess::ComputeRead);
 					pass.Write(tonemapInputHandle, GraphAccess::ComputeWrite);
 				},
-				[this, &raytraceOutput]()
-				{
-					ScopedGpuMarker marker(m_d3d12CommandList.Get(), "Accumulation");
-					m_accumulationPass->Render(raytraceOutput);
-				});
+				[this, &raytraceOutput]() { m_accumulationPass->Render(raytraceOutput); });
 		}
 
 		m_renderGraph.AddPass("PostProcess",
@@ -659,7 +665,6 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			},
 			[this, &tonemapInput, postProcessParams]()
 			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "PostProcess");
 				m_postProcessPass->Dispatch(tonemapInput, postProcessParams);
 			});
 
@@ -671,21 +676,38 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			},
 			[this, &backBuffer]() { m_postProcessPass->CopyToBackBuffer(backBuffer); });
 
+		// Readback for a screenshot armed by Tick(). A node so the copy-source state
+		// it needs is declared rather than inherited from whatever ran before it.
+		if (m_screenshotManager->IsCaptureDue())
+		{
+			m_renderGraph.AddPass("Screenshot Readback",
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.NeverCull();
+					pass.Read(tonemapOutputHandle, GraphAccess::CopySource);
+				},
+				[this]()
+				{
+					m_screenshotManager->RecordCopy(m_postProcessPass->GetOutputBuffer().GetUnderlyingResource());
+				});
+		}
+
 		// ImGui and the present transition still expect a render target.
 		m_renderGraph.AddPass("Back Buffer To Render Target",
-			[&](RenderGraphPassBuilder& pass) { pass.Write(backBufferHandle, GraphAccess::RenderTarget); },
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.NeverCull();
+				pass.Write(backBufferHandle, GraphAccess::RenderTarget);
+			},
 			nullptr);
 
+		m_renderGraph.Compile();
 		m_renderGraph.Execute(CommandContext::Get());
 		DumpRenderGraphIfRequested();
 
 		// Restore main descriptor heap for ImGui (post-process pass may have changed it)
 		ID3D12DescriptorHeap* mainHeaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
 		m_d3d12CommandList->SetDescriptorHeaps(_countof(mainHeaps), mainHeaps);
-
-		// Issue screenshot readback copy if this frame was chosen by Tick()
-		if (m_screenshotManager->IsCaptureDue())
-			m_screenshotManager->RecordCopy(m_postProcessPass->GetOutputBuffer().GetUnderlyingResource());
 	}
 
 	if (!m_headless)
@@ -1391,9 +1413,21 @@ void Renderer::WireGuidingResources()
 			m_fingerprintPass, m_clusterPass, m_lightTreePass);
 }
 
-void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
+bool Renderer::FrameUsesVoxelGuiding() const
 {
-	if (stage == VxpgStage::None || !m_voxelizationPass || !m_scene)
+	// One bit, not a stage ladder: it only gates the eager world-space bake, which
+	// has to run before the graph imports because a grid resize recreates the very
+	// textures those imports capture. Everything past that is the graph's call.
+	return m_rasterize
+		? RasterDebugViewUsesVoxelGuiding(g_rasterizationDebugMode.Get())
+		: (m_raytracePass && m_raytracePass->UsesVoxelGuiding());
+}
+
+void Renderer::BuildVxpgGraph()
+{
+	m_vxpg = VxpgGraphHandles{};
+
+	if (!FrameUsesVoxelGuiding() || !m_voxelizationPass || !m_scene)
 		return;
 
 	// Stage 1: geometry bake (rebakes only when invalidated) + per-frame
@@ -1444,91 +1478,118 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 			m_lightInjectionPass->OnVoxelGridResize();
 	}
 
-	// Stage 2: shared VBuffer (one jittered primary per pixel, ADR 0004), then
-	// light injection reconstructing its first vertex from it (also emits the
-	// ShadingPoints G-buffer). Both are graph nodes: the VBuffer -> injection and
-	// injection -> superpixel/fingerprint hazards come from the declarations.
-	const GraphResourceHandle vbufferHandle = m_vbufferPass
-		? m_renderGraph.ImportRaw(m_vbufferPass->GetVBufferTexture().Get(), "VXPG VBuffer")
-		: InvalidGraphResource;
-	const GraphResourceHandle shadingPointsHandle = m_lightInjectionPass
-		? m_renderGraph.ImportRaw(m_lightInjectionPass->GetShadingPointsTexture().Get(), "VXPG ShadingPoints")
-		: InvalidGraphResource;
-	const GraphResourceHandle representativeHandle = m_lightInjectionPass
-		? m_renderGraph.ImportRaw(m_lightInjectionPass->GetVoxelRepresentativeTexture().Get(), "VXPG VoxelRepresentative")
-		: InvalidGraphResource;
-	const GraphResourceHandle vplPositionHandle = m_lightInjectionPass
-		? m_renderGraph.ImportRaw(m_lightInjectionPass->GetVplPositionTexture().Get(), "VXPG VplPosition")
-		: InvalidGraphResource;
-	const GraphResourceHandle irradianceHandle =
-		m_renderGraph.ImportRaw(m_voxelizationPass->GetIrradianceTexture().Get(), "VXPG VoxelIrradiance");
-	const GraphResourceHandle vplCountHandle =
-		m_renderGraph.ImportRaw(m_voxelizationPass->GetVplCountTexture().Get(), "VXPG VoxelVplCount");
-	// Cross-pass structured buffers: fingerprint -> cluster -> cvis/light tree.
-	// (Buffers each pass only touches internally stay hand-barriered — those
-	// hazards are between kernels of one pass, which one node cannot express.)
-	const GraphResourceHandle fingerprintsHandle = m_fingerprintPass
-		? m_renderGraph.Import(*m_fingerprintPass->GetVoxelFingerprintsBuffer(), "VXPG VoxelFingerprints")
-		: InvalidGraphResource;
-	const GraphResourceHandle clusterAssignmentsHandle = m_clusterPass
-		? m_renderGraph.Import(*m_clusterPass->GetVoxelClusterAssignmentsBuffer(), "VXPG ClusterAssignments")
-		: InvalidGraphResource;
-
-	// Every injection output is declared, so the pass no longer places its own
-	// tail barriers — the readers below carry the dependency instead.
-	auto declareInjectionOutputs = [&](RenderGraphPassBuilder& pass)
+	// Imports last one frame (Reset drops them), so a texture the bake above just
+	// recreated can never be reached through a stale pointer. Invalid handles are
+	// dropped by the builder, so a pass that does not exist declares nothing.
+	auto importRaw    = [&](ID3D12Resource* r, const char* name) { return m_renderGraph.ImportRaw(r, name); };
+	auto importBuffer = [&](auto* buffer, const char* name)
 	{
-		if (shadingPointsHandle != InvalidGraphResource)
-			pass.Write(shadingPointsHandle, GraphAccess::ComputeWrite);
-		if (representativeHandle != InvalidGraphResource)
-			pass.Write(representativeHandle, GraphAccess::ComputeWrite);
-		if (vplPositionHandle != InvalidGraphResource)
-			pass.Write(vplPositionHandle, GraphAccess::ComputeWrite);
-		pass.Write(irradianceHandle, GraphAccess::ComputeWrite);
-		pass.Write(vplCountHandle, GraphAccess::ComputeWrite);
+		return buffer ? m_renderGraph.Import(*buffer, name) : InvalidGraphResource;
 	};
 
-	if (stage >= VxpgStage::Inject && m_vbufferPass)
+	m_vxpg.voxelOccupancy  = importRaw(m_voxelizationPass->GetOccupancyTexture().Get(), "VXPG VoxelOccupancy");
+	m_vxpg.voxelIrradiance = importRaw(m_voxelizationPass->GetIrradianceTexture().Get(), "VXPG VoxelIrradiance");
+	m_vxpg.voxelVplCount   = importRaw(m_voxelizationPass->GetVplCountTexture().Get(), "VXPG VoxelVplCount");
+
+	if (m_vbufferPass)
+		m_vxpg.vbuffer = importRaw(m_vbufferPass->GetVBufferTexture().Get(), "VXPG VBuffer");
+	if (m_lightInjectionPass)
+	{
+		m_vxpg.shadingPoints       = importRaw(m_lightInjectionPass->GetShadingPointsTexture().Get(), "VXPG ShadingPoints");
+		m_vxpg.voxelRepresentative = importRaw(m_lightInjectionPass->GetVoxelRepresentativeTexture().Get(), "VXPG VoxelRepresentative");
+		m_vxpg.vplPosition         = importRaw(m_lightInjectionPass->GetVplPositionTexture().Get(), "VXPG VplPosition");
+	}
+	if (m_voxelGuidingBuildPass)
+	{
+		m_vxpg.counters           = importBuffer(m_voxelGuidingBuildPass->GetCountersBuffer(), "VXPG Counters");
+		m_vxpg.compactIds         = importBuffer(m_voxelGuidingBuildPass->GetCompactIdsBuffer(), "VXPG CompactIds");
+		m_vxpg.inverseIndex       = importBuffer(m_voxelGuidingBuildPass->GetInverseIndexBuffer(), "VXPG InverseIndex");
+		m_vxpg.compactLightPoints = importBuffer(m_voxelGuidingBuildPass->GetCompactVoxelLightPointsBuffer(), "VXPG CompactLightPoints");
+		m_vxpg.premulIrradiance   = importBuffer(m_voxelGuidingBuildPass->GetPremulIrradianceBuffer(), "VXPG PremulIrradiance");
+		m_vxpg.liveBoundMin       = importBuffer(m_voxelGuidingBuildPass->GetLiveBoundMinBuffer(), "VXPG LiveBoundMin");
+		m_vxpg.liveBoundMax       = importBuffer(m_voxelGuidingBuildPass->GetLiveBoundMaxBuffer(), "VXPG LiveBoundMax");
+	}
+	if (m_fingerprintPass)
+		m_vxpg.voxelFingerprints = importBuffer(m_fingerprintPass->GetVoxelFingerprintsBuffer(), "VXPG VoxelFingerprints");
+	if (m_clusterPass)
+	{
+		m_vxpg.clusterAssignments    = importBuffer(m_clusterPass->GetVoxelClusterAssignmentsBuffer(), "VXPG ClusterAssignments");
+		m_vxpg.clusterSeedCompactIds = importBuffer(m_clusterPass->GetClusterSeedCompactIdsBuffer(), "VXPG ClusterSeedCompactIds");
+	}
+	if (m_superpixelBuildPass)
+	{
+		m_vxpg.superpixelIndex       = importRaw(m_superpixelBuildPass->GetIndexResource(), "VXPG SuperpixelIndex");
+		m_vxpg.superpixelCenter      = importRaw(m_superpixelBuildPass->GetCenterResource(), "VXPG SuperpixelCenter");
+		m_vxpg.superpixelCounter     = importRaw(m_superpixelBuildPass->GetCounterResource(), "VXPG SuperpixelCounter");
+		m_vxpg.superpixelGathered    = importRaw(m_superpixelBuildPass->GetGatheredResource(), "VXPG SuperpixelGathered");
+		m_vxpg.superpixelFuzzyWeight = importRaw(m_superpixelBuildPass->GetFuzzyWeightResource(), "VXPG SuperpixelFuzzyWeight");
+		m_vxpg.superpixelFuzzyIndex  = importRaw(m_superpixelBuildPass->GetFuzzyIndexResource(), "VXPG SuperpixelFuzzyIndex");
+	}
+	if (m_clusterVisibilityPass)
+	{
+		m_vxpg.clusterVisibilityMask = importRaw(m_clusterVisibilityPass->GetMaskResource(), "VXPG ClusterVisibilityMask");
+		m_vxpg.avgVisibility         = importBuffer(m_clusterVisibilityPass->GetAvgVisibilityBuffer(), "VXPG AvgVisibility");
+	}
+	if (m_lightTreePass)
+	{
+		m_vxpg.lightTreeNodes         = importBuffer(m_lightTreePass->GetNodesBuffer(), "VXPG LightTreeNodes");
+		m_vxpg.lightTreeCompactToLeaf = importBuffer(m_lightTreePass->GetCompactToLeafBuffer(), "VXPG LightTreeCompactToLeaf");
+		m_vxpg.lightTreeClusterRoots  = importBuffer(m_lightTreePass->GetClusterRootsBuffer(), "VXPG LightTreeClusterRoots");
+		m_vxpg.superpixelClusterHeap  = importBuffer(m_lightTreePass->GetSuperpixelClusterHeapBuffer(), "VXPG SuperpixelClusterHeap");
+	}
+
+	// Every node below is added unconditionally; the ones whose products nothing
+	// reads this frame are culled. Buffers a pass only hands between its own
+	// kernels stay hand-barriered — those hazards are intra-pass, which a single
+	// node cannot express.
+	constexpr GraphAccess kUavRead  = GraphAccess::UnorderedAccessRead;
+	constexpr GraphAccess kUavWrite = GraphAccess::ComputeWrite;
+
+	// Stage 2: shared VBuffer (one jittered primary per pixel, ADR 0004), then
+	// light injection reconstructing its first vertex from it (also emits the
+	// ShadingPoints G-buffer).
+	if (m_vbufferPass)
 	{
 		m_renderGraph.AddPass("VXPG VBuffer",
-			[&](RenderGraphPassBuilder& pass) { pass.Write(vbufferHandle, GraphAccess::ComputeWrite); },
-			[this]()
-			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG VBuffer");
-				m_vbufferPass->Render();
-			});
+			[&](RenderGraphPassBuilder& pass) { pass.Write(m_vxpg.vbuffer, kUavWrite); },
+			[this]() { m_vbufferPass->Render(); });
 	}
-	if (stage >= VxpgStage::Inject && m_lightInjectionPass)
+	if (m_lightInjectionPass)
 	{
 		m_renderGraph.AddPass("VXPG LightInjection",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				if (vbufferHandle != InvalidGraphResource)
-					pass.Read(vbufferHandle, GraphAccess::UnorderedAccessRead);
-				declareInjectionOutputs(pass);
+				pass.Read(m_vxpg.vbuffer, kUavRead);
+				pass.Read(m_vxpg.voxelOccupancy, kUavRead);
+				pass.Write(m_vxpg.shadingPoints, kUavWrite);
+				pass.Write(m_vxpg.voxelRepresentative, kUavWrite);
+				pass.Write(m_vxpg.vplPosition, kUavWrite);
+				pass.Write(m_vxpg.voxelIrradiance, kUavWrite);
+				pass.Write(m_vxpg.voxelVplCount, kUavWrite);
 			},
-			[this]()
-			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightInjection");
-				m_lightInjectionPass->Render();
-			});
+			[this]() { m_lightInjectionPass->Render(); });
 	}
 
 	// Stage 3: build the guiding distribution from the injected voxels
 	// (reload baked bounds -> compact -> CDF).
-	if (stage >= VxpgStage::GuidingBuild && m_voxelGuidingBuildPass)
+	if (m_voxelGuidingBuildPass)
 	{
 		m_renderGraph.AddPass("VXPG GuidingBuild",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				pass.Read(irradianceHandle, GraphAccess::UnorderedAccessRead);
-				pass.Read(vplCountHandle, GraphAccess::UnorderedAccessRead);
-				if (representativeHandle != InvalidGraphResource)
-					pass.Read(representativeHandle, GraphAccess::UnorderedAccessRead);
+				pass.Read(m_vxpg.voxelIrradiance, kUavRead);
+				pass.Read(m_vxpg.voxelVplCount, kUavRead);
+				pass.Read(m_vxpg.voxelRepresentative, kUavRead);
+				pass.Write(m_vxpg.counters, kUavWrite);
+				pass.Write(m_vxpg.compactIds, kUavWrite);
+				pass.Write(m_vxpg.inverseIndex, kUavWrite);
+				pass.Write(m_vxpg.compactLightPoints, kUavWrite);
+				pass.Write(m_vxpg.premulIrradiance, kUavWrite);
+				pass.Write(m_vxpg.liveBoundMin, kUavWrite);
+				pass.Write(m_vxpg.liveBoundMax, kUavWrite);
 			},
 			[this]()
 			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG GuidingBuild");
 				m_voxelGuidingBuildPass->Run(
 					m_lightInjectionPass ? m_lightInjectionPass->GetVoxelRepresentativeTexture().Get() : nullptr);
 			});
@@ -1536,19 +1597,18 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 
 	// Stage 4: fingerprint every lit voxel (128 stratified screen representatives
 	// -> per-voxel visibility mask via inline shadow rays).
-	if (stage >= VxpgStage::Fingerprint && m_fingerprintPass && m_scene)
+	if (m_fingerprintPass && m_scene)
 	{
 		m_renderGraph.AddPass("VXPG Fingerprint",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				if (shadingPointsHandle != InvalidGraphResource)
-					pass.Read(shadingPointsHandle, GraphAccess::UnorderedAccessRead);
-				if (fingerprintsHandle != InvalidGraphResource)
-					pass.Write(fingerprintsHandle, GraphAccess::ComputeWrite);
+				pass.Read(m_vxpg.shadingPoints, kUavRead);
+				pass.Read(m_vxpg.counters, kUavRead);
+				pass.Read(m_vxpg.compactLightPoints, kUavRead);
+				pass.Write(m_vxpg.voxelFingerprints, kUavWrite);
 			},
 			[this]()
 			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Fingerprint");
 				auto tlas = m_scene->GetAccelerationStructures()->GetTopLevelAS().p_result;
 				m_fingerprintPass->Run(tlas ? tlas->GetGPUVirtualAddress() : 0,
 					m_passConstants->data.frameIndex);
@@ -1556,35 +1616,36 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	}
 
 	// Stage 5: k-means++ cluster the fingerprinted voxels into 32 supervoxels.
-	if (stage >= VxpgStage::Cluster && m_clusterPass)
+	if (m_clusterPass)
 	{
 		m_renderGraph.AddPass("VXPG Cluster",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				if (fingerprintsHandle != InvalidGraphResource)
-					pass.Read(fingerprintsHandle, GraphAccess::UnorderedAccessRead);
-				if (clusterAssignmentsHandle != InvalidGraphResource)
-					pass.Write(clusterAssignmentsHandle, GraphAccess::ComputeWrite);
+				pass.Read(m_vxpg.voxelFingerprints, kUavRead);
+				pass.Read(m_vxpg.compactIds, kUavRead);
+				pass.Read(m_vxpg.premulIrradiance, kUavRead);
+				pass.Write(m_vxpg.clusterAssignments, kUavWrite);
+				pass.Write(m_vxpg.clusterSeedCompactIds, kUavWrite);
 			},
-			[this]()
-			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Cluster");
-				m_clusterPass->Run(m_passConstants->data.frameIndex);
-			});
+			[this]() { m_clusterPass->Run(m_passConstants->data.frameIndex); });
 	}
 
 	// Stage 6: SLIC superpixel clustering over the ShadingPoints G-buffer.
-	if (stage >= VxpgStage::Superpixel && m_superpixelBuildPass)
+	if (m_superpixelBuildPass)
 	{
 		m_renderGraph.AddPass("VXPG Superpixel",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				if (shadingPointsHandle != InvalidGraphResource)
-					pass.Read(shadingPointsHandle, GraphAccess::UnorderedAccessRead);
+				pass.Read(m_vxpg.shadingPoints, kUavRead);
+				pass.Write(m_vxpg.superpixelIndex, kUavWrite);
+				pass.Write(m_vxpg.superpixelCenter, kUavWrite);
+				pass.Write(m_vxpg.superpixelCounter, kUavWrite);
+				pass.Write(m_vxpg.superpixelGathered, kUavWrite);
+				pass.Write(m_vxpg.superpixelFuzzyWeight, kUavWrite);
+				pass.Write(m_vxpg.superpixelFuzzyIndex, kUavWrite);
 			},
 			[this]()
 			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Superpixel");
 				m_superpixelBuildPass->Run(
 					m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
 					g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
@@ -1592,88 +1653,127 @@ void Renderer::RunVxpgPipelineUpTo(VxpgStage stage)
 	}
 
 	// Stage 7: per-superpixel x per-cluster soft visibility (cvis).
-	if (stage >= VxpgStage::ClusterVisibility && m_clusterVisibilityPass)
+	if (m_clusterVisibilityPass)
 	{
 		m_renderGraph.AddPass("VXPG ClusterVisibility",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				if (vplPositionHandle != InvalidGraphResource)
-					pass.Read(vplPositionHandle, GraphAccess::UnorderedAccessRead);
-				if (vbufferHandle != InvalidGraphResource)
-					pass.Read(vbufferHandle, GraphAccess::UnorderedAccessRead);
-				if (clusterAssignmentsHandle != InvalidGraphResource)
-					pass.Read(clusterAssignmentsHandle, GraphAccess::UnorderedAccessRead);
+				pass.Read(m_vxpg.vplPosition, kUavRead);
+				pass.Read(m_vxpg.vbuffer, kUavRead);
+				pass.Read(m_vxpg.clusterAssignments, kUavRead);
+				pass.Read(m_vxpg.superpixelIndex, kUavRead);
+				pass.Read(m_vxpg.superpixelGathered, kUavRead);
+				pass.Read(m_vxpg.superpixelCounter, kUavRead);
+				pass.Write(m_vxpg.clusterVisibilityMask, kUavWrite);
+				pass.Write(m_vxpg.avgVisibility, kUavWrite);
 			},
-			[this]()
-			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG ClusterVisibility");
-				m_clusterVisibilityPass->Run(m_passConstants->data.frameIndex);
-			});
+			[this]() { m_clusterVisibilityPass->Run(m_passConstants->data.frameIndex); });
 	}
 
 	// Stage 8: bottom light tree (Karras LBVH over lit voxels: encode -> sort ->
 	// initial -> internal -> merge).
-	if (stage >= VxpgStage::LightTree && m_lightTreePass)
+	if (m_lightTreePass)
 	{
 		m_renderGraph.AddPass("VXPG LightTree",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				// Its own tree buffers stay hand-barriered (intra-pass kernels).
-				if (clusterAssignmentsHandle != InvalidGraphResource)
-					pass.Read(clusterAssignmentsHandle, GraphAccess::UnorderedAccessRead);
+				pass.Read(m_vxpg.clusterAssignments, kUavRead);
+				pass.Read(m_vxpg.counters, kUavRead);
+				pass.Read(m_vxpg.compactIds, kUavRead);
+				pass.Read(m_vxpg.compactLightPoints, kUavRead);
+				pass.Read(m_vxpg.premulIrradiance, kUavRead);
+				pass.Read(m_vxpg.avgVisibility, kUavRead);
+				pass.Write(m_vxpg.lightTreeNodes, kUavWrite);
+				pass.Write(m_vxpg.lightTreeCompactToLeaf, kUavWrite);
+				pass.Write(m_vxpg.lightTreeClusterRoots, kUavWrite);
+				pass.Write(m_vxpg.superpixelClusterHeap, kUavWrite);
 			},
-			[this]()
-			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG LightTree");
-				m_lightTreePass->Run();
-			});
+			[this]() { m_lightTreePass->Run(); });
 	}
 
 	// Reuse config (ADR 0009): the build above consumed last frame's VPL data;
-	// wipe the accumulators now so the guided GI raygen refills them fresh.
+	// wipe the accumulators now so the guided GI raygen refills them fresh. Its
+	// consumer is next frame's build, which culling cannot see.
 	if (reuseGiVpl)
 	{
 		m_renderGraph.AddPass("VXPG InjectionClear",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				pass.Write(irradianceHandle, GraphAccess::ComputeWrite);
-				pass.Write(vplCountHandle, GraphAccess::ComputeWrite);
+				pass.NeverCull();
+				pass.Write(m_vxpg.voxelIrradiance, kUavWrite);
+				pass.Write(m_vxpg.voxelVplCount, kUavWrite);
 			},
-			[this]()
-			{
-				ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG InjectionClear");
-				m_voxelizationPass->DispatchFrameClear(/*emitTailBarriers*/ false);
-			});
+			[this]() { m_voxelizationPass->DispatchFrameClear(/*emitTailBarriers*/ false); });
 	}
 }
 
 void Renderer::DeclareGuidingReads(RenderGraphPassBuilder& pass)
 {
 	// Only a guiding technique touches these; a plain path tracer declares nothing
-	// and the VXPG nodes have no reader at all.
-	if (!m_raytracePass || m_raytracePass->RequiredVxpgStage() == VxpgStage::None)
+	// and every VXPG node is culled.
+	if (!m_raytracePass || !m_raytracePass->UsesVoxelGuiding())
 		return;
 
-	auto readRaw = [&](ID3D12Resource* resource, const char* debugName)
-	{
-		if (resource)
-			pass.Read(m_renderGraph.ImportRaw(resource, debugName), GraphAccess::UnorderedAccessRead);
-	};
+	constexpr GraphAccess kUavRead = GraphAccess::UnorderedAccessRead;
 
-	if (m_voxelizationPass)
+	// Read through the global descriptor table.
+	pass.Read(m_vxpg.voxelOccupancy, kUavRead);
+	pass.Read(m_vxpg.voxelIrradiance, kUavRead);
+	pass.Read(m_vxpg.voxelVplCount, kUavRead);
+	pass.Read(m_vxpg.voxelRepresentative, kUavRead);
+	pass.Read(m_vxpg.shadingPoints, kUavRead);
+	pass.Read(m_vxpg.vbuffer, kUavRead);
+	pass.Read(m_vxpg.superpixelIndex, kUavRead);
+	pass.Read(m_vxpg.superpixelCenter, kUavRead);
+	pass.Read(m_vxpg.superpixelFuzzyWeight, kUavRead);
+	pass.Read(m_vxpg.superpixelFuzzyIndex, kUavRead);
+	pass.Read(m_vxpg.clusterVisibilityMask, kUavRead);
+
+	// Read as root UAVs (GuidedPathTracingPass root parameters 8-19).
+	pass.Read(m_vxpg.counters, kUavRead);
+	pass.Read(m_vxpg.compactIds, kUavRead);
+	pass.Read(m_vxpg.inverseIndex, kUavRead);
+	pass.Read(m_vxpg.voxelFingerprints, kUavRead);
+	pass.Read(m_vxpg.clusterAssignments, kUavRead);
+	pass.Read(m_vxpg.clusterSeedCompactIds, kUavRead);
+	pass.Read(m_vxpg.lightTreeNodes, kUavRead);
+	pass.Read(m_vxpg.lightTreeCompactToLeaf, kUavRead);
+	pass.Read(m_vxpg.lightTreeClusterRoots, kUavRead);
+	pass.Read(m_vxpg.superpixelClusterHeap, kUavRead);
+	pass.Read(m_vxpg.liveBoundMin, kUavRead);
+	pass.Read(m_vxpg.liveBoundMax, kUavRead);
+}
+
+void Renderer::DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass)
+{
+	// The raster draws are not a node yet (phase 5), so this stands in for them:
+	// whatever the active debug view samples is what keeps VXPG stages alive.
+	constexpr GraphAccess kUavRead = GraphAccess::UnorderedAccessRead;
+
+	switch (g_rasterizationDebugMode.Get())
 	{
-		readRaw(m_voxelizationPass->GetIrradianceTexture().Get(), "VXPG VoxelIrradiance");
-		readRaw(m_voxelizationPass->GetVplCountTexture().Get(), "VXPG VoxelVplCount");
+	case RasterDebugMode::VoxelOccupancy:
+	case RasterDebugMode::Supervoxels:
+		pass.Read(m_vxpg.voxelOccupancy, kUavRead);
+		break;
+	case RasterDebugMode::VoxelIrradiance:
+		pass.Read(m_vxpg.voxelIrradiance, kUavRead);
+		pass.Read(m_vxpg.voxelVplCount, kUavRead);
+		break;
+	case RasterDebugMode::ShadingPointsNormal:
+	case RasterDebugMode::ShadingPointsPos:
+		pass.Read(m_vxpg.shadingPoints, kUavRead);
+		break;
+	case RasterDebugMode::SuperpixelId:
+		pass.Read(m_vxpg.superpixelIndex, kUavRead);
+		break;
+	case RasterDebugMode::SuperpixelRepresentative:
+		pass.Read(m_vxpg.superpixelIndex, kUavRead);
+		pass.Read(m_vxpg.superpixelCenter, kUavRead);
+		break;
+	default:
+		break;
 	}
-	if (m_lightInjectionPass)
-	{
-		readRaw(m_lightInjectionPass->GetVoxelRepresentativeTexture().Get(), "VXPG VoxelRepresentative");
-		readRaw(m_lightInjectionPass->GetShadingPointsTexture().Get(), "VXPG ShadingPoints");
-	}
-	if (m_vbufferPass)
-		readRaw(m_vbufferPass->GetVBufferTexture().Get(), "VXPG VBuffer");
-	if (m_clusterVisibilityPass)
-		readRaw(m_clusterVisibilityPass->GetMaskResource(), "VXPG ClusterVisibilityMask");
 }
 
 void Renderer::DumpRenderGraphIfRequested()

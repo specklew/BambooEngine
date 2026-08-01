@@ -8,8 +8,10 @@ namespace
     // but the type still has to line up.
     enum class NullViewKind
     {
-        None, // filled during initialization before anything is dispatched
         SrvTexture2D,
+        SrvRawBuffer,
+        SrvAccelerationStructure,
+        Cbv,
         UavTexture2D,
         UavTexture3D
     };
@@ -20,13 +22,16 @@ namespace
         DXGI_FORMAT  format;
     };
 
+    // Every slot, with no exceptions: a slot whose producer has released its
+    // resource (scene switch, resize, technique swap) is still bound by the frame's
+    // one descriptor table, so it must always hold a legal descriptor.
     constexpr NullView NullViews[] = {
-        { NullViewKind::None,         DXGI_FORMAT_UNKNOWN },                 // ImGuiFont
-        { NullViewKind::None,         DXGI_FORMAT_UNKNOWN },                 // CameraMatrices
-        { NullViewKind::None,         DXGI_FORMAT_UNKNOWN },                 // RaytraceOutput
-        { NullViewKind::None,         DXGI_FORMAT_UNKNOWN },                 // Tlas
-        { NullViewKind::None,         DXGI_FORMAT_UNKNOWN },                 // Vertices
-        { NullViewKind::None,         DXGI_FORMAT_UNKNOWN },                 // Indices
+        { NullViewKind::SrvTexture2D, DXGI_FORMAT_R8G8B8A8_UNORM },          // ImGuiFont
+        { NullViewKind::Cbv,          DXGI_FORMAT_UNKNOWN },                 // CameraMatrices
+        { NullViewKind::UavTexture2D, DXGI_FORMAT_R16G16B16A16_FLOAT },      // RaytraceOutput
+        { NullViewKind::SrvAccelerationStructure, DXGI_FORMAT_UNKNOWN },     // Tlas
+        { NullViewKind::SrvRawBuffer, DXGI_FORMAT_R32_TYPELESS },            // Vertices
+        { NullViewKind::SrvRawBuffer, DXGI_FORMAT_R32_TYPELESS },            // Indices
         { NullViewKind::SrvTexture2D, DXGI_FORMAT_R8G8B8A8_UNORM },          // MaterialTextures
         { NullViewKind::SrvTexture2D, DXGI_FORMAT_R8G8B8A8_UNORM },          // Skybox
         { NullViewKind::UavTexture3D, DXGI_FORMAT_R32_UINT },                // VoxelOccupancy
@@ -126,13 +131,36 @@ void GlobalDescriptorHeap::ClearSlot(GlobalDescriptor slot)
         case NullViewKind::SrvTexture2D:
             m_allocator.CreateNullShaderResourceView(base + i, nullView.format, D3D12_SRV_DIMENSION_TEXTURE2D);
             break;
+        case NullViewKind::SrvRawBuffer:
+        {
+            D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
+            desc.Format                  = nullView.format;
+            desc.ViewDimension           = D3D12_SRV_DIMENSION_BUFFER;
+            desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            desc.Buffer.Flags            = D3D12_BUFFER_SRV_FLAG_RAW;
+            m_allocator.CreateNullShaderResourceView(base + i, desc);
+            break;
+        }
+        case NullViewKind::SrvAccelerationStructure:
+        {
+            // AS SRVs always take a null resource and address the structure through
+            // the desc, so Location 0 is the well-formed empty one.
+            D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
+            desc.Format                  = DXGI_FORMAT_UNKNOWN;
+            desc.ViewDimension           = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+            desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            desc.RaytracingAccelerationStructure.Location = 0;
+            m_allocator.CreateNullShaderResourceView(base + i, desc);
+            break;
+        }
+        case NullViewKind::Cbv:
+            m_allocator.CreateNullConstantBufferView(base + i);
+            break;
         case NullViewKind::UavTexture2D:
             m_allocator.CreateNullUnorderedAccessView(base + i, nullView.format, D3D12_UAV_DIMENSION_TEXTURE2D);
             break;
         case NullViewKind::UavTexture3D:
             m_allocator.CreateNullUnorderedAccessView(base + i, nullView.format, D3D12_UAV_DIMENSION_TEXTURE3D);
-            break;
-        case NullViewKind::None:
             break;
         }
     }

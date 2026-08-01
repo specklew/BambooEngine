@@ -54,6 +54,12 @@ public:
     D3D12_GPU_VIRTUAL_ADDRESS GetClusterRootsBufferVA() const { return m_clusterRoots->GetGPUVirtualAddress(); }
     D3D12_GPU_VIRTUAL_ADDRESS GetSuperpixelClusterHeapBufferVA() const { return m_spixelClusterHeap->GetGPUVirtualAddress(); }
 
+    // Same buffers as the VAs above, for the render graph's read/write declarations.
+    RWStructuredBuffer<LightTreeNodeGpu>* GetNodesBuffer() const { return m_nodes.get(); }
+    RWStructuredBuffer<int32_t>* GetCompactToLeafBuffer() const { return m_compactToLeaf.get(); }
+    RWStructuredBuffer<int32_t>* GetClusterRootsBuffer() const { return m_clusterRoots.get(); }
+    RWStructuredBuffer<float>* GetSuperpixelClusterHeapBuffer() const { return m_spixelClusterHeap.get(); }
+
 private:
     void CreateBuffers();
     void CreateRootSignature();

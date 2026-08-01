@@ -43,6 +43,8 @@ public:
     // freed memory.
     void CreateNullShaderResourceView(uint32_t index, DXGI_FORMAT format, D3D12_SRV_DIMENSION dimension);
     void CreateNullUnorderedAccessView(uint32_t index, DXGI_FORMAT format, D3D12_UAV_DIMENSION dimension);
+    void CreateNullShaderResourceView(uint32_t index, const D3D12_SHADER_RESOURCE_VIEW_DESC& desc);
+    void CreateNullConstantBufferView(uint32_t index);
 
 private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_heap;

@@ -39,7 +39,7 @@ public:
     // cluster -> cluster-visibility. Fingerprint/cluster/cvis are required always
     // (not just for debug views 8/9/10): the tree passes consume them and their
     // cost belongs in equal-time benchmarks.
-    VxpgStage RequiredVxpgStage() const override { return VxpgStage::LightTree; }
+    bool UsesVoxelGuiding() const override { return true; }
 
 protected:
     TechniqueDesc GetTechniqueDesc() const override;

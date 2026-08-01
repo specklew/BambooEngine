@@ -15,7 +15,8 @@ public:
 private:
     friend class ShaderProgramCache;
 
-    void Build();
+    // False on a compile/create failure, with the previous PSO left in place.
+    bool Build();
 
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipelineState;
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;

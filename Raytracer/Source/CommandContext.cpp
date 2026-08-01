@@ -65,6 +65,11 @@ void CommandContext::UavBarrierRaw(ID3D12Resource* resource)
     QueueBarrier(CD3DX12_RESOURCE_BARRIER::UAV(resource), resource);
 }
 
+void CommandContext::EnqueueBarrier(const D3D12_RESOURCE_BARRIER& barrier, ID3D12Resource* resource)
+{
+    QueueBarrier(barrier, resource);
+}
+
 void CommandContext::FlushBarriers()
 {
     if (m_pendingBarriers.empty())
@@ -112,6 +117,13 @@ void CommandContext::CopyResource(ID3D12Resource* destination, ID3D12Resource* s
 {
     FlushBarriers();
     m_commandList->CopyResource(destination, source);
+}
+
+void CommandContext::CopyTextureRegion(const D3D12_TEXTURE_COPY_LOCATION& destination,
+                                       const D3D12_TEXTURE_COPY_LOCATION& source)
+{
+    FlushBarriers();
+    m_commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
 }
 
 void CommandContext::Close()

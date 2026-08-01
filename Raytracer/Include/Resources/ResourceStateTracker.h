@@ -18,24 +18,18 @@ public:
     void Register(Resource& resource);
     void Unregister(Resource& resource);
 
-    // Emits exactly the barrier the call site always emitted (expectedBefore → after)
+    // Builds exactly the barrier the call site always emitted (expectedBefore → after)
     // and checks expectedBefore against tracked state, promotion-aware. A mismatch is
     // either a tracker bug or a wrong hardcoded state — both findings, reported once
-    // per (resource, before, after) site.
-    void TransitionChecked(ID3D12GraphicsCommandList* commandList, Resource& resource,
-                           D3D12_RESOURCE_STATES expectedBefore, D3D12_RESOURCE_STATES after);
-
-    // Same check and tracker update, but the barrier is handed back instead of
-    // submitted — CommandContext (L3) batches barriers and submits them together
-    // ahead of the work that needs them.
+    // per (resource, before, after) site. CommandContext (L3) batches the returned
+    // barriers and submits them together ahead of the work that needs them.
     D3D12_RESOURCE_BARRIER BuildTransitionChecked(Resource& resource,
                                                   D3D12_RESOURCE_STATES expectedBefore,
                                                   D3D12_RESOURCE_STATES after);
-    D3D12_RESOURCE_BARRIER BuildUavBarrierChecked(Resource& resource);
 
-    // Emits the UAV barrier; warns when the tracked state is not (promotable to)
+    // Builds the UAV barrier; warns when the tracked state is not (promotable to)
     // UNORDERED_ACCESS.
-    void UavBarrierChecked(ID3D12GraphicsCommandList* commandList, Resource& resource);
+    D3D12_RESOURCE_BARRIER BuildUavBarrierChecked(Resource& resource);
 
     // Applies implicit decay to COMMON. Call after every ExecuteCommandLists on the
     // queue this tracker models; the GPU decays at execution completion, but on the

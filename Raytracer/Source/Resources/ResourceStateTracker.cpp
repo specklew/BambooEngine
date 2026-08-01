@@ -16,8 +16,11 @@ namespace
 
 ResourceStateTracker& ResourceStateTracker::Get()
 {
-    static ResourceStateTracker s_directQueueTracker;
-    return s_directQueueTracker;
+    // Deliberately never destroyed: ~Resource calls Unregister(), and any Resource
+    // owned by a static outlives a function-local static's destruction. Leaking one
+    // tracker until process exit is cheaper than a use-after-free on teardown.
+    static ResourceStateTracker* s_directQueueTracker = new ResourceStateTracker();
+    return *s_directQueueTracker;
 }
 
 void ResourceStateTracker::Register(Resource& resource)
@@ -33,19 +36,6 @@ void ResourceStateTracker::Unregister(Resource& resource)
 bool ResourceStateTracker::ReportOnce(const std::string& siteKey)
 {
     return m_reportedSites.insert(siteKey).second;
-}
-
-void ResourceStateTracker::TransitionChecked(ID3D12GraphicsCommandList* commandList, Resource& resource,
-                                             D3D12_RESOURCE_STATES expectedBefore, D3D12_RESOURCE_STATES after)
-{
-    const auto barrier = BuildTransitionChecked(resource, expectedBefore, after);
-    commandList->ResourceBarrier(1, &barrier);
-}
-
-void ResourceStateTracker::UavBarrierChecked(ID3D12GraphicsCommandList* commandList, Resource& resource)
-{
-    const auto barrier = BuildUavBarrierChecked(resource);
-    commandList->ResourceBarrier(1, &barrier);
 }
 
 D3D12_RESOURCE_BARRIER ResourceStateTracker::BuildTransitionChecked(Resource& resource,
@@ -92,7 +82,6 @@ D3D12_RESOURCE_BARRIER ResourceStateTracker::BuildTransitionChecked(Resource& re
 
         // Both models agree after the barrier regardless of which was right.
         tracked.state = after;
-        tracked.promotedReadOnly = false;
     }
     else
     {
@@ -119,7 +108,6 @@ D3D12_RESOURCE_BARRIER ResourceStateTracker::BuildUavBarrierChecked(Resource& re
         {
             // The UAV write that this barrier flushes promoted the resource.
             tracked.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-            tracked.promotedReadOnly = false;
         }
         else if (tracked.state != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
         {
@@ -144,7 +132,6 @@ void ResourceStateTracker::OnExecuteCommandLists()
         if (tracked.tracked && tracked.DecaysAtExecuteCompletion())
         {
             tracked.state = D3D12_RESOURCE_STATE_COMMON;
-            tracked.promotedReadOnly = false;
         }
     }
 }

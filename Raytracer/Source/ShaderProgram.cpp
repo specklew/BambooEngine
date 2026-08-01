@@ -5,18 +5,37 @@
 #include "Shader.h"
 #include "Utils/Utils.h"
 
-void ComputeProgram::Build()
+// Builds into a temporary and only publishes on success: a hot reload that hits a
+// shader with a typo must leave the pass bound to its last good PSO rather than to
+// null. Returns false instead of throwing so one bad shader cannot take the rest
+// of RebuildAll() with it.
+bool ComputeProgram::Build()
 {
     auto& resourceManager = ResourceManager::Get();
     auto  shaderHandle    = resourceManager.GetOrLoadShader(AssetId(m_shaderAssetPath));
     auto  bytecode        = resourceManager.shaders.GetResource(shaderHandle).bytecode;
+    if (!bytecode)
+    {
+        spdlog::error("Compute program {}: no bytecode", m_shaderAssetPath);
+        return false;
+    }
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
     desc.pRootSignature = m_rootSignature.Get();
     desc.CS             = CD3DX12_SHADER_BYTECODE(bytecode->GetBufferPointer(), bytecode->GetBufferSize());
 
-    ThrowIfFailed(m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&m_pipelineState)));
-    m_pipelineState->SetName(m_debugName.c_str());
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> rebuilt;
+    const HRESULT hr = m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&rebuilt));
+    if (FAILED(hr))
+    {
+        spdlog::error("Compute program {} failed to build (0x{:08x}); keeping the previous PSO",
+                      m_shaderAssetPath, static_cast<uint32_t>(hr));
+        return false;
+    }
+
+    rebuilt->SetName(m_debugName.c_str());
+    m_pipelineState = std::move(rebuilt);
+    return true;
 }
 
 ShaderProgramCache& ShaderProgramCache::Get()
@@ -40,7 +59,11 @@ ComputeProgram* ShaderProgramCache::GetOrCreateCompute(ID3D12Device* device, ID3
     program->m_rootSignature   = rootSignature;
     program->m_shaderAssetPath = shaderAssetPath;
     program->m_debugName       = debugName ? debugName : L"Compute PSO";
-    program->Build();
+
+    // The first build has no previous PSO to fall back on, so a failure here is
+    // fatal in the same way it always was.
+    if (!program->Build())
+        ThrowIfFailed(E_FAIL);
 
     ComputeProgram* result = program.get();
     m_computePrograms.emplace(key, std::move(program));
@@ -49,8 +72,14 @@ ComputeProgram* ShaderProgramCache::GetOrCreateCompute(ID3D12Device* device, ID3
 
 void ShaderProgramCache::RebuildAll()
 {
+    size_t failed = 0;
     for (auto& [key, program] : m_computePrograms)
-        program->Build();
+        if (!program->Build())
+            ++failed;
 
-    spdlog::info("Rebuilt {} compute pipeline states", m_computePrograms.size());
+    if (failed > 0)
+        spdlog::warn("Rebuilt {} of {} compute pipeline states ({} kept their previous PSO)",
+                     m_computePrograms.size() - failed, m_computePrograms.size(), failed);
+    else
+        spdlog::info("Rebuilt {} compute pipeline states", m_computePrograms.size());
 }
