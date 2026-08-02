@@ -31,9 +31,10 @@ public:
 
     void OnSceneLoaded(const Scene& scene);
 
-    // Rebakes if invalidated (grid resize / bound flags / scene load), then
-    // clears the per-frame injection accumulators.
-    void RunFrame(const Scene& scene, uint32_t requestedGridDim, bool bakeUseCompact, bool bakeClipping);
+    // Resizes and invalidates, recording nothing: a grid resize recreates the
+    // textures the graph is about to import, so it has to settle before the
+    // imports. Returns whether the bake nodes below still owe this frame a bake.
+    bool PrepareFrame(const Scene& scene, uint32_t requestedGridDim, bool bakeUseCompact, bool bakeClipping);
 
     bool DidResize() const { return m_didResize; }
 
@@ -41,10 +42,17 @@ public:
     void SetRuntimeParams(bool injectUseAvg, float heatScale, bool reuseGiVpl);
 
     // Zeroes the per-frame injection accumulators (irradiance + VPL count).
-    // Called by the renderer: before injection in the faithful config, or
-    // after the guiding build when VPL data is reused from last frame's GI
-    // (ADR 0009) — the build passes must read before the wipe.
-    void DispatchFrameClear(bool emitTailBarriers = true);
+    // Ordered by the graph: before injection in the faithful config, or after the
+    // guiding build when VPL data is reused from last frame's GI (ADR 0009) — the
+    // build passes must read before the wipe.
+    void DispatchFrameClear();
+
+    // The two halves of the geometry bake, one graph node each. The bake stays
+    // valid until a scene load, grid resize or bound-flag change invalidates it,
+    // and marks itself valid only once it has actually run — a frame that culls it
+    // simply owes the bake again.
+    void DispatchBakeClear();
+    void DispatchBake(const Scene& scene);
 
     Microsoft::WRL::ComPtr<ID3D12Resource> GetOccupancyTexture() const { return m_occupancyTex; }
     Microsoft::WRL::ComPtr<ID3D12Resource> GetIrradianceTexture() const { return m_irradianceTex; }
@@ -69,8 +77,6 @@ private:
     void CreateDescriptorHeap();
     void WriteGridConstantsCB();
     void WriteUintTex3DUav(ID3D12Resource* resource, D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
-    void DispatchBakeClear();
-    void DispatchBake(const Scene& scene);
     void RecreateForNewDim(uint32_t newDim);
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;

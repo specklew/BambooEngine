@@ -169,6 +169,8 @@ private:
 		GraphResourceHandle voxelRepresentative  = InvalidGraphResource;
 		GraphResourceHandle vplPosition          = InvalidGraphResource;
 		GraphResourceHandle voxelOccupancy       = InvalidGraphResource;
+		GraphResourceHandle bakedBoundMin        = InvalidGraphResource;
+		GraphResourceHandle bakedBoundMax        = InvalidGraphResource;
 		GraphResourceHandle voxelIrradiance      = InvalidGraphResource;
 		GraphResourceHandle voxelVplCount        = InvalidGraphResource;
 		GraphResourceHandle counters             = InvalidGraphResource;

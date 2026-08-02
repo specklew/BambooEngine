@@ -12,7 +12,6 @@
 #include "StatesManager.h"
 #include "PostProcessPass.h"
 #include "Utils/CVars.h"
-#include "Utils/GpuMarker.h"
 #include "Utils/Utils.h"
 #include "SceneResources/GameObject.h"
 #include "imgui.h"
@@ -1239,9 +1238,9 @@ void Renderer::WireGuidingResources()
 
 bool Renderer::FrameUsesVoxelGuiding() const
 {
-	// One bit, not a stage ladder: it only gates the eager world-space bake, which
-	// has to run before the graph imports because a grid resize recreates the very
-	// textures those imports capture. Everything past that is the graph's call.
+	// One bit, not a stage ladder: it only gates whether the VXPG subgraph is
+	// declared at all, so a frame that cannot use it skips the resize/import work
+	// too. Which of the declared nodes run is the graph's call.
 	return m_rasterize
 		? RasterDebugViewUsesVoxelGuiding(g_rasterizationDebugMode.Get())
 		: (m_raytracePass && m_raytracePass->UsesVoxelGuiding());
@@ -1254,8 +1253,6 @@ void Renderer::BuildVxpgGraph()
 	if (!FrameUsesVoxelGuiding() || !m_voxelizationPass || !m_scene)
 		return;
 
-	// Stage 1: geometry bake (rebakes only when invalidated) + per-frame
-	// injection-accumulator clear.
 	// Debug views suppress the BSDF subtree whose bounce writes the VPL data,
 	// which would starve the guide within two frames — fall back to the
 	// dedicated injection trace whenever one is active. The symmetric baseline
@@ -1278,17 +1275,9 @@ void Renderer::BuildVxpgGraph()
 	if (requestedGridDim != m_voxelizationPass->GetGridDim())
 		FlushCommandQueue();
 
-	{
-		ScopedGpuMarker marker(m_d3d12CommandList.Get(), "VXPG Voxelize/BakeClear");
-		m_voxelizationPass->RunFrame(*m_scene, requestedGridDim,
-			g_voxelBakeUseCompact.Get() != 0, g_voxelBakeClipping.Get() != 0);
-		// Faithful config: wipe the injection accumulators up front, the
-		// injection trace refills them this frame. Reuse config wipes after
-		// the guiding build instead (below) — the build passes consume last
-		// frame's GI-written VPL data first (ADR 0009).
-		if (!reuseGiVpl)
-			m_voxelizationPass->DispatchFrameClear();
-	}
+	const bool needsBake = m_voxelizationPass->PrepareFrame(*m_scene, requestedGridDim,
+		g_voxelBakeUseCompact.Get() != 0, g_voxelBakeClipping.Get() != 0);
+
 	if (m_voxelizationPass->DidResize())
 	{
 		WriteVoxelUavsToGlobalHeap();
@@ -1314,6 +1303,8 @@ void Renderer::BuildVxpgGraph()
 	m_vxpg.voxelOccupancy  = importRaw(m_voxelizationPass->GetOccupancyTexture().Get(), "VXPG VoxelOccupancy");
 	m_vxpg.voxelIrradiance = importRaw(m_voxelizationPass->GetIrradianceTexture().Get(), "VXPG VoxelIrradiance");
 	m_vxpg.voxelVplCount   = importRaw(m_voxelizationPass->GetVplCountTexture().Get(), "VXPG VoxelVplCount");
+	m_vxpg.bakedBoundMin   = importBuffer(m_voxelizationPass->GetBakedBoundMinBuffer(), "VXPG BakedBoundMin");
+	m_vxpg.bakedBoundMax   = importBuffer(m_voxelizationPass->GetBakedBoundMaxBuffer(), "VXPG BakedBoundMax");
 
 	if (m_vbufferPass)
 		m_vxpg.vbuffer = importRaw(m_vbufferPass->GetVBufferTexture().Get(), "VXPG VBuffer");
@@ -1379,6 +1370,45 @@ void Renderer::BuildVxpgGraph()
 	constexpr GraphAccess kUavRead  = GraphAccess::UnorderedAccessRead;
 	constexpr GraphAccess kUavWrite = GraphAccess::ComputeWrite;
 
+	// Stage 1: the world-space geometry bake, whenever a scene load, grid resize or
+	// bound-flag change invalidated it. Two nodes, so the clear-before-bake order is
+	// a declaration rather than the four barriers the pass used to place. A frame
+	// that culls them keeps owing the bake, so laziness is safe.
+	if (needsBake)
+	{
+		m_renderGraph.AddPass("VXPG BakeClear",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Write(m_vxpg.voxelOccupancy, kUavWrite);
+				pass.Write(m_vxpg.bakedBoundMin, kUavWrite);
+				pass.Write(m_vxpg.bakedBoundMax, kUavWrite);
+			},
+			[this]() { m_voxelizationPass->DispatchBakeClear(); });
+
+		m_renderGraph.AddPass("VXPG Bake",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Write(m_vxpg.voxelOccupancy, kUavWrite);
+				pass.Write(m_vxpg.bakedBoundMin, kUavWrite);
+				pass.Write(m_vxpg.bakedBoundMax, kUavWrite);
+			},
+			[this]() { m_voxelizationPass->DispatchBake(*m_scene); });
+	}
+
+	// Faithful config: wipe the injection accumulators up front, the injection trace
+	// refills them this frame. Reuse config wipes after the guiding build instead
+	// (below) — those passes consume last frame's GI-written VPL data first.
+	if (!reuseGiVpl)
+	{
+		m_renderGraph.AddPass("VXPG InjectionClear",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Write(m_vxpg.voxelIrradiance, kUavWrite);
+				pass.Write(m_vxpg.voxelVplCount, kUavWrite);
+			},
+			[this]() { m_voxelizationPass->DispatchFrameClear(); });
+	}
+
 	// Stage 2: shared VBuffer (one jittered primary per pixel, ADR 0004), then
 	// light injection reconstructing its first vertex from it (also emits the
 	// ShadingPoints G-buffer).
@@ -1421,6 +1451,10 @@ void Renderer::BuildVxpgGraph()
 			{
 				pass.Read(m_vxpg.voxelIrradiance, kUavRead);
 				pass.Read(m_vxpg.voxelVplCount, kUavRead);
+				// Copies the baked bounds into the live ones: this is what keeps the
+				// bake nodes alive through culling.
+				pass.Read(m_vxpg.bakedBoundMin, kUavRead);
+				pass.Read(m_vxpg.bakedBoundMax, kUavRead);
 				pass.Write(m_vxpg.liveBoundMin, kUavWrite);
 				pass.Write(m_vxpg.liveBoundMax, kUavWrite);
 			},
@@ -1700,7 +1734,7 @@ void Renderer::BuildVxpgGraph()
 				pass.Write(m_vxpg.voxelIrradiance, kUavWrite);
 				pass.Write(m_vxpg.voxelVplCount, kUavWrite);
 			},
-			[this]() { m_voxelizationPass->DispatchFrameClear(/*emitTailBarriers*/ false); });
+			[this]() { m_voxelizationPass->DispatchFrameClear(); });
 	}
 }
 

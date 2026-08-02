@@ -329,11 +329,7 @@ void VoxelizationPass::WriteGridConstantsCB()
     std::memcpy(m_gridConstantsCBMapped, &m_gridConstants, sizeof(VoxelGridConstants));
 }
 
-// emitTailBarriers=false when this runs as a graph node: the node declares both
-// textures as writes, so the reader's declaration carries the barrier. The eager
-// pre-injection clear (stage 1, which runs before the graph is built because a
-// grid resize can recreate these textures) still emits its own.
-void VoxelizationPass::DispatchFrameClear(bool emitTailBarriers)
+void VoxelizationPass::DispatchFrameClear()
 {
     ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
@@ -351,12 +347,6 @@ void VoxelizationPass::DispatchFrameClear(bool emitTailBarriers)
 
     const uint32_t groups = (m_gridDim + 7) / 8;
     CommandContext::Get().Dispatch(groups, groups, groups);
-
-    if (emitTailBarriers)
-    {
-        CommandContext::Get().UavBarrierRaw(m_irradianceTex.Get());
-        CommandContext::Get().UavBarrierRaw(m_vplCountTex.Get());
-    }
 }
 
 void VoxelizationPass::DispatchBakeClear()
@@ -374,14 +364,13 @@ void VoxelizationPass::DispatchBakeClear()
 
     const uint32_t groups = (m_gridDim + 7) / 8;
     CommandContext::Get().Dispatch(groups, groups, groups);
-
-    CommandContext::Get().UavBarrierRaw(m_occupancyTex.Get());
-    m_bakedBoundMin->UavBarrier(m_commandList.Get());
-    m_bakedBoundMax->UavBarrier(m_commandList.Get());
 }
 
 void VoxelizationPass::DispatchBake(const Scene& scene)
 {
+    spdlog::info("VoxelizationPass: baking geometry (gridDim={}, useCompact={}, clipping={})",
+        m_gridDim, m_bakedUseCompact, m_bakedClipping);
+
     ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetGraphicsRootSignature(m_bakeRootSig.Get());
@@ -434,14 +423,12 @@ void VoxelizationPass::DispatchBake(const Scene& scene)
         }
     }
 
-    CommandContext::Get().UavBarrierRaw(m_occupancyTex.Get());
-    m_bakedBoundMin->UavBarrier(m_commandList.Get());
-    m_bakedBoundMax->UavBarrier(m_commandList.Get());
+    m_bakeValid = true;
 }
 
-void VoxelizationPass::RunFrame(const Scene& scene, uint32_t requestedGridDim, bool bakeUseCompact, bool bakeClipping)
+bool VoxelizationPass::PrepareFrame(const Scene& scene, uint32_t requestedGridDim, bool bakeUseCompact, bool bakeClipping)
 {
-    if (!m_initialized || !m_haveScene) return;
+    if (!m_initialized || !m_haveScene) return false;
 
     m_didResize = false;
     if (requestedGridDim != m_gridDim)
@@ -457,14 +444,5 @@ void VoxelizationPass::RunFrame(const Scene& scene, uint32_t requestedGridDim, b
         m_bakeValid       = false;
     }
 
-    if (!m_bakeValid)
-    {
-        spdlog::info("VoxelizationPass: baking geometry (gridDim={}, useCompact={}, clipping={})",
-            m_gridDim, m_bakedUseCompact, m_bakedClipping);
-        DispatchBakeClear();
-        DispatchBake(scene);
-        m_bakeValid = true;
-    }
-    // Injection-accumulator clear is the renderer's call now: its position
-    // depends on whether VPL data is reused from last frame's GI (ADR 0009).
+    return !m_bakeValid;
 }
