@@ -86,6 +86,14 @@ struct HeadlessArgs
 
     float       seconds = -1.0f;          // < 0 => use config default
     std::string outDir;                   // empty => use config output dir
+
+    // Headless normally runs without the debug layer, because its uneven
+    // per-submit validation cost makes frame counts meaningless. --debug-layer
+    // turns it back on for a correctness run; --rdg-dump asks for the one-shot
+    // graph/barrier/root-signature dump on the first frame. Both exist so a
+    // verification run needs no source edit.
+    bool debugLayer = false;
+    bool rdgDump    = false;
 };
 
 HeadlessArgs   ParseHeadlessArgs(int argc, wchar_t** argv);

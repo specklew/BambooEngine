@@ -37,11 +37,17 @@ int Application::Run()
 	Window::Create(m_hInstance, windowRect, this, headlessArgs.headless);
 
 	// Benchmarks must not pay the debug layer's uneven per-submit validation
-	// tax (see Renderer::g_enableDebugLayer).
-	Renderer::g_enableDebugLayer = !headlessArgs.headless;
+	// tax (see Renderer::g_enableDebugLayer), so headless opts out unless
+	// --debug-layer asks for a correctness run instead of a timing one.
+	Renderer::g_enableDebugLayer = !headlessArgs.headless || headlessArgs.debugLayer;
 
 	m_renderer->Initialize();
 	m_ready = true;
+
+	// Arm the one-shot dump after Initialize, so it fires on the first rendered
+	// frame rather than being reset by CVar defaults.
+	if (headlessArgs.rdgDump)
+		CVarSystem::Get()->SetCVarInt(StringId("rdg.dump"), 1);
 
 	int exitCode = 0;
 	if (headlessArgs.headless)
