@@ -11,7 +11,9 @@
 // Everything declared here is bound for every pass whether it reads it or not, so
 // keep the list short. Pass-scoped resources do not belong in this file.
 
-#define MAX_TEXTURES 512
+#include "FrameBindingRegisters.h"
+
+#define MAX_TEXTURES FRAME_MAX_TEXTURES
 
 struct GeometryInfo
 {
@@ -62,22 +64,22 @@ struct LightPoolEntry
     float cdf;
 };
 
-RWTexture2D<float4> gOutput : register(u0);
+RWTexture2D<float4> gOutput : BAMBOO_UAV(FRAME_REG_RAYTRACE_OUTPUT);
 
-RaytracingAccelerationStructure SceneBVH : register(t0);
-ByteAddressBuffer g_vertices              : register(t1);
-ByteAddressBuffer g_indices               : register(t2);
+RaytracingAccelerationStructure SceneBVH : BAMBOO_SRV(FRAME_REG_TLAS);
+ByteAddressBuffer g_vertices              : BAMBOO_SRV(FRAME_REG_VERTICES);
+ByteAddressBuffer g_indices               : BAMBOO_SRV(FRAME_REG_INDICES);
 
-StructuredBuffer<GeometryInfo>     g_geometryInfo      : register(t3);
-StructuredBuffer<InstanceInfo>     g_instanceInfo      : register(t4);
-StructuredBuffer<EmissiveTriangle> g_emissiveTriangles : register(t5);
-StructuredBuffer<LightData>        g_lightData         : register(t6);
-StructuredBuffer<LightPoolEntry>   g_lightPool         : register(t7);
+StructuredBuffer<GeometryInfo>     g_geometryInfo      : BAMBOO_SRV(FRAME_REG_GEOMETRY_INFO);
+StructuredBuffer<InstanceInfo>     g_instanceInfo      : BAMBOO_SRV(FRAME_REG_INSTANCE_INFO);
+StructuredBuffer<EmissiveTriangle> g_emissiveTriangles : BAMBOO_SRV(FRAME_REG_EMISSIVE_TRIANGLES);
+StructuredBuffer<LightData>        g_lightData         : BAMBOO_SRV(FRAME_REG_LIGHT_DATA);
+StructuredBuffer<LightPoolEntry>   g_lightPool         : BAMBOO_SRV(FRAME_REG_LIGHT_POOL);
 
-Texture2D g_skybox : register(t8);
+Texture2D g_skybox : BAMBOO_SRV(FRAME_REG_SKYBOX);
 
 // Last, so the bindless array can grow without moving anything above it.
-Texture2D g_textures[MAX_TEXTURES] : register(t16);
+Texture2D g_textures[MAX_TEXTURES] : BAMBOO_SRV(FRAME_REG_MATERIAL_TEXTURES);
 
 SamplerState gsamPointWrap : register(s0);
 SamplerState gsamPointClamp : register(s1);
@@ -86,7 +88,7 @@ SamplerState gsamLinearClamp : register(s3);
 SamplerState gsamAnisotropicWrap : register(s4);
 SamplerState gsamAnisotropicClamp : register(s5);
 
-cbuffer CameraParams : register(b0)
+cbuffer CameraParams : BAMBOO_CBV(FRAME_REG_CAMERA_MATRICES)
 {
     float4x4 worldViewProj;
     float4x4 view;

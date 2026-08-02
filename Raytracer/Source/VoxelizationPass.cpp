@@ -8,6 +8,7 @@
 #include "Constants.h"
 #include "InputElements.h"
 #include "Shader.h"
+#include "PassRegisters.h"
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "ShaderReflection.h"
@@ -138,10 +139,10 @@ void VoxelizationPass::CreateRootSignatures()
     // (u0 = irradiance, u1 = vpl count — heap slots 1..2).
     {
         CD3DX12_DESCRIPTOR_RANGE uavRange;
-        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0);
+        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, VOXEL_FRAME_CLEAR_REG_IRRADIANCE);
 
         CD3DX12_ROOT_PARAMETER params[2];
-        params[0].InitAsConstants(4, 0); // 4 uints at b0
+        params[0].InitAsConstants(4, VOXEL_FRAME_CLEAR_REG_CB);
         params[1].InitAsDescriptorTable(1, &uavRange);
 
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
@@ -154,13 +155,13 @@ void VoxelizationPass::CreateRootSignatures()
     // root UAVs u1/u2 (baked bounds).
     {
         CD3DX12_DESCRIPTOR_RANGE uavRange;
-        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, VOXEL_BAKE_CLEAR_REG_OCCUPANCY);
 
         CD3DX12_ROOT_PARAMETER params[4];
-        params[0].InitAsConstants(4, 0);
+        params[0].InitAsConstants(4, VOXEL_BAKE_CLEAR_REG_CB);
         params[1].InitAsDescriptorTable(1, &uavRange);
-        params[2].InitAsUnorderedAccessView(1);
-        params[3].InitAsUnorderedAccessView(2);
+        params[2].InitAsUnorderedAccessView(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MIN);
+        params[3].InitAsUnorderedAccessView(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MAX);
 
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_NONE);
@@ -172,15 +173,15 @@ void VoxelizationPass::CreateRootSignatures()
     // (axis + bound flags), table u0 (occupancy), root UAVs u1/u2 (baked bounds).
     {
         CD3DX12_DESCRIPTOR_RANGE uavRange;
-        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);
+        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, VOXEL_BAKE_REG_OCCUPANCY);
 
         CD3DX12_ROOT_PARAMETER params[6];
-        params[0].InitAsConstantBufferView(0);            // b0 grid
-        params[1].InitAsConstantBufferView(1);            // b1 model
-        params[2].InitAsConstants(4, 2);                  // b2 axis + flags
-        params[3].InitAsDescriptorTable(1, &uavRange);    // u0 occupancy
-        params[4].InitAsUnorderedAccessView(1);           // u1 baked bound min
-        params[5].InitAsUnorderedAccessView(2);           // u2 baked bound max
+        params[0].InitAsConstantBufferView(VOXEL_BAKE_REG_GRID_CB);
+        params[1].InitAsConstantBufferView(VOXEL_BAKE_REG_MODEL_CB);
+        params[2].InitAsConstants(4, VOXEL_BAKE_REG_AXIS_CB);         // axis + bound flags
+        params[3].InitAsDescriptorTable(1, &uavRange);                // occupancy
+        params[4].InitAsUnorderedAccessView(VOXEL_BAKE_REG_BAKED_BOUND_MIN);
+        params[5].InitAsUnorderedAccessView(VOXEL_BAKE_REG_BAKED_BOUND_MAX);
 
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);

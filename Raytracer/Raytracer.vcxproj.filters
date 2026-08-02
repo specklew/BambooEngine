@@ -225,6 +225,12 @@
     <ClInclude Include="Include\FrameBindingLayout.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\FrameBindingRegisters.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\PassRegisters.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\ShaderReflection.h">
       <Filter>Header Files</Filter>
     </ClInclude>

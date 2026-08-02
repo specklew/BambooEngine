@@ -1,10 +1,12 @@
 // Per-frame clear of the injection accumulators. Occupancy is NOT cleared —
 // it is a bake output that persists until the next rebake (ADR 0004).
 
-RWTexture3D<uint> gIrradiance : register(u0);
-RWTexture3D<uint> gVplCount   : register(u1);
+#include "PassRegisters.h"
 
-cbuffer ClearCB : register(b0)
+RWTexture3D<uint> gIrradiance : BAMBOO_UAV(VOXEL_FRAME_CLEAR_REG_IRRADIANCE);
+RWTexture3D<uint> gVplCount   : BAMBOO_UAV(VOXEL_FRAME_CLEAR_REG_VPL_COUNT);
+
+cbuffer ClearCB : BAMBOO_CBV(VOXEL_FRAME_CLEAR_REG_CB)
 {
     uint gGridDim;
     uint _pad0;

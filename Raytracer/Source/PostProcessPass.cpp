@@ -3,6 +3,7 @@
 #include "PostProcessPass.h"
 
 #include "Constants.h"
+#include "PassRegisters.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
 #include "Window.h"
@@ -40,12 +41,12 @@ void PostProcessPass::CreateRootSignature()
     CD3DX12_DESCRIPTOR_RANGE ranges[2];
 
     // [0] Descriptor table with SRV and UAV
-    ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // SRV at t0
-    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);  // UAV at u0
+    ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, POST_REG_INPUT);
+    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, POST_REG_OUTPUT);
     rootParams[0].InitAsDescriptorTable(2, ranges);
 
-    // [1] Root constants for post-process params (b0): exposure, contrast, saturation, lift
-    rootParams[1].InitAsConstants(4, 0);
+    // [1] Root constants: exposure, contrast, saturation, lift
+    rootParams[1].InitAsConstants(4, POST_REG_CB);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
         _countof(rootParams), rootParams,

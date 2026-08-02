@@ -20,6 +20,7 @@
 
 #include "CommandContext.h"
 #include "InputElements.h"
+#include "PassRegisters.h"
 #include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
 #include "ShaderReflection.h"
@@ -1018,7 +1019,7 @@ void Renderer::CreateRasterizationRootSignature()
 	CD3DX12_ROOT_PARAMETER rootParameters[num_params];
 	
 	D3D12_DESCRIPTOR_RANGE cbvRange;
-	cbvRange.BaseShaderRegister = 0;
+	cbvRange.BaseShaderRegister = RASTER_REG_CAMERA_CB;
 	cbvRange.NumDescriptors = 1;
 	cbvRange.RegisterSpace = 0;
 	cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
@@ -1028,31 +1029,31 @@ void Renderer::CreateRasterizationRootSignature()
 	// be declared here too, copied from the raytracing signature. Reflection shows
 	// no rasterization shader touches them (t3 upward is all colorShader reads).
 	D3D12_DESCRIPTOR_RANGE textureRange;
-	textureRange.BaseShaderRegister = 3;
+	textureRange.BaseShaderRegister = RASTER_REG_TEXTURES;
 	textureRange.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
 	textureRange.RegisterSpace = 0;
 	textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
 	textureRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::MaterialTextures);
 
-	// u1 = occupancy, u2 = packed irradiance, u3 = vpl count (three contiguous slots)
+	// occupancy, packed irradiance, vpl count: three contiguous registers and slots
 	D3D12_DESCRIPTOR_RANGE voxelOccupancyRange;
-	voxelOccupancyRange.BaseShaderRegister = 1;
+	voxelOccupancyRange.BaseShaderRegister = RASTER_REG_VOXEL_OCCUPANCY;
 	voxelOccupancyRange.NumDescriptors = 3;
 	voxelOccupancyRange.RegisterSpace = 0;
 	voxelOccupancyRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 	voxelOccupancyRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelOccupancy);
 
-	// u4 = ShadingPoints G-buffer (debug overlay reads it by screen pixel)
+	// ShadingPoints G-buffer (debug overlay reads it by screen pixel)
 	D3D12_DESCRIPTOR_RANGE shadingPointsRange;
-	shadingPointsRange.BaseShaderRegister = 4;
+	shadingPointsRange.BaseShaderRegister = RASTER_REG_SHADING_POINTS;
 	shadingPointsRange.NumDescriptors = 1;
 	shadingPointsRange.RegisterSpace = 0;
 	shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 	shadingPointsRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ShadingPoints);
 
-	// u7 = superpixel index, u8 = superpixel representative center (debug views 15/16)
+	// superpixel index + representative center (debug views 15/16)
 	D3D12_DESCRIPTOR_RANGE superpixelRange;
-	superpixelRange.BaseShaderRegister = 7;
+	superpixelRange.BaseShaderRegister = RASTER_REG_SUPERPIXEL_INDEX;
 	superpixelRange.NumDescriptors = 2;
 	superpixelRange.RegisterSpace = 0;
 	superpixelRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
@@ -1061,10 +1062,10 @@ void Renderer::CreateRasterizationRootSignature()
 	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, textureRange, voxelOccupancyRange, shadingPointsRange, superpixelRange};
 
 	rootParameters[0].InitAsDescriptorTable(_countof(ranges), ranges);
-	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer
-	rootParameters[2].InitAsConstantBufferView(2); // Material buffer
-	rootParameters[3].InitAsConstantBufferView(3); // Pass constants
-	rootParameters[4].InitAsConstantBufferView(4); // Voxel grid constants
+	rootParameters[1].InitAsConstantBufferView(RASTER_REG_MODEL_CB);
+	rootParameters[2].InitAsConstantBufferView(RASTER_REG_MATERIAL_CB);
+	rootParameters[3].InitAsConstantBufferView(FRAME_REG_PASS_CONSTANTS);
+	rootParameters[4].InitAsConstantBufferView(REG_VOXEL_GRID_CB);
 
 	auto static_samplers = GetStaticSamplers();
 	

@@ -5,6 +5,7 @@
 #include "Constants.h"
 #include "VoxelGuidingBuildPass.h"
 #include "LightInjectionPass.h"
+#include "PassRegisters.h"
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
@@ -93,14 +94,14 @@ void VxpgFingerprintPass::CreateRootSignatures()
     // root UAVs u1 representatives (out), u2 dispatch args (out), u3 counters (in).
     {
         CD3DX12_DESCRIPTOR_RANGE shadingPointsRange;
-        shadingPointsRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // u0
+        shadingPointsRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, FINGERPRINT_PRESAMPLE_REG_SHADING_POINTS);
 
         CD3DX12_ROOT_PARAMETER params[5];
-        params[0].InitAsConstants(4, 0);
+        params[0].InitAsConstants(4, FINGERPRINT_PRESAMPLE_REG_CB);
         params[1].InitAsDescriptorTable(1, &shadingPointsRange);
-        params[2].InitAsUnorderedAccessView(1);
-        params[3].InitAsUnorderedAccessView(2);
-        params[4].InitAsUnorderedAccessView(3);
+        params[2].InitAsUnorderedAccessView(FINGERPRINT_PRESAMPLE_REG_REPRESENTATIVES);
+        params[3].InitAsUnorderedAccessView(FINGERPRINT_PRESAMPLE_REG_DISPATCH_ARGS);
+        params[4].InitAsUnorderedAccessView(FINGERPRINT_PRESAMPLE_REG_COUNTERS);
 
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_NONE);
@@ -112,11 +113,11 @@ void VxpgFingerprintPass::CreateRootSignatures()
     // points (in), u3 dispatch args (in, count), u4 fingerprints (out).
     {
         CD3DX12_ROOT_PARAMETER params[5];
-        params[0].InitAsShaderResourceView(0); // t0 TLAS
-        params[1].InitAsUnorderedAccessView(1);
-        params[2].InitAsUnorderedAccessView(2);
-        params[3].InitAsUnorderedAccessView(3);
-        params[4].InitAsUnorderedAccessView(4);
+        params[0].InitAsShaderResourceView(FINGERPRINT_VISIBILITY_REG_TLAS);
+        params[1].InitAsUnorderedAccessView(FINGERPRINT_VISIBILITY_REG_REPRESENTATIVES);
+        params[2].InitAsUnorderedAccessView(FINGERPRINT_VISIBILITY_REG_LIGHT_POINTS);
+        params[3].InitAsUnorderedAccessView(FINGERPRINT_VISIBILITY_REG_DISPATCH_ARGS);
+        params[4].InitAsUnorderedAccessView(FINGERPRINT_VISIBILITY_REG_FINGERPRINTS);
 
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_NONE);

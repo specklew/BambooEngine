@@ -6,21 +6,22 @@
 // (useCompact = clipping = 0) the injected AABB is the full voxel cube.
 // SIByL's z_conservative flag is subsumed by the 3-axis draw scheme.
 
+#include "PassRegisters.h"
 #include "voxelGrid.hlsli"
 #include "TriangleClip.hlsl"
 
-cbuffer VoxelGridCB : register(b0)
+cbuffer VoxelGridCB : BAMBOO_CBV(VOXEL_BAKE_REG_GRID_CB)
 {
     VoxelGridParams gGrid;
 }
 
-cbuffer ModelTransforms : register(b1)
+cbuffer ModelTransforms : BAMBOO_CBV(VOXEL_BAKE_REG_MODEL_CB)
 {
     float4x4 world;
     float4x4 worldInvTranspose;
 }
 
-cbuffer BakeCB : register(b2)
+cbuffer BakeCB : BAMBOO_CBV(VOXEL_BAKE_REG_AXIS_CB)
 {
     uint axisIndex;
     uint useCompact; // 1 = tight AABB of the triangle sliver inside the voxel
@@ -28,9 +29,9 @@ cbuffer BakeCB : register(b2)
     uint _pad0;
 }
 
-RWTexture3D<uint>        gOccupancy     : register(u0);
-RWStructuredBuffer<uint> gBakedBoundMin : register(u1); // 4 uints per cell, quantized to the voxel cube
-RWStructuredBuffer<uint> gBakedBoundMax : register(u2);
+RWTexture3D<uint>        gOccupancy     : BAMBOO_UAV(VOXEL_BAKE_REG_OCCUPANCY);
+RWStructuredBuffer<uint> gBakedBoundMin : BAMBOO_UAV(VOXEL_BAKE_REG_BAKED_BOUND_MIN); // 4 uints per cell, quantized to the voxel cube
+RWStructuredBuffer<uint> gBakedBoundMax : BAMBOO_UAV(VOXEL_BAKE_REG_BAKED_BOUND_MAX);
 
 struct VsIn
 {

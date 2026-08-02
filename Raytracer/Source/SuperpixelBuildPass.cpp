@@ -3,6 +3,7 @@
 #include "SuperpixelBuildPass.h"
 
 #include "Constants.h"
+#include "PassRegisters.h"
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
@@ -55,10 +56,10 @@ void SuperpixelBuildPass::CreateRootSignature()
     // u0 ShadingPoints, u1 center, u2 index, u3 counter, u4 gathered,
     // u5 fuzzy weights, u6 fuzzy indices.
     CD3DX12_DESCRIPTOR_RANGE uavRange;
-    uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 7, 0);
+    uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 7, SUPERPIXEL_REG_INPUT);
 
     CD3DX12_ROOT_PARAMETER params[2];
-    params[0].InitAsConstants(12, 0);
+    params[0].InitAsConstants(12, SUPERPIXEL_REG_CB);
     params[1].InitAsDescriptorTable(1, &uavRange);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);

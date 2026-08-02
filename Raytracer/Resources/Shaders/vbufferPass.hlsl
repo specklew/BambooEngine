@@ -6,11 +6,12 @@
 // barycentrics) is packed into gVBuffer for light injection and the guided
 // integrator to reconstruct from — neither traces its own primary anymore.
 
+#include "PassRegisters.h"
 #include "RaytracingUtils.hlsl"
 #include "passConstants.hlsl"
 #include "VBuffer.hlsl"
 
-RWTexture2D<uint4> gVBuffer : register(u9);
+RWTexture2D<uint4> gVBuffer : BAMBOO_UAV(VBUFFER_REG_VBUFFER);
 
 struct VBufferPayload
 {

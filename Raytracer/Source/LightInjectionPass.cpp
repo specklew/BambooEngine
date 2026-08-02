@@ -6,6 +6,7 @@
 #include "Constants.h"
 #include "FrameBindingLayout.h"
 #include "GlobalDescriptorHeap.h"
+#include "PassRegisters.h"
 #include "Renderer.h"
 #include "RootSignatureLibrary.h"
 #include "VoxelizationPass.h"
@@ -48,42 +49,42 @@ void LightInjectionPass::CreateGlobalRootSignature()
     FrameBindingLayout::AppendFrameRanges(ranges);
 
     D3D12_DESCRIPTOR_RANGE voxelIrradianceRange;
-    voxelIrradianceRange.BaseShaderRegister = 1;
+    voxelIrradianceRange.BaseShaderRegister = INJECT_REG_IRRADIANCE;
     voxelIrradianceRange.NumDescriptors = 1;
     voxelIrradianceRange.RegisterSpace = 0;
     voxelIrradianceRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     voxelIrradianceRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelIrradiance);
 
     D3D12_DESCRIPTOR_RANGE voxelVplCountRange;
-    voxelVplCountRange.BaseShaderRegister = 2;
+    voxelVplCountRange.BaseShaderRegister = INJECT_REG_VPL_COUNT;
     voxelVplCountRange.NumDescriptors = 1;
     voxelVplCountRange.RegisterSpace = 0;
     voxelVplCountRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     voxelVplCountRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelVplCount);
 
     D3D12_DESCRIPTOR_RANGE shadingPointsRange;
-    shadingPointsRange.BaseShaderRegister = 3; // u3
+    shadingPointsRange.BaseShaderRegister = INJECT_REG_SHADING_POINTS;
     shadingPointsRange.NumDescriptors = 1;
     shadingPointsRange.RegisterSpace = 0;
     shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     shadingPointsRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ShadingPoints);
 
     D3D12_DESCRIPTOR_RANGE voxelRepresentativeRange;
-    voxelRepresentativeRange.BaseShaderRegister = 4; // u4
+    voxelRepresentativeRange.BaseShaderRegister = INJECT_REG_VOXEL_REPRESENTATIVE;
     voxelRepresentativeRange.NumDescriptors = 1;
     voxelRepresentativeRange.RegisterSpace = 0;
     voxelRepresentativeRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     voxelRepresentativeRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelRepresentative);
 
     D3D12_DESCRIPTOR_RANGE vplPositionRange;
-    vplPositionRange.BaseShaderRegister = 5; // u5
+    vplPositionRange.BaseShaderRegister = INJECT_REG_VPL_POSITION;
     vplPositionRange.NumDescriptors = 1;
     vplPositionRange.RegisterSpace = 0;
     vplPositionRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     vplPositionRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VplPosition);
 
     D3D12_DESCRIPTOR_RANGE vbufferRange;
-    vbufferRange.BaseShaderRegister = 6; // u6
+    vbufferRange.BaseShaderRegister = INJECT_REG_VBUFFER;
     vbufferRange.NumDescriptors = 1;
     vbufferRange.RegisterSpace = 0;
     vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
@@ -95,7 +96,7 @@ void LightInjectionPass::CreateGlobalRootSignature()
 
     CD3DX12_ROOT_PARAMETER rootParameters[FrameBindingLayout::kPassRootParameterStart + 1];
     FrameBindingLayout::FillFrameRootParameters(rootParameters, ranges);
-    rootParameters[VoxelGridConstantsCbv].InitAsConstantBufferView(4, 0);
+    rootParameters[VoxelGridConstantsCbv].InitAsConstantBufferView(REG_VOXEL_GRID_CB, 0);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
 

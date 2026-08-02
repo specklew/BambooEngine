@@ -6,8 +6,10 @@
 // EMA-damped, clamped so both strategies stay explored; stats cleared for the
 // next frame. Bound through the guided PT global root signature (u22/u23).
 
-RWStructuredBuffer<float> gTileGuideQ        : register(u22);
-RWStructuredBuffer<uint>  gTileStrategyStats : register(u23);
+#include "PassRegisters.h"
+
+RWStructuredBuffer<float> gTileGuideQ        : BAMBOO_UAV(GUIDED_REG_TILE_GUIDE_Q);
+RWStructuredBuffer<uint>  gTileStrategyStats : BAMBOO_UAV(GUIDED_REG_TILE_STRATEGY_STATS);
 
 // Keep in sync with guidedPathTracing.hlsl's one-sample block.
 #define ADAPTIVE_Q_MIN 0.05

@@ -1,7 +1,9 @@
 ﻿#ifndef PASS_CONSTANTS_HLSL
 #define PASS_CONSTANTS_HLSL
 
-cbuffer PassConstants : register(b3)
+#include "FrameBindingRegisters.h"
+
+cbuffer PassConstants : BAMBOO_CBV(FRAME_REG_PASS_CONSTANTS)
 {
     float uvX;
     float uvY;

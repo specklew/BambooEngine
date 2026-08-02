@@ -4,6 +4,7 @@
 
 #include "Constants.h"
 #include "VoxelizationPass.h"
+#include "PassRegisters.h"
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
@@ -114,13 +115,14 @@ void VoxelGuidingBuildPass::CreateRootSignature()
     // bounds, u8 representVPL, u9 premul irradiance, u10/u11 baked bounds.
     // Root constants b0: gridDim.
     CD3DX12_DESCRIPTOR_RANGE texRange;
-    texRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 3, 0);
+    texRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 3, GUIDING_BUILD_REG_IRRADIANCE);
 
     CD3DX12_ROOT_PARAMETER params[11];
-    params[0].InitAsConstants(4, 0);
+    params[0].InitAsConstants(4, GUIDING_BUILD_REG_CB);
     params[1].InitAsDescriptorTable(1, &texRange);
+    // u3 through u11, contiguous by construction: see the register block above.
     for (uint32_t i = 0; i < 9; ++i)
-        params[2 + i].InitAsUnorderedAccessView(3 + i);
+        params[2 + i].InitAsUnorderedAccessView(GUIDING_BUILD_REG_COUNTERS + i);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 

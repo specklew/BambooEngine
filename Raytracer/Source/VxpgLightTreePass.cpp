@@ -8,6 +8,7 @@
 #include "VoxelGuidingBuildPass.h"
 #include "VxpgClusterPass.h"
 #include "VxpgClusterVisibilityPass.h"
+#include "PassRegisters.h"
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
@@ -94,17 +95,18 @@ void VxpgLightTreePass::CreateRootSignature()
     // constants (map dims + mode), u11 avg-visibility, u12 heap, and the mask
     // texture as a shared-heap descriptor table (u13, at slot 530).
     CD3DX12_DESCRIPTOR_RANGE maskRange;
-    maskRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 13, 0,
-        GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ClusterVisibilityMask)); // u13 @ 530
+    maskRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, LIGHT_TREE_REG_VISIBILITY_MASK, 0,
+        GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ClusterVisibilityMask));
 
     CD3DX12_ROOT_PARAMETER params[16];
-    params[0].InitAsConstantBufferView(0);
+    params[0].InitAsConstantBufferView(LIGHT_TREE_REG_GRID_CB);
+    // u0 through u10, contiguous by construction: see the register block above.
     for (uint32_t i = 0; i < 11; ++i)
-        params[1 + i].InitAsUnorderedAccessView(i);
-    params[12].InitAsConstants(4, 1);           // b1: mapX, mapY, useAvgVisibility, pad
-    params[13].InitAsUnorderedAccessView(11);   // u11 avg-visibility
-    params[14].InitAsUnorderedAccessView(12);   // u12 importance heap
-    params[15].InitAsDescriptorTable(1, &maskRange); // u13 visibility mask
+        params[1 + i].InitAsUnorderedAccessView(LIGHT_TREE_REG_SORT_KEYS + i);
+    params[12].InitAsConstants(4, LIGHT_TREE_REG_TOP_LEVEL_CB); // mapX, mapY, useAvgVisibility, pad
+    params[13].InitAsUnorderedAccessView(LIGHT_TREE_REG_AVG_VISIBILITY);
+    params[14].InitAsUnorderedAccessView(LIGHT_TREE_REG_IMPORTANCE_HEAP);
+    params[15].InitAsDescriptorTable(1, &maskRange);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);

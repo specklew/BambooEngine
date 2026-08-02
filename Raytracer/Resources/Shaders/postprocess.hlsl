@@ -1,7 +1,9 @@
-Texture2D<float4>   gInput  : register(t0);
-RWTexture2D<float4> gOutput : register(u0);
+#include "PassRegisters.h"
 
-cbuffer PostProcessCB : register(b0)
+Texture2D<float4>   gInput  : BAMBOO_SRV(POST_REG_INPUT);
+RWTexture2D<float4> gOutput : BAMBOO_UAV(POST_REG_OUTPUT);
+
+cbuffer PostProcessCB : BAMBOO_CBV(POST_REG_CB)
 {
     float exposure;
     float contrast;    // pre-ACES power curve  (default 1.0)

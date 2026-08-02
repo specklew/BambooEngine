@@ -2,6 +2,7 @@
 #include "CommandContext.h"
 #include "BitonicSortPass.h"
 
+#include "PassRegisters.h"
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
@@ -25,11 +26,11 @@ void BitonicSortPass::Initialize(
 
 void BitonicSortPass::CreateRootSignature()
 {
-    // b0 root constants (k, j, counterOffset); u0 key buffer; u1 counter buffer.
+    // Root constants (k, j, counterOffset), key buffer, counter buffer.
     CD3DX12_ROOT_PARAMETER params[3];
-    params[0].InitAsConstants(3, 0);
-    params[1].InitAsUnorderedAccessView(0);
-    params[2].InitAsUnorderedAccessView(1);
+    params[0].InitAsConstants(3, BITONIC_REG_CB);
+    params[1].InitAsUnorderedAccessView(BITONIC_REG_SORT_BUFFER);
+    params[2].InitAsUnorderedAccessView(BITONIC_REG_COUNTER);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);

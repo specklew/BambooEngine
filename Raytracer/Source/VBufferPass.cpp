@@ -6,6 +6,7 @@
 #include "Constants.h"
 #include "FrameBindingLayout.h"
 #include "GlobalDescriptorHeap.h"
+#include "PassRegisters.h"
 #include "Renderer.h"
 #include "RootSignatureLibrary.h"
 #include "Window.h"
@@ -39,7 +40,7 @@ void VBufferPass::CreateGlobalRootSignature()
     FrameBindingLayout::AppendFrameRanges(ranges);
 
     D3D12_DESCRIPTOR_RANGE vbufferRange;
-    vbufferRange.BaseShaderRegister = 9; // u9
+    vbufferRange.BaseShaderRegister = VBUFFER_REG_VBUFFER;
     vbufferRange.NumDescriptors = 1;
     vbufferRange.RegisterSpace = 0;
     vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;

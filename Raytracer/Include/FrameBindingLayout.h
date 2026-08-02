@@ -1,6 +1,8 @@
 #pragma once
 #include <vector>
 
+#include "FrameBindingRegisters.h"
+
 class Scene;
 class PassConstants;
 
@@ -14,24 +16,25 @@ class PassConstants;
 // bound for every pass regardless of use, so the list stays short by hand.
 namespace FrameBindingLayout
 {
+    // Typed views of FrameBindingRegisters.h, which HLSL reads from the same file.
     // t-registers
-    inline constexpr uint32_t kTlas              = 0;
-    inline constexpr uint32_t kVertices          = 1;
-    inline constexpr uint32_t kIndices           = 2;
-    inline constexpr uint32_t kGeometryInfo      = 3;
-    inline constexpr uint32_t kInstanceInfo      = 4;
-    inline constexpr uint32_t kEmissiveTriangles = 5;
-    inline constexpr uint32_t kLightData         = 6;
-    inline constexpr uint32_t kLightPool         = 7;
-    inline constexpr uint32_t kSkybox            = 8;
-    inline constexpr uint32_t kMaterialTextures  = 16; // …16 + MAX_TEXTURES - 1
+    inline constexpr uint32_t kTlas              = FRAME_REG_TLAS;
+    inline constexpr uint32_t kVertices          = FRAME_REG_VERTICES;
+    inline constexpr uint32_t kIndices           = FRAME_REG_INDICES;
+    inline constexpr uint32_t kGeometryInfo      = FRAME_REG_GEOMETRY_INFO;
+    inline constexpr uint32_t kInstanceInfo      = FRAME_REG_INSTANCE_INFO;
+    inline constexpr uint32_t kEmissiveTriangles = FRAME_REG_EMISSIVE_TRIANGLES;
+    inline constexpr uint32_t kLightData         = FRAME_REG_LIGHT_DATA;
+    inline constexpr uint32_t kLightPool         = FRAME_REG_LIGHT_POOL;
+    inline constexpr uint32_t kSkybox            = FRAME_REG_SKYBOX;
+    inline constexpr uint32_t kMaterialTextures  = FRAME_REG_MATERIAL_TEXTURES; // …+ MAX_TEXTURES - 1
 
     // u-registers
-    inline constexpr uint32_t kRaytraceOutput = 0;
+    inline constexpr uint32_t kRaytraceOutput = FRAME_REG_RAYTRACE_OUTPUT;
 
     // b-registers
-    inline constexpr uint32_t kCameraMatrices = 0;
-    inline constexpr uint32_t kPassConstants  = 3;
+    inline constexpr uint32_t kCameraMatrices = FRAME_REG_CAMERA_MATRICES;
+    inline constexpr uint32_t kPassConstants  = FRAME_REG_PASS_CONSTANTS;
 
     // Root parameter slots. Frame parameters occupy a fixed prefix in every
     // raytracing root signature so one bind call can serve all of them; a pass

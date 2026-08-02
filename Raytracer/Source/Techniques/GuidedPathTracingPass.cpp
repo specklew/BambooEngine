@@ -6,6 +6,7 @@
 #include "Constants.h"
 #include "FrameBindingLayout.h"
 #include "GlobalDescriptorHeap.h"
+#include "PassRegisters.h"
 #include "Renderer.h"
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
@@ -135,14 +136,14 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     FrameBindingLayout::AppendFrameRanges(ranges);
 
     D3D12_DESCRIPTOR_RANGE voxelIrradianceRange;
-    voxelIrradianceRange.BaseShaderRegister = 1;
+    voxelIrradianceRange.BaseShaderRegister = GUIDED_REG_IRRADIANCE;
     voxelIrradianceRange.NumDescriptors = 1;
     voxelIrradianceRange.RegisterSpace = 0;
     voxelIrradianceRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     voxelIrradianceRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelIrradiance);
 
     D3D12_DESCRIPTOR_RANGE voxelVplCountRange;
-    voxelVplCountRange.BaseShaderRegister = 2;
+    voxelVplCountRange.BaseShaderRegister = GUIDED_REG_VPL_COUNT;
     voxelVplCountRange.NumDescriptors = 1;
     voxelVplCountRange.RegisterSpace = 0;
     voxelVplCountRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
@@ -151,21 +152,21 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     // Debug views 6/7 read the injection-pass outputs (texture UAVs can't be
     // root descriptors, so they ride the shared-heap table at their slots).
     D3D12_DESCRIPTOR_RANGE voxelRepresentativeRange;
-    voxelRepresentativeRange.BaseShaderRegister = 7;
+    voxelRepresentativeRange.BaseShaderRegister = GUIDED_REG_VOXEL_REPRESENTATIVE;
     voxelRepresentativeRange.NumDescriptors = 1;
     voxelRepresentativeRange.RegisterSpace = 0;
     voxelRepresentativeRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     voxelRepresentativeRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelRepresentative);
 
     D3D12_DESCRIPTOR_RANGE vplPositionRange;
-    vplPositionRange.BaseShaderRegister = 8;
+    vplPositionRange.BaseShaderRegister = GUIDED_REG_VPL_POSITION;
     vplPositionRange.NumDescriptors = 1;
     vplPositionRange.RegisterSpace = 0;
     vplPositionRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     vplPositionRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VplPosition);
 
     D3D12_DESCRIPTOR_RANGE vbufferRange;
-    vbufferRange.BaseShaderRegister = 9; // u9
+    vbufferRange.BaseShaderRegister = GUIDED_REG_VBUFFER;
     vbufferRange.NumDescriptors = 1;
     vbufferRange.RegisterSpace = 0;
     vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
@@ -173,7 +174,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
 
     // Cluster-visibility mask (debug view 10), texture UAV in the shared heap.
     D3D12_DESCRIPTOR_RANGE clusterMaskRange;
-    clusterMaskRange.BaseShaderRegister = 13; // u13
+    clusterMaskRange.BaseShaderRegister = GUIDED_REG_VISIBILITY_MASK;
     clusterMaskRange.NumDescriptors = 1;
     clusterMaskRange.RegisterSpace = 0;
     clusterMaskRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
@@ -182,7 +183,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     // Superpixel index texture (SLIC assignment) — selects the top-level heap
     // row for both MIS strategies.
     D3D12_DESCRIPTOR_RANGE spixelIndexRange;
-    spixelIndexRange.BaseShaderRegister = 5; // u5
+    spixelIndexRange.BaseShaderRegister = GUIDED_REG_SUPERPIXEL_INDEX;
     spixelIndexRange.NumDescriptors = 1;
     spixelIndexRange.RegisterSpace = 0;
     spixelIndexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
@@ -191,14 +192,14 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     // Fuzzy 4-nearest blend (superpixel pass outputs): per-pixel weights + ids
     // for the guided integrator's mixture top-level pdf.
     D3D12_DESCRIPTOR_RANGE fuzzyWeightRange;
-    fuzzyWeightRange.BaseShaderRegister = 20; // u20
+    fuzzyWeightRange.BaseShaderRegister = GUIDED_REG_FUZZY_WEIGHT;
     fuzzyWeightRange.NumDescriptors = 1;
     fuzzyWeightRange.RegisterSpace = 0;
     fuzzyWeightRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     fuzzyWeightRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::FuzzyWeight);
 
     D3D12_DESCRIPTOR_RANGE fuzzyIndexRange;
-    fuzzyIndexRange.BaseShaderRegister = 21; // u21
+    fuzzyIndexRange.BaseShaderRegister = GUIDED_REG_FUZZY_INDEX;
     fuzzyIndexRange.NumDescriptors = 1;
     fuzzyIndexRange.RegisterSpace = 0;
     fuzzyIndexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
@@ -211,21 +212,21 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
 
     CD3DX12_ROOT_PARAMETER rootParameters[GuidedRootParameterCount];
     FrameBindingLayout::FillFrameRootParameters(rootParameters, ranges);
-    rootParameters[VoxelGridConstantsCbv].InitAsConstantBufferView(4, 0);   // Voxel grid constants
-    rootParameters[GuidingCountersUav].InitAsUnorderedAccessView(3, 0);     // Guiding counters
-    rootParameters[GuidingCompactIdsUav].InitAsUnorderedAccessView(4, 0);   // Guiding compact ids
-    rootParameters[GuidingInverseIndexUav].InitAsUnorderedAccessView(6, 0); // Guiding inverse index
-    rootParameters[VoxelFingerprintsUav].InitAsUnorderedAccessView(10, 0);  // Voxel fingerprints (debug view 8)
-    rootParameters[ClusterAssignmentsUav].InitAsUnorderedAccessView(11, 0); // Cluster assignments (sampling + view 9)
-    rootParameters[ClusterSeedsUav].InitAsUnorderedAccessView(12, 0);       // Cluster seeds (debug view 9)
-    rootParameters[LightTreeNodesUav].InitAsUnorderedAccessView(14, 0);     // Light tree nodes (sampling + view 11)
-    rootParameters[CompactToLeafUav].InitAsUnorderedAccessView(15, 0);      // Compact->leaf map (sampling + view 11)
-    rootParameters[ClusterRootsUav].InitAsUnorderedAccessView(16, 0);       // Cluster root nodes (sampling + view 11)
-    rootParameters[ImportanceHeapUav].InitAsUnorderedAccessView(17, 0);     // Top-level importance heap (view 12)
-    rootParameters[LiveBoundMinUav].InitAsUnorderedAccessView(18, 0);       // Live voxel bound min (guide sampling)
-    rootParameters[LiveBoundMaxUav].InitAsUnorderedAccessView(19, 0);       // Live voxel bound max (guide sampling)
-    rootParameters[TileGuideQUav].InitAsUnorderedAccessView(22, 0);         // Per-tile adaptive q (ADR 0015)
-    rootParameters[TileStrategyStatsUav].InitAsUnorderedAccessView(23, 0);  // Per-tile strategy stats (ADR 0015)
+    rootParameters[VoxelGridConstantsCbv].InitAsConstantBufferView(REG_VOXEL_GRID_CB, 0);
+    rootParameters[GuidingCountersUav].InitAsUnorderedAccessView(GUIDED_REG_COUNTERS, 0);
+    rootParameters[GuidingCompactIdsUav].InitAsUnorderedAccessView(GUIDED_REG_COMPACT_IDS, 0);
+    rootParameters[GuidingInverseIndexUav].InitAsUnorderedAccessView(GUIDED_REG_INVERSE_INDEX, 0);
+    rootParameters[VoxelFingerprintsUav].InitAsUnorderedAccessView(GUIDED_REG_FINGERPRINTS, 0);      // debug view 8
+    rootParameters[ClusterAssignmentsUav].InitAsUnorderedAccessView(GUIDED_REG_CLUSTER_ASSIGNMENTS, 0); // sampling + view 9
+    rootParameters[ClusterSeedsUav].InitAsUnorderedAccessView(GUIDED_REG_CLUSTER_SEEDS, 0);          // debug view 9
+    rootParameters[LightTreeNodesUav].InitAsUnorderedAccessView(GUIDED_REG_LIGHT_TREE_NODES, 0);     // sampling + view 11
+    rootParameters[CompactToLeafUav].InitAsUnorderedAccessView(GUIDED_REG_COMPACT_TO_LEAF, 0);
+    rootParameters[ClusterRootsUav].InitAsUnorderedAccessView(GUIDED_REG_CLUSTER_ROOTS, 0);
+    rootParameters[ImportanceHeapUav].InitAsUnorderedAccessView(GUIDED_REG_IMPORTANCE_HEAP, 0);      // view 12
+    rootParameters[LiveBoundMinUav].InitAsUnorderedAccessView(GUIDED_REG_LIVE_BOUND_MIN, 0);
+    rootParameters[LiveBoundMaxUav].InitAsUnorderedAccessView(GUIDED_REG_LIVE_BOUND_MAX, 0);
+    rootParameters[TileGuideQUav].InitAsUnorderedAccessView(GUIDED_REG_TILE_GUIDE_Q, 0);             // ADR 0015
+    rootParameters[TileStrategyStatsUav].InitAsUnorderedAccessView(GUIDED_REG_TILE_STRATEGY_STATS, 0);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
 

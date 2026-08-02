@@ -112,6 +112,8 @@
     <ClInclude Include="Include\ShaderProgram.h" />
     <ClInclude Include="Include\RootSignatureLibrary.h" />
     <ClInclude Include="Include\FrameBindingLayout.h" />
+    <ClInclude Include="Include\FrameBindingRegisters.h" />
+    <ClInclude Include="Include\PassRegisters.h" />
     <ClInclude Include="Include\ShaderReflection.h" />
     <ClInclude Include="Include\FrameAccumulationPass.h" />
     <ClInclude Include="Include\EditorUI.h" />

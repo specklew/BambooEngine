@@ -3,34 +3,35 @@
 
 // Reuses scene bindings, BRDF helpers, surface setup and shadow tracing
 // from the main path tracing shader.
+#include "PassRegisters.h"
 #include "raytracing.hlsl"
 #include "Octahedral.hlsl"
 #include "VBuffer.hlsl"
 
 // ---- VXPG light injection resources ----
 
-RWTexture3D<uint> gVoxelIrradiance : register(u1);
-RWTexture3D<uint> gVoxelVplCount   : register(u2);
+RWTexture3D<uint> gVoxelIrradiance : BAMBOO_UAV(INJECT_REG_IRRADIANCE);
+RWTexture3D<uint> gVoxelVplCount   : BAMBOO_UAV(INJECT_REG_VPL_COUNT);
 
 // ShadingPoints G-buffer: primary-hit worldPos in .xyz, octahedral-packed
 // normal (bit-cast) in .w. Consumed by superpixel clustering (Stage B).
-RWTexture2D<float4> gShadingPoints : register(u3);
+RWTexture2D<float4> gShadingPoints : BAMBOO_UAV(INJECT_REG_SHADING_POINTS);
 
 // VXPG faithful port (B+): per-voxel representative VPL (second-vertex surface
 // pos + octa normal, last-writer-wins) for the fingerprint pass; per-pixel VPL
 // hit position for cvis assignment. Written at the bounce-1 closest hit.
-RWTexture3D<float4> gVoxelRepresentative : register(u4);
-RWTexture2D<float4> gVplPosition         : register(u5);
+RWTexture3D<float4> gVoxelRepresentative : BAMBOO_UAV(INJECT_REG_VOXEL_REPRESENTATIVE);
+RWTexture2D<float4> gVplPosition         : BAMBOO_UAV(INJECT_REG_VPL_POSITION);
 
 // Shared primary-visibility buffer (ADR 0004): the primary hit comes from
 // here; injection no longer traces its own camera rays.
-RWTexture2D<uint4> gVBuffer : register(u6);
+RWTexture2D<uint4> gVBuffer : BAMBOO_UAV(INJECT_REG_VBUFFER);
 
 // Sentinel for pixels whose primary ray missed: far position, zero-packed
 // normal. Clustering treats these as invalid (normal gate fails).
 static const float4 SHADINGPOINT_INVALID = float4(1e30, 1e30, 1e30, 0.0);
 
-cbuffer VoxelGridCB : register(b4)
+cbuffer VoxelGridCB : BAMBOO_CBV(REG_VOXEL_GRID_CB)
 {
     float3 voxGridMin;
     float  voxVoxelSize;

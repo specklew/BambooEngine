@@ -20,11 +20,12 @@
 // Ported from SIByL; identifiers renamed to descriptive Bamboo names (original
 // SIByL names kept in comments for traceability).
 
+#include "PassRegisters.h"
 #include "Random.hlsl"
 
 #define CLUSTER_COUNT 32
 
-cbuffer ClusterCB : register(b0)
+cbuffer ClusterCB : BAMBOO_CBV(CLUSTER_REG_CB)
 {
     uint gGridDim;
     // 0 = SIByL-faithful frame-constant seeding (its sampler is seeded with
@@ -42,13 +43,13 @@ struct ClusterCenter
     float  intensity;   // premultiplied irradiance
 };
 
-RWStructuredBuffer<int>           gClusterSeedCompactIds   : register(u0); // SIByL u_Seeds
-RWStructuredBuffer<ClusterCenter> gClusterCenters          : register(u1); // SIByL u_RowClusterInfo / u_ClusterInfo
-RWStructuredBuffer<uint4>         gGuidingDispatchArgs     : register(u2); // SIByL u_IndirectArgs ([0].w = lit voxel count)
-RWStructuredBuffer<uint4>         gVoxelFingerprints       : register(u3); // SIByL u_RowVisibility (uint4 view of the mask words)
-RWStructuredBuffer<uint>          gCompactIds              : register(u4); // SIByL u_CompactIndices (compactID -> voxelID)
-RWStructuredBuffer<float>         gPremulIrradiance        : register(u5); // SIByL u_PremulIrradiance
-RWStructuredBuffer<int>           gVoxelClusterAssignments : register(u6); // SIByL u_Clusters
+RWStructuredBuffer<int>           gClusterSeedCompactIds   : BAMBOO_UAV(CLUSTER_REG_SEED_COMPACT_IDS); // SIByL u_Seeds
+RWStructuredBuffer<ClusterCenter> gClusterCenters          : BAMBOO_UAV(CLUSTER_REG_CENTERS); // SIByL u_RowClusterInfo / u_ClusterInfo
+RWStructuredBuffer<uint4>         gGuidingDispatchArgs     : BAMBOO_UAV(CLUSTER_REG_DISPATCH_ARGS); // SIByL u_IndirectArgs ([0].w = lit voxel count)
+RWStructuredBuffer<uint4>         gVoxelFingerprints       : BAMBOO_UAV(CLUSTER_REG_FINGERPRINTS); // SIByL u_RowVisibility (uint4 view of the mask words)
+RWStructuredBuffer<uint>          gCompactIds              : BAMBOO_UAV(CLUSTER_REG_COMPACT_IDS); // SIByL u_CompactIndices (compactID -> voxelID)
+RWStructuredBuffer<float>         gPremulIrradiance        : BAMBOO_UAV(CLUSTER_REG_PREMUL_IRRADIANCE); // SIByL u_PremulIrradiance
+RWStructuredBuffer<int>           gVoxelClusterAssignments : BAMBOO_UAV(CLUSTER_REG_ASSIGNMENTS); // SIByL u_Clusters
 
 // SIByL call-site weights (kept as named constants; position term is dead but
 // the struct keeps the field for port fidelity).

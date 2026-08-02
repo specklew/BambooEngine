@@ -2,11 +2,13 @@
 // before the bake raster. Bounds start inverted (min = all ones, max = 0) so
 // the bake's InterlockedMin/Max shrink-wrap correctly.
 
-RWTexture3D<uint>        gOccupancy     : register(u0);
-RWStructuredBuffer<uint> gBakedBoundMin : register(u1); // 4 uints per cell
-RWStructuredBuffer<uint> gBakedBoundMax : register(u2); // 4 uints per cell
+#include "PassRegisters.h"
 
-cbuffer ClearCB : register(b0)
+RWTexture3D<uint>        gOccupancy     : BAMBOO_UAV(VOXEL_BAKE_CLEAR_REG_OCCUPANCY);
+RWStructuredBuffer<uint> gBakedBoundMin : BAMBOO_UAV(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MIN); // 4 uints per cell
+RWStructuredBuffer<uint> gBakedBoundMax : BAMBOO_UAV(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MAX); // 4 uints per cell
+
+cbuffer ClearCB : BAMBOO_CBV(VOXEL_BAKE_CLEAR_REG_CB)
 {
     uint gGridDim;
     uint _pad0;

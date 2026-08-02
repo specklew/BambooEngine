@@ -20,6 +20,7 @@
 // SIByL names in comments). Substitution: Cook-Torrance replaces SIByL's
 // Lambertian/RoughPlastic BSDF weight (Bamboo's material family).
 
+#include "PassRegisters.h"
 #include "RaytracingUtils.hlsl" // scene bindings + VBuffer hit reconstruction
 #include "BRDF.hlsl"
 #include "Octahedral.hlsl"
@@ -30,21 +31,21 @@
 
 // ---- cvis-specific resources (registers chosen to avoid RaytracingUtils') ----
 // Table (global heap): per-pixel + per-superpixel textures.
-RWTexture2D<float4> gVplPosition             : register(u1); // SIByL u_vpl_position (slot 526)
-RWTexture2D<uint4>  gVBuffer                 : register(u2); // shared primary VBuffer (slot 527)
-RWTexture2D<int>    gSuperpixelIndex         : register(u3); // SIByL u_spixelIdx (slot 523)
-RWTexture2D<int2>   gSpixelGathered          : register(u4); // SIByL u_spixel_gathered (slot 528)
-RWTexture2D<uint>   gSpixelCounter           : register(u5); // SIByL u_spixel_counter (slot 529)
-RWTexture2D<uint>   gClusterVisibilityMask   : register(u6); // SIByL u_spixel_visibility (slot 530)
+RWTexture2D<float4> gVplPosition             : BAMBOO_UAV(CVIS_REG_VPL_POSITION); // SIByL u_vpl_position (slot 526)
+RWTexture2D<uint4>  gVBuffer                 : BAMBOO_UAV(CVIS_REG_VBUFFER); // shared primary VBuffer (slot 527)
+RWTexture2D<int>    gSuperpixelIndex         : BAMBOO_UAV(CVIS_REG_SUPERPIXEL_INDEX); // SIByL u_spixelIdx (slot 523)
+RWTexture2D<int2>   gSpixelGathered          : BAMBOO_UAV(CVIS_REG_SPIXEL_GATHERED); // SIByL u_spixel_gathered (slot 528)
+RWTexture2D<uint>   gSpixelCounter           : BAMBOO_UAV(CVIS_REG_SPIXEL_COUNTER); // SIByL u_spixel_counter (slot 529)
+RWTexture2D<uint>   gClusterVisibilityMask   : BAMBOO_UAV(CVIS_REG_VISIBILITY_MASK); // SIByL u_spixel_visibility (slot 530)
 
 // Root UAVs / SRVs: structured buffers.
-RWStructuredBuffer<int>    gVoxInverseIndex          : register(u7);  // voxelID -> compactID
-RWStructuredBuffer<int>    gVoxelClusterAssignments  : register(u8);  // SIByL u_associate_buffer
-RWStructuredBuffer<float4> gClusterGatheredLightPoints : register(u9); // SIByL u_cluster_gathered
-RWStructuredBuffer<uint>   gClusterLightPointCounts  : register(u10); // SIByL u_cluster_counter
-RWStructuredBuffer<float>  gSpixelClusterAvgVisibility : register(u11); // SIByL u_spixel_avg_visibility
+RWStructuredBuffer<int>    gVoxInverseIndex          : BAMBOO_UAV(CVIS_REG_INVERSE_INDEX);  // voxelID -> compactID
+RWStructuredBuffer<int>    gVoxelClusterAssignments  : BAMBOO_UAV(CVIS_REG_CLUSTER_ASSIGNMENTS);  // SIByL u_associate_buffer
+RWStructuredBuffer<float4> gClusterGatheredLightPoints : BAMBOO_UAV(CVIS_REG_GATHERED_LIGHT_POINTS); // SIByL u_cluster_gathered
+RWStructuredBuffer<uint>   gClusterLightPointCounts  : BAMBOO_UAV(CVIS_REG_LIGHT_POINT_COUNTS); // SIByL u_cluster_counter
+RWStructuredBuffer<float>  gSpixelClusterAvgVisibility : BAMBOO_UAV(CVIS_REG_AVG_VISIBILITY); // SIByL u_spixel_avg_visibility
 
-cbuffer CvisGridCB : register(b1)
+cbuffer CvisGridCB : BAMBOO_CBV(CVIS_REG_GRID_CB)
 {
     float3 gGridMin;
     float  gVoxelSize;
@@ -52,7 +53,7 @@ cbuffer CvisGridCB : register(b1)
     uint   gGridDim;
 }
 
-cbuffer CvisCB : register(b2)
+cbuffer CvisCB : BAMBOO_CBV(CVIS_REG_CB)
 {
     int2 gResolution;
     int2 gMapSize;      // (mapX, mapY) = superpixel grid dimensions

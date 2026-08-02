@@ -1,13 +1,16 @@
 #pragma once
 
+#include "FrameBindingRegisters.h"
+
 namespace Constants
 {
     constexpr int MAX_STRING_LEN = 256;
-    
+
     namespace Graphics
 {
         constexpr int NUM_FRAMES = 3;
-        constexpr int MAX_TEXTURES = 512;
+        // Shared with the shaders, which size their bindless array from the same define.
+        constexpr int MAX_TEXTURES = FRAME_MAX_TEXTURES;
         constexpr int MAX_OBJECTS = 64;
         // Descriptor slot layout lives in GlobalDescriptorHeap.h (ADR 0017 L2).
         constexpr int STATIC_SAMPLERS_COUNT = 6;

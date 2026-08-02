@@ -1,4 +1,5 @@
-#define MAX_TEXTURES 512
+#include "PassRegisters.h"
+#define MAX_TEXTURES FRAME_MAX_TEXTURES
 #include "RasterDebugMode.h"
 #include "passConstants.hlsl"
 #include "consts.hlsl"
@@ -11,7 +12,7 @@ SamplerState gsamLinearClamp : register(s3);
 SamplerState gsamAnisotropicWrap : register(s4);
 SamplerState gsamAnisotropicClamp : register(s5);
 
-cbuffer CameraParams : register(b0)
+cbuffer CameraParams : BAMBOO_CBV(RASTER_REG_CAMERA_CB)
 {
     float4x4 viewProj;
     float4x4 view;
@@ -20,13 +21,13 @@ cbuffer CameraParams : register(b0)
     float4x4 projectionI;
 }
 
-cbuffer ModelTransforms : register(b1)
+cbuffer ModelTransforms : BAMBOO_CBV(RASTER_REG_MODEL_CB)
 {
     float4x4 world;
     float4x4 worldInvTranspose;
 }
 
-cbuffer Material : register(b2)
+cbuffer Material : BAMBOO_CBV(RASTER_REG_MATERIAL_CB)
 {
     float4 baseColorFactor;
     int textureIndex;
@@ -36,22 +37,22 @@ cbuffer Material : register(b2)
     float roughnessFactor;
 }
 
-Texture2D gTextures[MAX_TEXTURES] : register(t3, space0);
+Texture2D gTextures[MAX_TEXTURES] : BAMBOO_SRV(RASTER_REG_TEXTURES);
 
-ByteAddressBuffer g_indices : register(t2);
+ByteAddressBuffer g_indices : BAMBOO_SRV(RASTER_REG_INDICES);
 
-RWTexture3D<uint> gVoxelOccupancy  : register(u1);
-RWTexture3D<uint> gVoxelIrradiance : register(u2);
-RWTexture3D<uint> gVoxelVplCount   : register(u3);
-RWTexture2D<float4> gShadingPoints : register(u4); // VXPG primary G-buffer (pos, octaN)
+RWTexture3D<uint> gVoxelOccupancy  : BAMBOO_UAV(RASTER_REG_VOXEL_OCCUPANCY);
+RWTexture3D<uint> gVoxelIrradiance : BAMBOO_UAV(RASTER_REG_VOXEL_IRRADIANCE);
+RWTexture3D<uint> gVoxelVplCount   : BAMBOO_UAV(RASTER_REG_VOXEL_VPL_COUNT);
+RWTexture2D<float4> gShadingPoints : BAMBOO_UAV(RASTER_REG_SHADING_POINTS); // VXPG primary G-buffer (pos, octaN)
 
 // Stage A supervoxel cluster output (debug view 14 reads these). Bound as root UAVs.
 
 // Stage B superpixel outputs (debug views 15/16).
-RWTexture2D<int>    gSuperpixelIndex  : register(u7); // per-pixel superpixel id (screen res)
-RWTexture2D<float4> gSuperpixelCenter : register(u8); // representative pos + octaN (map res)
+RWTexture2D<int>    gSuperpixelIndex  : BAMBOO_UAV(RASTER_REG_SUPERPIXEL_INDEX); // per-pixel superpixel id (screen res)
+RWTexture2D<float4> gSuperpixelCenter : BAMBOO_UAV(RASTER_REG_SUPERPIXEL_CENTER); // representative pos + octaN (map res)
 
-cbuffer VoxelGridCB : register(b4)
+cbuffer VoxelGridCB : BAMBOO_CBV(REG_VOXEL_GRID_CB)
 {
     float3 voxGridMin;
     float  voxVoxelSize;

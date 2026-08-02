@@ -10,6 +10,7 @@
 #include "VxpgClusterPass.h"
 #include "SuperpixelBuildPass.h"
 #include "SceneResources/Scene.h"
+#include "PassRegisters.h"
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
@@ -86,29 +87,31 @@ void VxpgClusterVisibilityPass::CreateRootSignature()
     // No texture range: the BSDF weight uses per-instance material factors, so
     // this compute pass never samples the scene textures (which sit in the
     // raster path's PIXEL_SHADER_RESOURCE layout, illegal for a compute Dispatch).
+    // It includes RaytracingUtils.hlsl, so the scene half of its bindings is the
+    // frame layout; only the cvis-specific UAVs are pass-scoped.
     CD3DX12_DESCRIPTOR_RANGE r[10];
-    r[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0, 0, 1);   // camera b0 @ heap 1
-    r[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, 3);   // TLAS t0 @ 3
-    r[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 0, 4);   // vertices t1 @ 4
-    r[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 2, 0, 5);   // indices t2 @ 5
-    r[4].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 3, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SuperpixelIndex));        // gSuperpixelIndex u3 @ 523
-    r[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 1, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VplPosition));           // gVplPosition u1 @ 526
-    r[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 2, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VBuffer));                // gVBuffer u2 @ 527
-    r[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 4, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SpixelGathered));        // gSpixelGathered u4 @ 528
-    r[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 5, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SpixelCounter));         // gSpixelCounter u5 @ 529
-    r[9].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 6, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ClusterVisibilityMask)); // gClusterVisibilityMask u6 @ 530
+    r[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, FRAME_REG_CAMERA_MATRICES, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices));
+    r[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, FRAME_REG_TLAS, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Tlas));
+    r[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, FRAME_REG_VERTICES, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Vertices));
+    r[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, FRAME_REG_INDICES, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Indices));
+    r[4].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_SUPERPIXEL_INDEX, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SuperpixelIndex));
+    r[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_VPL_POSITION, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VplPosition));
+    r[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_VBUFFER, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VBuffer));
+    r[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_SPIXEL_GATHERED, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SpixelGathered));
+    r[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_SPIXEL_COUNTER, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SpixelCounter));
+    r[9].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_VISIBILITY_MASK, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ClusterVisibilityMask));
 
     CD3DX12_ROOT_PARAMETER params[10];
     params[0].InitAsDescriptorTable(_countof(r), r);
-    params[1].InitAsShaderResourceView(3);       // geometry info t3
-    params[2].InitAsShaderResourceView(4);       // instance info t4
-    params[3].InitAsConstantBufferView(1);       // grid CB b1
-    params[4].InitAsConstants(8, 2);             // cvis constants b2
-    params[5].InitAsUnorderedAccessView(7);      // gVoxInverseIndex u7
-    params[6].InitAsUnorderedAccessView(8);      // gVoxelClusterAssignments u8
-    params[7].InitAsUnorderedAccessView(9);      // gClusterGatheredLightPoints u9
-    params[8].InitAsUnorderedAccessView(10);     // gClusterLightPointCounts u10
-    params[9].InitAsUnorderedAccessView(11);     // gSpixelClusterAvgVisibility u11
+    params[1].InitAsShaderResourceView(FRAME_REG_GEOMETRY_INFO);
+    params[2].InitAsShaderResourceView(FRAME_REG_INSTANCE_INFO);
+    params[3].InitAsConstantBufferView(CVIS_REG_GRID_CB);
+    params[4].InitAsConstants(8, CVIS_REG_CB);
+    params[5].InitAsUnorderedAccessView(CVIS_REG_INVERSE_INDEX);
+    params[6].InitAsUnorderedAccessView(CVIS_REG_CLUSTER_ASSIGNMENTS);
+    params[7].InitAsUnorderedAccessView(CVIS_REG_GATHERED_LIGHT_POINTS);
+    params[8].InitAsUnorderedAccessView(CVIS_REG_LIGHT_POINT_COUNTS);
+    params[9].InitAsUnorderedAccessView(CVIS_REG_AVG_VISIBILITY);
 
     auto samplers = Renderer::GetStaticSamplers();
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params,

@@ -23,20 +23,16 @@ namespace
 
 void FrameBindingLayout::AppendFrameRanges(std::vector<D3D12_DESCRIPTOR_RANGE>& ranges)
 {
-    ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, kCameraMatrices, 1,
-                               GlobalDescriptor::CameraMatrices));
-    ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, kRaytraceOutput, 1,
-                               GlobalDescriptor::RaytraceOutput));
+    ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, kCameraMatrices, 1, GlobalDescriptor::CameraMatrices));
+    ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, kRaytraceOutput, 1, GlobalDescriptor::RaytraceOutput));
     ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kTlas, 1, GlobalDescriptor::Tlas));
     ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kVertices, 1, GlobalDescriptor::Vertices));
     ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kIndices, 1, GlobalDescriptor::Indices));
     ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kSkybox, 1, GlobalDescriptor::Skybox));
-    ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kMaterialTextures,
-                               Constants::Graphics::MAX_TEXTURES, GlobalDescriptor::MaterialTextures));
+    ranges.push_back(MakeRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, kMaterialTextures, Constants::Graphics::MAX_TEXTURES, GlobalDescriptor::MaterialTextures));
 }
 
-bool FrameBindingLayout::IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister,
-                                         uint32_t registerSpace)
+bool FrameBindingLayout::IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister, uint32_t registerSpace)
 {
     if (registerSpace != 0)
         return false;

@@ -7,6 +7,7 @@
 #include "VoxelizationPass.h"
 #include "VoxelGuidingBuildPass.h"
 #include "VxpgFingerprintPass.h"
+#include "PassRegisters.h"
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
@@ -73,9 +74,10 @@ void VxpgClusterPass::CreateRootSignature()
     // term), root UAVs u0 seeds, u1 centers, u2 dispatch args, u3 fingerprints,
     // u4 compact ids, u5 premul irradiance, u6 assignments.
     CD3DX12_ROOT_PARAMETER params[8];
-    params[0].InitAsConstants(4, 0);
+    params[0].InitAsConstants(4, CLUSTER_REG_CB);
+    // u0 through u6, contiguous by construction: see the register block above.
     for (uint32_t i = 0; i < 7; ++i)
-        params[1 + i].InitAsUnorderedAccessView(i);
+        params[1 + i].InitAsUnorderedAccessView(CLUSTER_REG_SEED_COMPACT_IDS + i);
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);

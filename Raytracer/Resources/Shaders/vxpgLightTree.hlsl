@@ -18,6 +18,7 @@
 // flag), and the sort reads the clamped count. Ported from SIByL; identifiers
 // renamed (original SIByL names in comments).
 
+#include "PassRegisters.h"
 #include "LightTreeNode.hlsl"
 
 // uint16 node-index ceiling: the node array holds 2N-1 entries and every index
@@ -28,7 +29,7 @@
 // Sort-key buffer capacity (SIByL bitonic element_count = 65536).
 #define LIGHT_TREE_SORT_CAPACITY 65536
 
-cbuffer LightTreeGridCB : register(b0)
+cbuffer LightTreeGridCB : BAMBOO_CBV(LIGHT_TREE_REG_GRID_CB)
 {
     float3 gGridMin;
     float gVoxelSize;
@@ -36,39 +37,39 @@ cbuffer LightTreeGridCB : register(b0)
     uint gGridDim;
 }
 
-RWStructuredBuffer<uint64_t> gSortKeys : register(u0); // SIByL u_Codes
+RWStructuredBuffer<uint64_t> gSortKeys : BAMBOO_UAV(LIGHT_TREE_REG_SORT_KEYS); // SIByL u_Codes
 // globallycoherent: merge threads communicate through these across thread
 // groups (child results read by the sibling's thread). SIByL's Vulkan backend
 // is coherent by default; D3D12 UAVs are not without this keyword.
-globallycoherent RWStructuredBuffer<LightTreeNode> gNodes : register(u1); // SIByL u_Nodes
-RWStructuredBuffer<uint> gLeafRanges : register(u2); // SIByL u_Descendant (dead output; x | y<<16)
-RWStructuredBuffer<int> gCompactToLeaf : register(u3); // SIByL compact2leaf
-globallycoherent RWStructuredBuffer<int> gClusterRoots : register(u4); // SIByL cluster_roots
-RWStructuredBuffer<TreeBuildDispatchArgs> gDispatchArgs : register(u5); // SIByL u_ConstrIndirectArgs
-RWStructuredBuffer<uint> gCompactIds : register(u6); // SIByL u_compactIndex (compactID -> voxelID)
-RWStructuredBuffer<int> gClusterAssignments : register(u7); // SIByL u_clusterIndex
-RWStructuredBuffer<float> gPremulIrradiance : register(u8); // SIByL u_vxIrradiance
-RWStructuredBuffer<uint> gVoxCounters : register(u9); // SIByL u_vxCounter ([0] = lit voxel count)
+globallycoherent RWStructuredBuffer<LightTreeNode> gNodes : BAMBOO_UAV(LIGHT_TREE_REG_NODES); // SIByL u_Nodes
+RWStructuredBuffer<uint> gLeafRanges : BAMBOO_UAV(LIGHT_TREE_REG_LEAF_RANGES); // SIByL u_Descendant (dead output; x | y<<16)
+RWStructuredBuffer<int> gCompactToLeaf : BAMBOO_UAV(LIGHT_TREE_REG_COMPACT_TO_LEAF); // SIByL compact2leaf
+globallycoherent RWStructuredBuffer<int> gClusterRoots : BAMBOO_UAV(LIGHT_TREE_REG_CLUSTER_ROOTS); // SIByL cluster_roots
+RWStructuredBuffer<TreeBuildDispatchArgs> gDispatchArgs : BAMBOO_UAV(LIGHT_TREE_REG_DISPATCH_ARGS); // SIByL u_ConstrIndirectArgs
+RWStructuredBuffer<uint> gCompactIds : BAMBOO_UAV(LIGHT_TREE_REG_COMPACT_IDS); // SIByL u_compactIndex (compactID -> voxelID)
+RWStructuredBuffer<int> gClusterAssignments : BAMBOO_UAV(LIGHT_TREE_REG_CLUSTER_ASSIGNMENTS); // SIByL u_clusterIndex
+RWStructuredBuffer<float> gPremulIrradiance : BAMBOO_UAV(LIGHT_TREE_REG_PREMUL_IRRADIANCE); // SIByL u_vxIrradiance
+RWStructuredBuffer<uint> gVoxCounters : BAMBOO_UAV(LIGHT_TREE_REG_COUNTERS); // SIByL u_vxCounter ([0] = lit voxel count)
 // DEVIATION from SIByL: the merge sibling-gate flag lives in its OWN scalar
 // buffer, not TreeNode.flag. DXC will not emit an atomic on a struct sub-member
 // (InterlockedCompareExchange on gNodes[i].flag silently compiles NON-atomic ->
 // race -> merge parent-walk cycles -> GPU hang). node.flag stays pure clusterID.
-globallycoherent RWStructuredBuffer<uint> gNodeVisited : register(u10);
+globallycoherent RWStructuredBuffer<uint> gNodeVisited : BAMBOO_UAV(LIGHT_TREE_REG_NODE_VISITED);
 
 // ---- Top-level tree bindings (BuildSuperpixelClusterHeaps only) -------------
 // SIByL vxguiding/tree/tree-top-level-constr: per-superpixel implicit heap of
 // the 32 clusters' view-weighted importance. These are unused by the six
 // bottom-tree kernels above (DXC strips them per-entry).
-cbuffer TopLevelTreeCB : register(b1)
+cbuffer TopLevelTreeCB : BAMBOO_CBV(LIGHT_TREE_REG_TOP_LEVEL_CB)
 {
     uint gMapX;             // superpixel columns = ceil(width / SUPERPIXEL_SIZE)
     uint gMapY;             // superpixel rows
     uint gUseAvgVisibility; // 1 = SIByL Average (soft), 0 = Binary (mask bit)
     uint gTopLevelPad;
 }
-RWStructuredBuffer<float> gAvgVisibility : register(u11);               // SIByL avg_visibility (spixelFlat*32+cluster)
-RWStructuredBuffer<float> gSpixelClusterImportanceHeap : register(u12); // SIByL tltree (spixelFlat*64 implicit heap)
-RWTexture2D<uint> gClusterVisibilityMask : register(u13);              // SIByL visibilityIMG (bit c = sees cluster c)
+RWStructuredBuffer<float> gAvgVisibility : BAMBOO_UAV(LIGHT_TREE_REG_AVG_VISIBILITY);               // SIByL avg_visibility (spixelFlat*32+cluster)
+RWStructuredBuffer<float> gSpixelClusterImportanceHeap : BAMBOO_UAV(LIGHT_TREE_REG_IMPORTANCE_HEAP); // SIByL tltree (spixelFlat*64 implicit heap)
+RWTexture2D<uint> gClusterVisibilityMask : BAMBOO_UAV(LIGHT_TREE_REG_VISIBILITY_MASK);              // SIByL visibilityIMG (bit c = sees cluster c)
 
 // ---- voxel + Morton helpers (SIByL vxgi_interface / space_filling_curve) ----
 

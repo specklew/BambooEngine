@@ -3,6 +3,7 @@
 #include "FrameAccumulationPass.h"
 
 #include "Constants.h"
+#include "PassRegisters.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
 #include "Window.h"
@@ -40,13 +41,13 @@ void FrameAccumulationPass::CreateRootSignature()
     CD3DX12_DESCRIPTOR_RANGE ranges[3];
 
     // [0] Descriptor table with all resources
-    ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);  // SRV at t0
-    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0);  // UAV at u0
-    ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 1);  // UAV at u1
+    ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, ACCUM_REG_CURRENT);
+    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, ACCUM_REG_ACCUM);
+    ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, ACCUM_REG_DISPLAY);
     rootParams[0].InitAsDescriptorTable(3, ranges);
 
-    // [1] Root constant for frameCount (b0)
-    rootParams[1].InitAsConstants(1, 0);
+    // [1] Root constant for frameCount
+    rootParams[1].InitAsConstants(1, ACCUM_REG_CB);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
         _countof(rootParams), rootParams,
