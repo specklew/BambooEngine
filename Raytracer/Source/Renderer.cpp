@@ -1918,25 +1918,52 @@ void Renderer::DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass)
 	}
 }
 
+// A multi-line dump logged as one spdlog call arrives as a single wall of text:
+// sinks that prefix each entry only prefix the first line, and consoles wrap the
+// rest wherever they like. One entry per line reads correctly everywhere.
+static void LogDumpBlock(const char* title, const std::string& body)
+{
+	if (body.empty())
+		return;
+
+	spdlog::info("{}", title);
+	size_t lineStart = 0;
+	while (lineStart < body.size())
+	{
+		size_t lineEnd = body.find('\n', lineStart);
+		if (lineEnd == std::string::npos)
+			lineEnd = body.size();
+
+		// Trailing '\r' would print as a stray glyph on some consoles.
+		size_t trimmed = lineEnd;
+		if (trimmed > lineStart && body[trimmed - 1] == '\r')
+			--trimmed;
+
+		if (trimmed > lineStart)
+			spdlog::info("{}", body.substr(lineStart, trimmed - lineStart));
+
+		lineStart = lineEnd + 1;
+	}
+}
+
 void Renderer::DumpRenderGraphIfRequested()
 {
 	if (g_dumpRenderGraph.Get() == 0)
 		return;
 
-	spdlog::info("[RDG] frame passes:\n{}", m_renderGraph.DumpPasses());
-	spdlog::info("[RDG] synthesized barriers:\n{}", m_renderGraph.DumpBarriers());
+	LogDumpBlock("[RDG] frame passes:", m_renderGraph.DumpPasses());
+	LogDumpBlock("[RDG] synthesized barriers:", m_renderGraph.DumpBarriers());
 
 	// Last resolved frame's node costs, when rdg.timings is on — the same numbers
 	// the ImGui table shows, so a headless run can attribute a regression too.
 	std::string timings;
 	for (const auto& timing : m_renderGraph.GetTimings())
 		timings += fmt::format("    {:<32} {:.3f} ms\n", timing.name, timing.milliseconds);
-	if (!timings.empty())
-		spdlog::info("[RDG] node GPU cost:\n{}", timings);
+	LogDumpBlock("[RDG] node GPU cost:", timings);
 
 	// Deferred to here rather than to end-of-init: techniques build their root
 	// signatures on first selection, so coverage is only complete once a frame ran.
-	spdlog::info("[RootSignature] layouts:\n{}", RootSignatureLibrary::Get().DumpRootSignatures());
+	LogDumpBlock("[RootSignature] layouts:", RootSignatureLibrary::Get().DumpRootSignatures());
 	RootSignatureLibrary::Get().LogUnreferencedSlots();
 
 	g_dumpRenderGraph.Set(0); // one-shot: a per-frame dump is unreadable
