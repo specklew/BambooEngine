@@ -5,7 +5,8 @@
 
 static constexpr size_t EntryIDSize = D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT;
 
-ShaderBindingTable::ShaderBindingTable(const Microsoft::WRL::ComPtr<ID3D12Device5>& device, const Microsoft::WRL::ComPtr<ID3D12StateObjectProperties>& stateObj, SBTDescriptor& sbtDesc)
+ShaderBindingTable::ShaderBindingTable(const Microsoft::WRL::ComPtr<ID3D12Device5>& device,
+    const Microsoft::WRL::ComPtr<ID3D12StateObjectProperties>& stateObj, SBTDescriptor& sbtDesc)
     : Buffer(device, nullptr),
     m_stateObjectProperties(stateObj),
     m_rayGenShaders(std::move(sbtDesc.RayGenShaders)),

@@ -10,7 +10,8 @@ IndexBuffer::IndexBuffer(const Microsoft::WRL::ComPtr<ID3D12Device5>& device, si
     m_indexBufferView = CreateAndGetIndexBufferView();
     SetResourceName(L"Index Buffer");
 }
-IndexBuffer::IndexBuffer(const Microsoft::WRL::ComPtr<ID3D12Device5>& device, const Microsoft::WRL::ComPtr<ID3D12Resource>& resource, size_t indexCount, DXGI_FORMAT format)
+IndexBuffer::IndexBuffer(const Microsoft::WRL::ComPtr<ID3D12Device5>& device,
+    const Microsoft::WRL::ComPtr<ID3D12Resource>& resource, size_t indexCount, DXGI_FORMAT format)
     :   Buffer(device, resource),
         m_indexCount(indexCount),
         m_indexFormat(format)

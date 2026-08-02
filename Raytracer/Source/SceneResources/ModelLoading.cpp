@@ -87,7 +87,8 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
     {
         Vertex vertex{};
 
-        // Inverting Y and Z to convert from right-handed to left-handed coordinate system. https://stackoverflow.com/questions/16986017/how-do-i-make-blender-operate-in-left-hand
+        // Inverting Y and Z to convert from right-handed to left-handed coordinate system.
+        // https://stackoverflow.com/questions/16986017/how-do-i-make-blender-operate-in-left-hand
         vertex.Pos.x = positions[i * 3 + 0];
         vertex.Pos.y = positions[i * 3 + 1];
         vertex.Pos.z = positions[i * 3 + 2];
@@ -201,7 +202,8 @@ static bool LoadTinyGLTFModel(const std::filesystem::path &path, tinygltf::Model
     return true;
 }
 
-static std::shared_ptr<Texture> GetOrCreateTexture(Renderer& renderer, const tinygltf::Model& model, int textureIndex, std::unordered_map<int, std::shared_ptr<Texture>>& textureCache)
+static std::shared_ptr<Texture> GetOrCreateTexture(Renderer& renderer, const tinygltf::Model& model, int textureIndex,
+    std::unordered_map<int, std::shared_ptr<Texture>>& textureCache)
 {
     int sourceIndex = model.textures[textureIndex].source;
     auto it = textureCache.find(sourceIndex);
@@ -213,7 +215,9 @@ static std::shared_ptr<Texture> GetOrCreateTexture(Renderer& renderer, const tin
     return texture;
 }
 
-static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygltf::Model& model, tinygltf::Primitive& primitive, std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices, std::unordered_map<int, std::shared_ptr<Texture>>& textureCache)
+static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygltf::Model& model,
+    tinygltf::Primitive& primitive, std::vector<Vertex>& outVertices, std::vector<uint32_t>& outIndices,
+    std::unordered_map<int, std::shared_ptr<Texture>>& textureCache)
 {
     assert(primitive.indices >= 0 && "Failed loading glTF model. Mesh primitive must have indices");
 

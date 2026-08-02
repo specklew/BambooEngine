@@ -172,5 +172,6 @@ private:
 
     __forceinline void AssertExistsInAssetIdLookup(ResourceId id) const; // inline won't work unless defined in header, right?
 
-    std::unordered_map<ResourceId, AssetId> m_assetIdLookup; // TODO : I don't like having asset ids scattered around the heap. Could we use a string store like for StringId?
+    // TODO : I don't like having asset ids scattered around the heap. Could we use a string store like for StringId?
+    std::unordered_map<ResourceId, AssetId> m_assetIdLookup;
 };

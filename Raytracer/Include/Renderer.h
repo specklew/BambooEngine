@@ -87,7 +87,8 @@ public:
 	                   const std::string& outDir, const std::string& stem);
 	bool ScreenshotIdle() const;
 
-	std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> Renderer::CreateSceneResources(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+	std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> CreateSceneResources(
+		const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
 	std::shared_ptr<Texture> CreateTextureFromGLTF(const tinygltf::Image& image);
 	std::shared_ptr<GameObject> InstantiateGameObject();
 
@@ -287,7 +288,8 @@ std::shared_ptr<StructuredBuffer<T>> Renderer::CreateStructuredBuffer(const std:
 	if (data_size > 0)
 		memcpy(cpuData, data.data(), data_size);
 
-	Microsoft::WRL::ComPtr<ID3D12Resource> default_buffer = RenderingUtils::CreateDefaultBuffer(g_device.Get(), m_d3d12CommandList.Get(), cpuData, buffer_size, upload_buffer);
+	Microsoft::WRL::ComPtr<ID3D12Resource> default_buffer = RenderingUtils::CreateDefaultBuffer(
+		g_device.Get(), m_d3d12CommandList.Get(), cpuData, buffer_size, upload_buffer);
 	auto structured_buffer = std::make_shared<StructuredBuffer<T>>(g_device, default_buffer, data.size());
 
 	const std::string type_name = typeid(T).name();

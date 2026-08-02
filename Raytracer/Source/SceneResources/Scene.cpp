@@ -82,7 +82,9 @@ static std::shared_ptr<StructuredBuffer<GeometryInfo>> CreateGeometryInfoBuffer(
     return geo_buffer;
 }
 
-static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(Renderer& renderer, const std::vector<std::shared_ptr<GameObject>>& gameObjects, const std::vector<std::shared_ptr<Primitive>>& primitives, std::vector<EmissiveTriangle>& outEmissiveTriangles)
+static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(Renderer& renderer,
+    const std::vector<std::shared_ptr<GameObject>>& gameObjects,
+    const std::vector<std::shared_ptr<Primitive>>& primitives, std::vector<EmissiveTriangle>& outEmissiveTriangles)
 {
     std::vector<InstanceInfo> instances_info;
 
@@ -141,8 +143,9 @@ static std::shared_ptr<StructuredBuffer<InstanceInfo>> CreateInstanceInfoBuffer(
             {
                 if (primitive->m_emissiveBakePositions.empty() || primitive->m_emissiveBakeIndices.empty())
                 {
-                    spdlog::error("Material claims emissive radiance but primitive has no baked emissive positions/indices (loader bug); treating instance as non-emissive. instance={} geometry_id={}",
-                        instances_info.size(), geometry_id);
+                    spdlog::error("Material claims emissive radiance but primitive has no baked emissive "
+                        "positions/indices (loader bug); treating instance as non-emissive. instance={} "
+                        "geometry_id={}", instances_info.size(), geometry_id);
                 }
                 else
                 {

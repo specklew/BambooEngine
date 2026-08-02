@@ -95,7 +95,8 @@ static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (
 // Opt-in stripped raygen (debug-view code compiled out). Measured SLOWER on
 // the current AMD RDNA driver (see the variant-sync block in Update); kept for
 // A/Bs on other vendors/drivers where the dead-code footprint may win.
-static AutoCVarInt g_raygenCleanVariant("renderer.raygenCleanVariant", "1 = compile raygen without debug-view code (measured slower on RDNA)", 0, CVarFlags::EditCheckbox);
+static AutoCVarInt g_raygenCleanVariant("renderer.raygenCleanVariant",
+	"1 = compile raygen without debug-view code (measured slower on RDNA)", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);
@@ -115,15 +116,20 @@ static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accum
 // Default ON (deviation from SIByL's shipped default): full-cube bounds made the
 // guided sampler aim at mostly-empty cube space — view-4 acceptance was ~red
 // everywhere; tight bounds turned the lit half of Sponza green (2026-07-09).
-static AutoCVarInt   g_voxelBakeUseCompact("voxel.bake.useCompact", "Bake tight per-voxel triangle AABBs instead of full cubes (SIByL default: off)", 1, CVarFlags::EditCheckbox);
-static AutoCVarInt   g_voxelBakeClipping("voxel.bake.clipping", "Clip triangles against the voxel cube before the tight AABB (SIByL default: off)", 0, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_voxelBakeUseCompact("voxel.bake.useCompact",
+	"Bake tight per-voxel triangle AABBs instead of full cubes (SIByL default: off)", 1, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_voxelBakeClipping("voxel.bake.clipping",
+	"Clip triangles against the voxel cube before the tight AABB (SIByL default: off)", 0, CVarFlags::EditCheckbox);
 // Jitter ON is a deliberate deviation (SIByL uses pixel centers): the PT
 // reference anti-aliases its primaries, so a pixel-center VBuffer leaves a
 // constant silhouette mismatch vs the reference (measured 2026-07-10: RMSE
 // 0.0180 vs 0.0117 with jitter, same frame count) — edge error, not variance.
-static AutoCVarInt   g_vbufferJitter("vxpg.vbufferJitter", "Sub-pixel jitter for the shared VBuffer primaries (off = SIByL-literal pixel-center, no edge AA)", 1, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_vbufferJitter("vxpg.vbufferJitter",
+	"Sub-pixel jitter for the shared VBuffer primaries (off = SIByL-literal pixel-center, no edge AA)", 1,
+	CVarFlags::EditCheckbox);
 static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence weight: screen-xy vs world-position", 0.6f, CVarFlags::EditDrag, 0.0f, 4.0f);
-static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer", "SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
+static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer",
+	"SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
 // ADR 0009: 1 = the guided GI's BSDF MIS subtree writes the VPL fitting data
 // (last-frame reuse, supplemental 2's own pattern) and the injection pass
@@ -142,25 +148,36 @@ static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = b
 // 1/2 make the within-cluster voxel pick account for solid angle + orientation,
 // at the cost of a non-telescoping leaf->root reverse pdf walk per BSDF-MIS
 // query. Rides guidingFlags bits 5-6.
-static AutoCVarInt   g_guidingTreeWeightMode("vxpg.tree.weightMode", "Bottom light-tree weighting: 0 = intensity-only, 1 = geometry exact + dist (paper), 2 = geometry approx + dist (cheap)", 0, CVarFlags::EditDrag, 0, 2);
+static AutoCVarInt   g_guidingTreeWeightMode("vxpg.tree.weightMode",
+	"Bottom light-tree weighting: 0 = intensity-only, 1 = geometry exact + dist (paper), 2 = geometry approx + dist (cheap)",
+	0, CVarFlags::EditDrag, 0, 2);
 // Second-bounce guiding (SIByL strategy-6 `second=true`, guidedPathTracing.hlsl
 // ShadeSecondVertex). MIS-guides the second path vertex via the global voxel
 // irradiance guide, turning the BSDF branch into a 2-bounce guided path.
 // Meaningful only at bounces >= 2; default off. Rides guidingFlags bit 7.
-static AutoCVarInt   g_guidingSecondBounce("vxpg.secondBounce", "Also MIS-guide the second path vertex (SIByL second=true); needs bounces >= 2", 0, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_guidingSecondBounce("vxpg.secondBounce",
+	"Also MIS-guide the second path vertex (SIByL second=true); needs bounces >= 2", 0, CVarFlags::EditCheckbox);
 // One-sample MIS at the first vertex (ADR 0015, deviation from SIByL's
 // two-sample MIS): a fair coin picks EITHER the BSDF or the guide strategy
 // per sample and only that branch traces — halves the GI raygen's trace work
 // at higher per-sample variance. Debug views keep the two-sample estimator.
 // Rides guidingFlags bit 8.
-static AutoCVarInt   g_guidingOneSampleMis("vxpg.oneSampleMis", "One-sample MIS: trace one stochastically-picked strategy per sample instead of both", 0, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_guidingOneSampleMis("vxpg.oneSampleMis",
+	"One-sample MIS: trace one stochastically-picked strategy per sample instead of both", 0,
+	CVarFlags::EditCheckbox);
 // Adaptive per-tile selection probability for one-sample MIS (ADR 0015):
 // learned from the previous frame's per-strategy contribution shares —
 // where one strategy dominates, one-sample loses almost no variance there.
 // Rides guidingFlags bit 9; 0 = fixed fair coin.
-static AutoCVarInt   g_guidingOneSampleAdaptiveQ("vxpg.oneSample.adaptiveQ", "Adaptive per-tile strategy-selection probability for one-sample MIS; 0 = fixed 0.5", 1, CVarFlags::EditCheckbox);
-static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp", "Clamp indirect-bounce skybox radiance to suppress HDR-sun fireflies for benchmark convergence. 0 = disabled (unbiased)", 0.0f, CVarFlags::EditDrag, 0.0f, 1000.0f);
-static AutoCVarInt   g_skyLighting("pathtracing.skyLighting", "Skybox radiance lights surfaces via indirect rays; 0 = sky is background-only (benchmark isolation: the VXPG guide only targets direct-lit surfaces)", 1, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_guidingOneSampleAdaptiveQ("vxpg.oneSample.adaptiveQ",
+	"Adaptive per-tile strategy-selection probability for one-sample MIS; 0 = fixed 0.5", 1,
+	CVarFlags::EditCheckbox);
+static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp",
+	"Clamp indirect-bounce skybox radiance to suppress HDR-sun fireflies for benchmark convergence. 0 = disabled (unbiased)",
+	0.0f, CVarFlags::EditDrag, 0.0f, 1000.0f);
+static AutoCVarInt   g_skyLighting("pathtracing.skyLighting",
+	"Skybox radiance lights surfaces via indirect rays; 0 = sky is background-only (benchmark isolation: the VXPG guide only targets direct-lit surfaces)",
+	1, CVarFlags::EditCheckbox);
 static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization", GuidingDebugView::None,
                                         CVarFlags::None, FormatDebugViewDocs<GuidingDebugView>(kGuidingDebugViewDocs));
 
@@ -2143,7 +2160,8 @@ void Renderer::ToggleRasterization()
 	m_rasterize = !m_rasterize;
 }
 
-std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> Renderer::CreateSceneResources(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> Renderer::CreateSceneResources(
+	const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
 {
 	ComPtr<ID3D12Resource> vertex_upload_buffer;
 	ComPtr<ID3D12Resource> index_upload_buffer;
@@ -2153,8 +2171,10 @@ std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> Renderer:
 	memcpy(cpuVertex, vertices.data(), vertices.size() * sizeof(Vertex));
 	memcpy(cpuIndex, indices.data(), indices.size() * sizeof(uint32_t));
 	
-	auto vertex_buffer_resource = RenderingUtils::CreateDefaultBuffer(g_device.Get(), m_d3d12CommandList.Get(), cpuVertex, vertices.size() * sizeof(Vertex), vertex_upload_buffer);
-	auto index_buffer_resource = RenderingUtils::CreateDefaultBuffer(g_device.Get(), m_d3d12CommandList.Get(), cpuIndex, indices.size() * sizeof(uint32_t), index_upload_buffer);
+	auto vertex_buffer_resource = RenderingUtils::CreateDefaultBuffer(g_device.Get(), m_d3d12CommandList.Get(),
+		cpuVertex, vertices.size() * sizeof(Vertex), vertex_upload_buffer);
+	auto index_buffer_resource = RenderingUtils::CreateDefaultBuffer(g_device.Get(), m_d3d12CommandList.Get(),
+		cpuIndex, indices.size() * sizeof(uint32_t), index_upload_buffer);
 	
 	// Need to be closed and executed to create buffers before the upload buffers go out of scope.
 	ExecuteCommandsAndReset();
@@ -2227,15 +2247,18 @@ void Renderer::ExecuteCommandsAndReset()
 	// 1. commands are closed
 	// 2. commands are executed
 	// 3. command queue is flushed
-	// D3D12 ERROR: ID3D12CommandAllocator::Reset: The command allocator cannot be reset because a command list is currently being recorded with the allocator. [ EXECUTION ERROR #543: COMMAND_ALLOCATOR_CANNOT_RESET]
+	// D3D12 ERROR: ID3D12CommandAllocator::Reset: The command allocator cannot be reset because a command list is
+	// currently being recorded with the allocator. [ EXECUTION ERROR #543: COMMAND_ALLOCATOR_CANNOT_RESET]
 	// Is it possible that in the meantime something gets recorded to the command list?
 	// ---
 	// We have 3 allocators for each of the triple buffered frames
 	// When we reset, we reset only the current frame's allocator
 	// But maybe we haven't yet presented the frame, and we need to??? is that it?
 
-	// After all it seems that the FlushGPU method was not functioning correctly, I never quite researched why that was the case. But it seems that there was an issue with the fence value.
-	// There was a unique fence value for each allocator (frame) and somehow it was not being updated properly. TODO: Check out why was that for the next iteration of the engine.
+	// After all it seems that the FlushGPU method was not functioning correctly, I never quite researched why that
+	// was the case. But it seems that there was an issue with the fence value.
+	// There was a unique fence value for each allocator (frame) and somehow it was not being updated properly.
+	// TODO: Check out why was that for the next iteration of the engine.
 	ResetCommandList();
 }
 

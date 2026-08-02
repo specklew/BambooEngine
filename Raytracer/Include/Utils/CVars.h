@@ -118,7 +118,8 @@ struct AutoCVarFloat : AutoCVar<float>
 	// Creates a new FLOAT cvar with the given name, description, default value and optional flags
 	// example usage:
 	// AutoCVarFloat cvar("player.speed", "speed", 1.0f, CVarFlags::EditDrag, 0.0f, 50.0f);
-	AutoCVarFloat(const char* name, const char* description, float defaultValue, CVarFlags flags = CVarFlags::None, float minValue = -IMGUI_SAFE_FLT_MAX, float maxValue = IMGUI_SAFE_FLT_MAX);
+	AutoCVarFloat(const char* name, const char* description, float defaultValue, CVarFlags flags = CVarFlags::None,
+		float minValue = -IMGUI_SAFE_FLT_MAX, float maxValue = IMGUI_SAFE_FLT_MAX);
 	float Get();
 	float* GetPtr();
 	void Set(float value);
