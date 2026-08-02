@@ -6,6 +6,7 @@
 #include "VoxelGuidingBuildPass.h"
 #include "LightInjectionPass.h"
 #include "ResourceManager/ResourceManager.h"
+#include "RootSignatureLibrary.h"
 #include "Shader.h"
 #include "Utils/Utils.h"
 
@@ -103,11 +104,8 @@ void VxpgFingerprintPass::CreateRootSignatures()
 
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_NONE);
-        ComPtr<ID3DBlob> sig, err;
-        ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
-        ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
-            IID_PPV_ARGS(&m_presampleRootSig)));
-        m_presampleRootSig->SetName(L"VxpgFingerprint Presample RootSig");
+        m_presampleRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc,
+                                                                L"VxpgFingerprint Presample RootSig");
     }
 
     // Visibility: t0 TLAS, root UAVs u1 representatives (in), u2 compact light
@@ -122,11 +120,8 @@ void VxpgFingerprintPass::CreateRootSignatures()
 
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_NONE);
-        ComPtr<ID3DBlob> sig, err;
-        ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
-        ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
-            IID_PPV_ARGS(&m_visibilityRootSig)));
-        m_visibilityRootSig->SetName(L"VxpgFingerprint Visibility RootSig");
+        m_visibilityRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc,
+                                                                 L"VxpgFingerprint Visibility RootSig");
     }
 }
 

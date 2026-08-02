@@ -19,6 +19,7 @@ struct Shader
 {
     ResourceId id;
     Microsoft::WRL::ComPtr<IDxcBlob> bytecode = nullptr;
+    Microsoft::WRL::ComPtr<IDxcBlob> reflection = nullptr; // DXC reflection blob, null if DXC produced none
     ShaderMetadata metadata = {}; // TODO : is this only stored for recompilation? if so, maybe editor only?
 
     explicit Shader(ResourceId id) : id(id) {}

@@ -21,7 +21,7 @@ static wchar_t* ConvertToWideString(const char* narrowString)
 	return wideString;
 }
 
-ComPtr<IDxcBlob> CompileShader(const ShaderMetadata& meta)
+ComPtr<IDxcBlob> CompileShader(const ShaderMetadata& meta, ComPtr<IDxcBlob>* outReflection)
 {
 	// adapted from: https://github.com/microsoft/DirectXShaderCompiler/wiki/Using-dxc.exe-and-dxcompiler.dll
 
@@ -121,6 +121,17 @@ ComPtr<IDxcBlob> CompileShader(const ShaderMetadata& meta)
 	ComPtr<IDxcBlob> pShader = nullptr;
 	ThrowIfFailed(pResults->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&pShader), nullptr));
 	assert(pShader != nullptr);
+
+	if (outReflection)
+	{
+		*outReflection = nullptr;
+		if (pResults->HasOutput(DXC_OUT_REFLECTION))
+		{
+			ComPtr<IDxcBlob> pReflection = nullptr;
+			if (SUCCEEDED(pResults->GetOutput(DXC_OUT_REFLECTION, IID_PPV_ARGS(&pReflection), nullptr)))
+				*outReflection = pReflection;
+		}
+	}
 
 	return pShader;
 }

@@ -8,6 +8,7 @@
 #include "VoxelGuidingBuildPass.h"
 #include "VxpgFingerprintPass.h"
 #include "ResourceManager/ResourceManager.h"
+#include "RootSignatureLibrary.h"
 #include "Shader.h"
 #include "Utils/Utils.h"
 
@@ -78,11 +79,7 @@ void VxpgClusterPass::CreateRootSignature()
 
     CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);
-    ComPtr<ID3DBlob> sig, err;
-    ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
-    ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
-        IID_PPV_ARGS(&m_rootSig)));
-    m_rootSig->SetName(L"VxpgCluster RootSig");
+    m_rootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VxpgCluster RootSig");
 }
 
 void VxpgClusterPass::CreatePSOs()

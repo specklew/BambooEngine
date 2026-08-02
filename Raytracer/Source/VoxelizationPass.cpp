@@ -9,6 +9,8 @@
 #include "InputElements.h"
 #include "Shader.h"
 #include "ResourceManager/ResourceManager.h"
+#include "RootSignatureLibrary.h"
+#include "ShaderReflection.h"
 #include "Resources/ConstantBuffer.h"
 #include "Resources/IndexBuffer.h"
 #include "Resources/VertexBuffer.h"
@@ -145,11 +147,7 @@ void VoxelizationPass::CreateRootSignatures()
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
-        ComPtr<ID3DBlob> sig, err;
-        ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
-        ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
-            IID_PPV_ARGS(&m_clearRootSig)));
-        m_clearRootSig->SetName(L"VoxelFrameClear RootSig");
+        m_clearRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VoxelFrameClear RootSig");
     }
 
     // Bake-clear root sig: constants b0, table u0 (occupancy, heap slot 0),
@@ -167,11 +165,7 @@ void VoxelizationPass::CreateRootSignatures()
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
-        ComPtr<ID3DBlob> sig, err;
-        ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
-        ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
-            IID_PPV_ARGS(&m_bakeClearRootSig)));
-        m_bakeClearRootSig->SetName(L"VoxelBakeClear RootSig");
+        m_bakeClearRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VoxelBakeClear RootSig");
     }
 
     // Bake root sig: CBV b0 (grid), CBV b1 (model), root constants b2
@@ -191,13 +185,7 @@ void VoxelizationPass::CreateRootSignatures()
         CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
 
-        ComPtr<ID3DBlob> sig, err;
-        HRESULT hr = D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err);
-        if (err) OutputDebugStringA(static_cast<char*>(err->GetBufferPointer()));
-        ThrowIfFailed(hr);
-        ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
-            IID_PPV_ARGS(&m_bakeRootSig)));
-        m_bakeRootSig->SetName(L"VoxelBake RootSig");
+        m_bakeRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VoxelBake RootSig");
     }
 }
 
@@ -245,6 +233,9 @@ void VoxelizationPass::CreatePSOs()
 
         ThrowIfFailed(m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_bakePso)));
         m_bakePso->SetName(L"VoxelBake PSO");
+
+        ShaderReflection::ValidateShaderAsset("resources/shaders/voxelize.vs.shader", m_bakeRootSig.Get());
+        ShaderReflection::ValidateShaderAsset("resources/shaders/voxelize.ps.shader", m_bakeRootSig.Get());
     }
 }
 

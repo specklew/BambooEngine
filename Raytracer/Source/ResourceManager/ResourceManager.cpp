@@ -107,7 +107,7 @@ ShaderHandle ResourceManager::LoadShader(const AssetId& assetId)
     delete[] buffer;
 
     Shader shader(CreateNewResourceId(assetId));
-    shader.bytecode = CompileShader(meta);
+    shader.bytecode = CompileShader(meta, &shader.reflection);
     shader.metadata = meta;
     shader.metadata.lastCompilationTime = std::filesystem::_File_time_clock::now();
 
@@ -141,12 +141,14 @@ bool ResourceManager::RecompileAllShaders()
     for (uint32_t i = 0; i < shaders.m_stackTop; i++)
     {
         Shader& shader = shaders.GetResource(ShaderHandle(i));
-        Microsoft::WRL::ComPtr<IDxcBlob> newBytecode = CompileShader(shader.metadata);
+        Microsoft::WRL::ComPtr<IDxcBlob> newReflection;
+        Microsoft::WRL::ComPtr<IDxcBlob> newBytecode = CompileShader(shader.metadata, &newReflection);
         if (newBytecode == nullptr)
         {
             return false;
         }
-        shader.bytecode = newBytecode;
+        shader.bytecode   = newBytecode;
+        shader.reflection = newReflection;
         shader.metadata.lastCompilationTime = std::filesystem::_File_time_clock::now();
     }
 
@@ -170,11 +172,13 @@ bool ResourceManager::RecompileOutdatedShadersIfAny()
         if (lastWriteTime > shader.metadata.lastCompilationTime)
         {
             SPDLOG_INFO("Recompiling {}", shader.id.GetUnderlyingString());
-            const Microsoft::WRL::ComPtr<IDxcBlob> newBytecode = CompileShader(shader.metadata);
+            Microsoft::WRL::ComPtr<IDxcBlob>       newReflection;
+            const Microsoft::WRL::ComPtr<IDxcBlob> newBytecode = CompileShader(shader.metadata, &newReflection);
 
             if (newBytecode != nullptr)
             {
-                shader.bytecode = newBytecode;
+                shader.bytecode   = newBytecode;
+                shader.reflection = newReflection;
                 shader.metadata.lastCompilationTime = _File_time_clock::now();
                 anyShaderRecompiled = true;
             }

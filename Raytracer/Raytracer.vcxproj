@@ -110,6 +110,8 @@
     <ClInclude Include="Include\CommandContext.h" />
     <ClInclude Include="Include\RenderGraph.h" />
     <ClInclude Include="Include\ShaderProgram.h" />
+    <ClInclude Include="Include\RootSignatureLibrary.h" />
+    <ClInclude Include="Include\ShaderReflection.h" />
     <ClInclude Include="Include\FrameAccumulationPass.h" />
     <ClInclude Include="Include\EditorUI.h" />
     <ClInclude Include="Include\PostProcessPass.h" />
@@ -383,6 +385,8 @@
     <ClCompile Include="Source\CommandContext.cpp" />
     <ClCompile Include="Source\RenderGraph.cpp" />
     <ClCompile Include="Source\ShaderProgram.cpp" />
+    <ClCompile Include="Source\RootSignatureLibrary.cpp" />
+    <ClCompile Include="Source\ShaderReflection.cpp" />
     <ClCompile Include="Source\FrameAccumulationPass.cpp" />
     <ClCompile Include="Source\PostProcessPass.cpp" />
     <ClCompile Include="Source\HighResolutionClock.cpp" />

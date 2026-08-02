@@ -219,6 +219,12 @@
     <ClInclude Include="Include\ShaderProgram.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\RootSignatureLibrary.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\ShaderReflection.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\ModelLoading.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -711,6 +717,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\ShaderProgram.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RootSignatureLibrary.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\ShaderReflection.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\ModelLoading.cpp">

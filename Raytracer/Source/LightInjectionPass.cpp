@@ -6,6 +6,7 @@
 #include "Constants.h"
 #include "GlobalDescriptorHeap.h"
 #include "Renderer.h"
+#include "RootSignatureLibrary.h"
 #include "VoxelizationPass.h"
 #include "Window.h"
 #include "Resources/ShaderBindingTable.h"
@@ -156,10 +157,8 @@ void LightInjectionPass::CreateGlobalRootSignature()
     rootSignatureDesc.pStaticSamplers   = static_samplers.data();
     rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
-    Microsoft::WRL::ComPtr<ID3DBlob> blob, error;
-    ThrowIfFailed(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
-    ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_globalRootSignature)));
-    m_globalRootSignature->SetName(L"LightInjection GlobalRootSig");
+    m_globalRootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSignatureDesc,
+                                                               L"LightInjection GlobalRootSig");
 }
 
 void LightInjectionPass::CreateShaderResourceHeap()

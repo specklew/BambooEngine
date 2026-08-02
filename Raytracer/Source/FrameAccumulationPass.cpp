@@ -3,6 +3,7 @@
 #include "FrameAccumulationPass.h"
 
 #include "Constants.h"
+#include "RootSignatureLibrary.h"
 #include "Shader.h"
 #include "Window.h"
 #include "ResourceManager/ResourceManager.h"
@@ -52,12 +53,8 @@ void FrameAccumulationPass::CreateRootSignature()
         0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
-    Microsoft::WRL::ComPtr<ID3DBlob> signature;
-    Microsoft::WRL::ComPtr<ID3DBlob> error;
-    ThrowIfFailed(D3D12SerializeRootSignature(&rootSigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error));
-    ThrowIfFailed(m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&m_rootSignature)));
-
-    m_rootSignature->SetName(L"FrameAccumulationPass Root Signature");
+    m_rootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSigDesc,
+                                                         L"FrameAccumulationPass Root Signature");
 }
 
 void FrameAccumulationPass::CreateResources()

@@ -66,6 +66,9 @@ protected:
     // Override to customize the global root signature (default: standard 7-param scene binding).
     virtual void CreateGlobalRootSignature();
 
+    // Checks every library's reflected bindings against the global root signature.
+    void ValidateShaderBindings() const;
+
     // Pipeline build — iterates TechniqueDesc returned by GetTechniqueDesc().
     // Override only if you need a fundamentally different pipeline structure.
     virtual void InitializeRaytracingPipeline();

@@ -9,7 +9,9 @@
 #include "DXRHelper.h"
 #include "GlobalDescriptorHeap.h"
 #include "Renderer.h"
+#include "RootSignatureLibrary.h"
 #include "Shader.h"
+#include "ShaderReflection.h"
 #include "Window.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Resources/ShaderBindingTable.h"
@@ -195,6 +197,14 @@ void RaytracePass::LoadShaders()
     }
 }
 
+// Every library in a state object is served by the one global root signature, so
+// each is checked against it and their coverage accumulates.
+void RaytracePass::ValidateShaderBindings() const
+{
+    for (const auto& shaderDesc : m_techniqueDesc.shaders)
+        ShaderReflection::ValidateLibraryAsset(shaderDesc.shaderPath.c_str(), m_globalRootSignature.Get());
+}
+
 void RaytracePass::InitializeRaytracingPipeline()
 {
     spdlog::debug("Initializing raytracing pipeline");
@@ -207,6 +217,8 @@ void RaytracePass::InitializeRaytracingPipeline()
     // Build local and global root signatures (virtual — subclass can override)
     CreateLocalRootSignatures();
     CreateGlobalRootSignature();
+
+    ValidateShaderBindings();
 
     CD3DX12_STATE_OBJECT_DESC raytracingPipeline{D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE};
 
@@ -302,18 +314,16 @@ void RaytracePass::CreateLocalRootSignatures()
 {
     spdlog::debug("Creating local root signatures (empty defaults)");
 
-    auto createEmptyLocalSig = [&](Microsoft::WRL::ComPtr<ID3D12RootSignature>& outSig)
+    auto createEmptyLocalSig = [&](Microsoft::WRL::ComPtr<ID3D12RootSignature>& outSig, const wchar_t* debugName)
     {
         CD3DX12_ROOT_SIGNATURE_DESC desc(0, nullptr);
         desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
-        Microsoft::WRL::ComPtr<ID3DBlob> blob, error;
-        ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
-        ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&outSig)));
+        outSig     = RootSignatureLibrary::Get().Create(m_device.Get(), desc, debugName);
     };
 
-    createEmptyLocalSig(m_rayGenLocalSig);
-    createEmptyLocalSig(m_missLocalSig);
-    createEmptyLocalSig(m_hitLocalSig);
+    createEmptyLocalSig(m_rayGenLocalSig, L"RayGen LocalRootSig");
+    createEmptyLocalSig(m_missLocalSig, L"Miss LocalRootSig");
+    createEmptyLocalSig(m_hitLocalSig, L"Hit LocalRootSig");
 }
 
 
@@ -393,9 +403,8 @@ void RaytracePass::CreateGlobalRootSignature()
     rootSignatureDesc.pStaticSamplers   = static_samplers.data();
     rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
-    Microsoft::WRL::ComPtr<ID3DBlob> blob, error;
-    ThrowIfFailed(D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &error));
-    ThrowIfFailed(m_device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&m_globalRootSignature)));
+    m_globalRootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSignatureDesc,
+                                                               L"RaytracePass GlobalRootSig");
 }
 
 

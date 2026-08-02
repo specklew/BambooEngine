@@ -20,7 +20,9 @@
 
 #include "CommandContext.h"
 #include "InputElements.h"
+#include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
+#include "ShaderReflection.h"
 #include "Resources/ResourceStateTracker.h"
 #include "SceneResources/ModelLoading.h"
 #include "SceneResources/Primitive.h"
@@ -1107,26 +1109,7 @@ void Renderer::CreateRasterizationRootSignature()
 	desc.NumStaticSamplers = static_samplers.size();
 	desc.pStaticSamplers = static_samplers.data();
 
-	ComPtr<ID3DBlob> serializedRootSignature = nullptr;
-	ComPtr<ID3DBlob> errorBlob = nullptr;
-
-	HRESULT hr = D3D12SerializeRootSignature(
-		&desc,
-		D3D_ROOT_SIGNATURE_VERSION_1,
-		&serializedRootSignature,
-		&errorBlob);
-
-	if(errorBlob != nullptr)
-	{
-		OutputDebugStringA(static_cast<char*>(errorBlob->GetBufferPointer()));
-	}
-	ThrowIfFailed(hr);
-	
-	ThrowIfFailed(g_device->CreateRootSignature(
-		0,
-		serializedRootSignature->GetBufferPointer(),
-		serializedRootSignature->GetBufferSize(),
-		IID_PPV_ARGS(&m_rootSignature)));
+	m_rootSignature = RootSignatureLibrary::Get().Create(g_device.Get(), desc, L"Rasterization RootSig");
 }
 
 void Renderer::CreatePipelineState()
@@ -1137,7 +1120,11 @@ void Renderer::CreatePipelineState()
 	m_pixelShader = rm.shaders.GetResource(psh).bytecode;
 	auto vsh = rm.GetOrLoadShader(AssetId("resources/shaders/colorShader.vs.shader"));
 	m_vertexShader = rm.shaders.GetResource(vsh).bytecode;
-	
+
+	ShaderReflection::ValidateShaderAsset("resources/shaders/colorShader.vs.shader", m_rootSignature.Get());
+	ShaderReflection::ValidateShaderAsset("resources/shaders/colorShader.ps.shader", m_rootSignature.Get());
+
+
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
 	desc.VS = {static_cast<BYTE*>(m_vertexShader->GetBufferPointer()), m_vertexShader->GetBufferSize()};
 	desc.PS = {static_cast<BYTE*>(m_pixelShader->GetBufferPointer()), m_pixelShader->GetBufferSize()};
@@ -1981,6 +1968,10 @@ void Renderer::DumpRenderGraphIfRequested()
 		timings += fmt::format("    {:<32} {:.3f} ms\n", timing.name, timing.milliseconds);
 	if (!timings.empty())
 		spdlog::info("[RDG] node GPU cost:\n{}", timings);
+
+	// Deferred to here rather than to end-of-init: techniques build their root
+	// signatures on first selection, so coverage is only complete once a frame ran.
+	RootSignatureLibrary::Get().LogUnreferencedBindings();
 
 	g_dumpRenderGraph.Set(0); // one-shot: a per-frame dump is unreadable
 }

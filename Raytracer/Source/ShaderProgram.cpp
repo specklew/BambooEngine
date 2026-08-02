@@ -3,6 +3,7 @@
 
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
+#include "ShaderReflection.h"
 #include "Utils/Utils.h"
 
 // Builds into a temporary and only publishes on success: a hot reload that hits a
@@ -19,6 +20,8 @@ bool ComputeProgram::Build()
         spdlog::error("Compute program {}: no bytecode", m_shaderAssetPath);
         return false;
     }
+
+    ShaderReflection::ValidateShaderAsset(m_shaderAssetPath.c_str(), m_rootSignature.Get());
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
     desc.pRootSignature = m_rootSignature.Get();

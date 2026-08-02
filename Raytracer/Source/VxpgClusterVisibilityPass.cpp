@@ -11,6 +11,7 @@
 #include "SuperpixelBuildPass.h"
 #include "SceneResources/Scene.h"
 #include "ResourceManager/ResourceManager.h"
+#include "RootSignatureLibrary.h"
 #include "Shader.h"
 #include "Utils/CVars.h"
 #include "Utils/Utils.h"
@@ -114,11 +115,7 @@ void VxpgClusterVisibilityPass::CreateRootSignature()
         static_cast<UINT>(samplers.size()), samplers.data(),
         D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
-    ComPtr<ID3DBlob> sig, err;
-    ThrowIfFailed(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
-    ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(), sig->GetBufferSize(),
-        IID_PPV_ARGS(&m_rootSig)));
-    m_rootSig->SetName(L"VxpgClusterVisibility RootSig");
+    m_rootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VxpgClusterVisibility RootSig");
 }
 
 void VxpgClusterVisibilityPass::CreatePSOs()
