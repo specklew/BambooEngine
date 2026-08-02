@@ -24,17 +24,17 @@ void BitonicSortPass::Initialize(
     m_initialized = true;
 }
 
+static constexpr BindingSlot kSortConstants = RootConstants("BitonicCB", BITONIC_REG_CB, 3); // k, j, counterOffset
+static constexpr BindingSlot kSortBuffer    = RootUav("gSortBuffer", BITONIC_REG_SORT_BUFFER);
+static constexpr BindingSlot kSortCounter   = RootUav("gCounter", BITONIC_REG_COUNTER);
+
 void BitonicSortPass::CreateRootSignature()
 {
-    // Root constants (k, j, counterOffset), key buffer, counter buffer.
-    CD3DX12_ROOT_PARAMETER params[3];
-    params[0].InitAsConstants(3, BITONIC_REG_CB);
-    params[1].InitAsUnorderedAccessView(BITONIC_REG_SORT_BUFFER);
-    params[2].InitAsUnorderedAccessView(BITONIC_REG_COUNTER);
-
-    CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
-        D3D12_ROOT_SIGNATURE_FLAG_NONE);
-    m_rootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"BitonicSort RootSig");
+    m_rootSig = RootSignatureBuilder(L"BitonicSort RootSig", /*tableCount*/ 0)
+                    .Add(kSortConstants)
+                    .Add(kSortBuffer)
+                    .Add(kSortCounter)
+                    .Build(m_device.Get());
 }
 
 void BitonicSortPass::CreatePSOs()
@@ -61,8 +61,8 @@ void BitonicSortPass::Sort(
     auto* cmd = m_commandList.Get();
 
     cmd->SetComputeRootSignature(m_rootSig.Get());
-    cmd->SetComputeRootUnorderedAccessView(1, keyBufferVA);
-    cmd->SetComputeRootUnorderedAccessView(2, counterBufferVA);
+    m_rootSig.Set(cmd, kSortBuffer, keyBufferVA);
+    m_rootSig.Set(cmd, kSortCounter, counterBufferVA);
 
     // 65536 elements: presort/inner sort 2048 per group, outer compares 1024
     // pairs per group -> every stage is exactly 32 groups worst-case.
@@ -75,7 +75,7 @@ void BitonicSortPass::Sort(
     auto setConstants = [&](uint32_t k, uint32_t j)
     {
         uint32_t c[3] = { k, j, counterByteOffset };
-        cmd->SetComputeRoot32BitConstants(0, 3, c, 0);
+        m_rootSig.SetConstants(cmd, kSortConstants, c, 3);
     };
 
     // Presort: sort each 2048-block into bitonic order.

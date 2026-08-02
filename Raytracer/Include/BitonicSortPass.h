@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
 
 // Reusable GPU bitonic sort over uint64 keys (MiniEngine-style, ported from
@@ -32,7 +33,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
+    RootSignature m_rootSig;
     ComputeProgram* m_presortProgram = nullptr;
     ComputeProgram* m_outerProgram = nullptr;
     ComputeProgram* m_innerProgram = nullptr;

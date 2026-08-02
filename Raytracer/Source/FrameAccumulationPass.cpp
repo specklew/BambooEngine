@@ -33,29 +33,22 @@ void FrameAccumulationPass::Initialize(
     spdlog::info("Frame accumulation pass initialized successfully.");
 }
 
+// Private heap: current frame in, running average and display copy out.
+static constexpr BindingSlot kAccumSlots[] = {
+    TableEntryAt("gCurrent", BindingKind::Srv, ACCUM_REG_CURRENT, 0),
+    TableEntryAt("gAccum", BindingKind::Uav, ACCUM_REG_ACCUM, 1),
+    TableEntryAt("gDisplay", BindingKind::Uav, ACCUM_REG_DISPLAY, 2),
+};
+static constexpr BindingSlot kAccumConstants = RootConstants("AccumCB", ACCUM_REG_CB, 1);
+
 void FrameAccumulationPass::CreateRootSignature()
 {
     spdlog::debug("Creating root signature for accumulation pass");
 
-    CD3DX12_ROOT_PARAMETER rootParams[2];
-    CD3DX12_DESCRIPTOR_RANGE ranges[3];
-
-    // [0] Descriptor table with all resources
-    ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, ACCUM_REG_CURRENT);
-    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, ACCUM_REG_ACCUM);
-    ranges[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, ACCUM_REG_DISPLAY);
-    rootParams[0].InitAsDescriptorTable(3, ranges);
-
-    // [1] Root constant for frameCount
-    rootParams[1].InitAsConstants(1, ACCUM_REG_CB);
-
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
-        _countof(rootParams), rootParams,
-        0, nullptr,
-        D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
-    m_rootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSigDesc,
-                                                         L"FrameAccumulationPass Root Signature");
+    m_rootSignature = RootSignatureBuilder(L"FrameAccumulationPass Root Signature", /*tableCount*/ 1)
+                          .Add(kAccumSlots)
+                          .Add(kAccumConstants)
+                          .Build(m_device.Get());
 }
 
 void FrameAccumulationPass::CreateResources()
@@ -148,10 +141,10 @@ void FrameAccumulationPass::Render(Texture& currentFrameOutput)
     // Set descriptor heap and bind descriptor table
     ID3D12DescriptorHeap* heaps[] = { m_descriptorHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
-    m_commandList->SetComputeRootDescriptorTable(0, m_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    m_rootSignature.SetTable(m_commandList.Get(), 0, m_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
-    // Bind root constant for frameCount
-    m_commandList->SetComputeRoot32BitConstant(1, m_frameCount + 1, 0);
+    const uint32_t frameCount = m_frameCount + 1;
+    m_rootSignature.SetConstants(m_commandList.Get(), kAccumConstants, &frameCount, 1);
 
     // Dispatch
     UINT width = Window::Get().GetWidth();

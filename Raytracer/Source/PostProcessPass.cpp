@@ -33,28 +33,21 @@ void PostProcessPass::Initialize(
     spdlog::info("Post-process pass initialized successfully.");
 }
 
+// Private heap: accumulated image in, tone-mapped image out.
+static constexpr BindingSlot kPostSlots[] = {
+    TableEntryAt("gInput", BindingKind::Srv, POST_REG_INPUT, 0),
+    TableEntryAt("gOutput", BindingKind::Uav, POST_REG_OUTPUT, 1),
+};
+static constexpr BindingSlot kPostConstants = RootConstants("PostProcessCB", POST_REG_CB, 4);
+
 void PostProcessPass::CreateRootSignature()
 {
     spdlog::debug("Creating root signature for post-process pass");
 
-    CD3DX12_ROOT_PARAMETER rootParams[2];
-    CD3DX12_DESCRIPTOR_RANGE ranges[2];
-
-    // [0] Descriptor table with SRV and UAV
-    ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, POST_REG_INPUT);
-    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, POST_REG_OUTPUT);
-    rootParams[0].InitAsDescriptorTable(2, ranges);
-
-    // [1] Root constants: exposure, contrast, saturation, lift
-    rootParams[1].InitAsConstants(4, POST_REG_CB);
-
-    CD3DX12_ROOT_SIGNATURE_DESC rootSigDesc(
-        _countof(rootParams), rootParams,
-        0, nullptr,
-        D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
-    m_rootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSigDesc,
-                                                         L"PostProcessPass Root Signature");
+    m_rootSignature = RootSignatureBuilder(L"PostProcessPass Root Signature", /*tableCount*/ 1)
+                          .Add(kPostSlots)
+                          .Add(kPostConstants)
+                          .Build(m_device.Get());
 }
 
 void PostProcessPass::CreateResources()
@@ -123,11 +116,10 @@ void PostProcessPass::Dispatch(Texture& input, const PostProcessParams& params)
     // Set descriptor heap and bind descriptor table
     ID3D12DescriptorHeap* heaps[] = { m_descriptorHeap.Get() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
-    m_commandList->SetComputeRootDescriptorTable(0, m_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    m_rootSignature.SetTable(m_commandList.Get(), 0, m_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
-    // Bind all post-process params as root constants
     static_assert(sizeof(PostProcessParams) == 4 * sizeof(uint32_t), "PostProcessParams must be exactly 4 floats");
-    m_commandList->SetComputeRoot32BitConstants(1, 4, &params, 0);
+    m_rootSignature.SetConstants(m_commandList.Get(), kPostConstants, &params, 4);
 
     UINT width = Window::Get().GetWidth();
     UINT height = Window::Get().GetHeight();
