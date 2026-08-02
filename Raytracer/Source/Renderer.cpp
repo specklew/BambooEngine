@@ -1024,34 +1024,9 @@ void Renderer::CreateRasterizationRootSignature()
 	cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
 	cbvRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices);
 
-	D3D12_DESCRIPTOR_RANGE rtRange;
-	rtRange.BaseShaderRegister = 0;
-	rtRange.NumDescriptors = 1;
-	rtRange.RegisterSpace = 0;
-	rtRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	rtRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::RaytraceOutput);
-
-	D3D12_DESCRIPTOR_RANGE tlasRange;
-	tlasRange.BaseShaderRegister = 0;
-	tlasRange.NumDescriptors = 1;
-	tlasRange.RegisterSpace = 0;
-	tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	tlasRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Tlas);
-
-	D3D12_DESCRIPTOR_RANGE vertexRange;
-	vertexRange.BaseShaderRegister = 1;
-	vertexRange.NumDescriptors = 1;
-	vertexRange.RegisterSpace = 0;
-	vertexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	vertexRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Vertices);
-	
-	D3D12_DESCRIPTOR_RANGE indexRange;
-	indexRange.BaseShaderRegister = 2;
-	indexRange.NumDescriptors = 1;
-	indexRange.RegisterSpace = 0;
-	indexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	indexRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Indices);
-	
+	// The raytracing output UAV, the TLAS and the merged vertex/index SRVs used to
+	// be declared here too, copied from the raytracing signature. Reflection shows
+	// no rasterization shader touches them (t3 upward is all colorShader reads).
 	D3D12_DESCRIPTOR_RANGE textureRange;
 	textureRange.BaseShaderRegister = 3;
 	textureRange.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
@@ -1083,7 +1058,7 @@ void Renderer::CreateRasterizationRootSignature()
 	superpixelRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
 	superpixelRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SuperpixelIndex);
 
-	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, rtRange, tlasRange, vertexRange, indexRange, textureRange, voxelOccupancyRange, shadingPointsRange, superpixelRange};
+	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, textureRange, voxelOccupancyRange, shadingPointsRange, superpixelRange};
 
 	rootParameters[0].InitAsDescriptorTable(_countof(ranges), ranges);
 	rootParameters[1].InitAsConstantBufferView(1); // Model index buffer
