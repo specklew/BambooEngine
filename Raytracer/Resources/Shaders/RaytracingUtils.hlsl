@@ -1,9 +1,9 @@
 #ifndef RAYTRACING_UTILS_HLSL
 #define RAYTRACING_UTILS_HLSL
 
+#include "FrameBindings.hlsl"
 #include "Random.hlsl"
 
-#define MAX_TEXTURES 512
 #define VERTEX_STRIDE 48 // float3 pos + float3 normal + float4 tangent + float2 uv
 
 static const float MIN_ROUGHNESS = 0.04;
@@ -23,39 +23,6 @@ struct Payload
 struct Attributes
 {
     float2 barycentrics;
-};
-
-struct GeometryInfo
-{
-    uint vertexOffset;
-    uint indexOffset;
-};
-
-struct InstanceInfo
-{
-    uint geometryIndex;
-    int textureIndex;
-    int normalTextureIndex;
-    int roughnessTextureIndex;
-    float metallicFactor;
-    float roughnessFactor;
-    float4 baseColorFactor;
-    // Object-to-world in DXR ObjectToWorld3x4() layout (transpose of the
-    // row-vector world matrix). Lets raygen shaders reconstruct hits from the
-    // VBuffer without hit-shader intrinsics.
-    row_major float3x4 objectToWorld;
-    float3 emissiveRadiance; // 0 = not emissive
-    int    emissiveLightOffset; // -1 = not a light; else light-pool index of primitive 0
-};
-
-struct LightData
-{
-    uint type; // 0 = directional, 1 = point, 2 = spot (not implemented)
-    float3 position;
-    float3 direction;
-    float3 color;
-    float intensity;
-    float range;
 };
 
 struct TriangleData
@@ -98,54 +65,7 @@ struct HitData
     float2 uv;
 };
 
-// ---- Resource declarations ----
-
-RWTexture2D<float4> gOutput : register(u0);
-RaytracingAccelerationStructure SceneBVH : register(t0);
-
-ByteAddressBuffer g_vertices : register(t1);
-ByteAddressBuffer g_indices : register(t2);
-
-StructuredBuffer<GeometryInfo> g_geometryInfo : register(t3);
-StructuredBuffer<InstanceInfo> g_instanceInfo : register(t4);
-StructuredBuffer<LightData> g_lightData : register(t6);
-
-struct EmissiveTriangle
-{
-    float3 v0; float3 v1; float3 v2;
-    float3 radiance;
-    float  area;
-    uint   instanceId;
-};
-struct LightPoolEntry
-{
-    uint  kind;      // 0 analytic, 1 emissive triangle
-    uint  dataIndex;
-    float power;
-    float cdf;
-};
-StructuredBuffer<EmissiveTriangle> g_emissiveTriangles : register(t1, space1);
-StructuredBuffer<LightPoolEntry>   g_lightPool         : register(t2, space1);
-
-Texture2D g_textures[MAX_TEXTURES] : register(t7);
-
-Texture2D g_skybox : register(t0, space1);
-
-SamplerState gsamPointWrap : register(s0);
-SamplerState gsamPointClamp : register(s1);
-SamplerState gsamLinearWrap : register(s2);
-SamplerState gsamLinearClamp : register(s3);
-SamplerState gsamAnisotropicWrap : register(s4);
-SamplerState gsamAnisotropicClamp : register(s5);
-
-cbuffer CameraParams : register(b0)
-{
-    float4x4 worldViewProj;
-    float4x4 view;
-    float4x4 projection;
-    float4x4 viewI;
-    float4x4 projectionI;
-}
+// Frame resources (space0) live in FrameBindings.hlsl, included above.
 
 // ---- Vertex / index loading ----
 

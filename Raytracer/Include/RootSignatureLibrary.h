@@ -30,9 +30,14 @@ public:
     // Serializes, creates, names and records the layout. Throws on failure, after
     // logging the serializer's error blob — a malformed root signature is a
     // programming error with a message worth reading.
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> Create(ID3D12Device*                     device,
+    //
+    // usesFrameLayout marks a signature built on FrameBindingLayout: its frame
+    // registers are present whether the pass reads them or not, so the
+    // unused-binding report skips them there (and only there).
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> Create(ID3D12Device*                    device,
                                                        const D3D12_ROOT_SIGNATURE_DESC& desc,
-                                                       const wchar_t*                   debugName);
+                                                       const wchar_t*                   debugName,
+                                                       bool usesFrameLayout = false);
 
     // Null for a signature created outside the library.
     [[nodiscard]] const std::vector<RootSignatureBinding>* FindLayout(ID3D12RootSignature* signature) const;
@@ -56,6 +61,7 @@ private:
         std::vector<RootSignatureBinding>           bindings;
         std::vector<bool>                           bindingReferenced;
         std::string                                 debugName;
+        bool                                        usesFrameLayout = false;
     };
 
     std::unordered_map<ID3D12RootSignature*, Entry> m_signatures;

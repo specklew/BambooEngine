@@ -4,6 +4,7 @@
 
 #include "AccelerationStructures.h"
 #include "Constants.h"
+#include "FrameBindingLayout.h"
 #include "GlobalDescriptorHeap.h"
 #include "Renderer.h"
 #include "ResourceManager/ResourceManager.h"
@@ -31,6 +32,28 @@ static AutoCVarInt g_inlineRayQuery("vxpg.integrator.inlineRq",
 
 namespace
 {
+// Pass-scoped root parameters, appended after the frame prefix so both the
+// signature and the bind call read from one list.
+enum GuidedRootParameter : uint32_t
+{
+    VoxelGridConstantsCbv = FrameBindingLayout::kPassRootParameterStart,
+    GuidingCountersUav,
+    GuidingCompactIdsUav,
+    GuidingInverseIndexUav,
+    VoxelFingerprintsUav,
+    ClusterAssignmentsUav,
+    ClusterSeedsUav,
+    LightTreeNodesUav,
+    CompactToLeafUav,
+    ClusterRootsUav,
+    ImportanceHeapUav,
+    LiveBoundMinUav,
+    LiveBoundMaxUav,
+    TileGuideQUav,
+    TileStrategyStatsUav,
+    GuidedRootParameterCount
+};
+
 bool IsAmdDevice(ID3D12Device* device)
 {
     static int cached = -1;
@@ -108,54 +131,8 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     // distribution and light-tree buffers (u3 counters, u4 ids, u6 inverse
     // index, u10-u17 fingerprint/cluster/tree/heap).
 
-    D3D12_DESCRIPTOR_RANGE cbvRange;
-    cbvRange.BaseShaderRegister = 0;
-    cbvRange.NumDescriptors = 1;
-    cbvRange.RegisterSpace = 0;
-    cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices);
-
-    D3D12_DESCRIPTOR_RANGE rtRange;
-    rtRange.BaseShaderRegister = 0;
-    rtRange.NumDescriptors = 1;
-    rtRange.RegisterSpace = 0;
-    rtRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    rtRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::RaytraceOutput);
-
-    D3D12_DESCRIPTOR_RANGE tlasRange;
-    tlasRange.BaseShaderRegister = 0;
-    tlasRange.NumDescriptors = 1;
-    tlasRange.RegisterSpace = 0;
-    tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    tlasRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Tlas);
-
-    D3D12_DESCRIPTOR_RANGE vertex_range;
-    vertex_range.BaseShaderRegister = 1;
-    vertex_range.NumDescriptors = 1;
-    vertex_range.RegisterSpace = 0;
-    vertex_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    vertex_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Vertices);
-
-    D3D12_DESCRIPTOR_RANGE index_range;
-    index_range.BaseShaderRegister = 2;
-    index_range.NumDescriptors = 1;
-    index_range.RegisterSpace = 0;
-    index_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    index_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Indices);
-
-    D3D12_DESCRIPTOR_RANGE texture_range;
-    texture_range.BaseShaderRegister = 7;
-    texture_range.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
-    texture_range.RegisterSpace = 0;
-    texture_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    texture_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::MaterialTextures);
-
-    D3D12_DESCRIPTOR_RANGE skybox_range;
-    skybox_range.BaseShaderRegister = 0;
-    skybox_range.NumDescriptors = 1;
-    skybox_range.RegisterSpace = 1;
-    skybox_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    skybox_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Skybox);
+    std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
+    FrameBindingLayout::AppendFrameRanges(ranges);
 
     D3D12_DESCRIPTOR_RANGE voxelIrradianceRange;
     voxelIrradianceRange.BaseShaderRegister = 1;
@@ -227,34 +204,28 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     fuzzyIndexRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     fuzzyIndexRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::FuzzyIndex);
 
-    D3D12_DESCRIPTOR_RANGE ranges[16] = {cbvRange, rtRange, tlasRange, vertex_range, index_range,
-                                         texture_range, skybox_range, voxelIrradianceRange, voxelVplCountRange,
-                                         voxelRepresentativeRange, vplPositionRange, vbufferRange, clusterMaskRange,
-                                         spixelIndexRange, fuzzyWeightRange, fuzzyIndexRange};
+    for (const D3D12_DESCRIPTOR_RANGE& range :
+         {voxelIrradianceRange, voxelVplCountRange, voxelRepresentativeRange, vplPositionRange, vbufferRange,
+          clusterMaskRange, spixelIndexRange, fuzzyWeightRange, fuzzyIndexRange})
+        ranges.push_back(range);
 
-    CD3DX12_ROOT_PARAMETER rootParameters[22];
-    rootParameters[0].InitAsDescriptorTable(16, ranges);
-    rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
-    rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
-    rootParameters[3].InitAsShaderResourceView(6, 0);  // Lights struct buffer
-    rootParameters[4].InitAsConstantBufferView(3, 0);   // Pass constants
-    rootParameters[5].InitAsConstantBufferView(4, 0);   // Voxel grid constants
-    rootParameters[6].InitAsUnorderedAccessView(3, 0);  // Guiding counters
-    rootParameters[7].InitAsUnorderedAccessView(4, 0);  // Guiding compact ids
-    rootParameters[8].InitAsUnorderedAccessView(6, 0);  // Guiding inverse index
-    rootParameters[9].InitAsUnorderedAccessView(10, 0); // Voxel fingerprints (debug view 8)
-    rootParameters[10].InitAsUnorderedAccessView(11, 0); // Cluster assignments (sampling + view 9)
-    rootParameters[11].InitAsUnorderedAccessView(12, 0); // Cluster seeds (debug view 9)
-    rootParameters[12].InitAsUnorderedAccessView(14, 0); // Light tree nodes (sampling + view 11)
-    rootParameters[13].InitAsUnorderedAccessView(15, 0); // Compact->leaf map (sampling + view 11)
-    rootParameters[14].InitAsUnorderedAccessView(16, 0); // Cluster root nodes (sampling + view 11)
-    rootParameters[15].InitAsUnorderedAccessView(17, 0); // Top-level importance heap (sampling + view 12)
-    rootParameters[16].InitAsUnorderedAccessView(18, 0); // Live voxel bound min (compact-bound guide sampling)
-    rootParameters[17].InitAsUnorderedAccessView(19, 0); // Live voxel bound max (compact-bound guide sampling)
-    rootParameters[18].InitAsUnorderedAccessView(22, 0); // Per-tile adaptive guide q (one-sample MIS, ADR 0015)
-    rootParameters[19].InitAsUnorderedAccessView(23, 0); // Per-tile strategy stats (one-sample MIS, ADR 0015)
-    rootParameters[20].InitAsShaderResourceView(1, 1); // Emissive triangles (t1, space1)
-    rootParameters[21].InitAsShaderResourceView(2, 1); // Light pool (t2, space1)
+    CD3DX12_ROOT_PARAMETER rootParameters[GuidedRootParameterCount];
+    FrameBindingLayout::FillFrameRootParameters(rootParameters, ranges);
+    rootParameters[VoxelGridConstantsCbv].InitAsConstantBufferView(4, 0);   // Voxel grid constants
+    rootParameters[GuidingCountersUav].InitAsUnorderedAccessView(3, 0);     // Guiding counters
+    rootParameters[GuidingCompactIdsUav].InitAsUnorderedAccessView(4, 0);   // Guiding compact ids
+    rootParameters[GuidingInverseIndexUav].InitAsUnorderedAccessView(6, 0); // Guiding inverse index
+    rootParameters[VoxelFingerprintsUav].InitAsUnorderedAccessView(10, 0);  // Voxel fingerprints (debug view 8)
+    rootParameters[ClusterAssignmentsUav].InitAsUnorderedAccessView(11, 0); // Cluster assignments (sampling + view 9)
+    rootParameters[ClusterSeedsUav].InitAsUnorderedAccessView(12, 0);       // Cluster seeds (debug view 9)
+    rootParameters[LightTreeNodesUav].InitAsUnorderedAccessView(14, 0);     // Light tree nodes (sampling + view 11)
+    rootParameters[CompactToLeafUav].InitAsUnorderedAccessView(15, 0);      // Compact->leaf map (sampling + view 11)
+    rootParameters[ClusterRootsUav].InitAsUnorderedAccessView(16, 0);       // Cluster root nodes (sampling + view 11)
+    rootParameters[ImportanceHeapUav].InitAsUnorderedAccessView(17, 0);     // Top-level importance heap (view 12)
+    rootParameters[LiveBoundMinUav].InitAsUnorderedAccessView(18, 0);       // Live voxel bound min (guide sampling)
+    rootParameters[LiveBoundMaxUav].InitAsUnorderedAccessView(19, 0);       // Live voxel bound max (guide sampling)
+    rootParameters[TileGuideQUav].InitAsUnorderedAccessView(22, 0);         // Per-tile adaptive q (ADR 0015)
+    rootParameters[TileStrategyStatsUav].InitAsUnorderedAccessView(23, 0);  // Per-tile strategy stats (ADR 0015)
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
 
@@ -264,7 +235,7 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
     m_globalRootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSignatureDesc,
-                                                               L"GuidedPathTracing GlobalRootSig");
+                                                               L"GuidedPathTracing GlobalRootSig", true);
 
     // Compute programs are keyed on the root signature they were created with;
     // a rebuilt signature (variant reload) must drop them or a later dispatch
@@ -311,32 +282,24 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
     m_commandList->SetGraphicsRootSignature(nullptr);
 
-    ID3D12DescriptorHeap* heaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
-    m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
-    m_commandList->SetComputeRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
-    m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(3, m_currentScene->GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(20, m_currentScene->GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(21, m_currentScene->GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    FrameBindingLayout::BindFrameRootParameters(m_commandList.Get(), *m_currentScene, *m_passConstants);
 
-    m_commandList->SetComputeRootConstantBufferView(4, m_passConstants->GetGpuVirtualAddress());
-    m_commandList->SetComputeRootConstantBufferView(5, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(6, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(7, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(8, m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(9, m_fingerprintPass->GetVoxelFingerprintsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(10, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(11, m_clusterPass->GetClusterSeedCompactIdsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(12, m_lightTreePass->GetNodesBufferVA());
-    m_commandList->SetComputeRootUnorderedAccessView(13, m_lightTreePass->GetCompactToLeafBufferVA());
-    m_commandList->SetComputeRootUnorderedAccessView(14, m_lightTreePass->GetClusterRootsBufferVA());
-    m_commandList->SetComputeRootUnorderedAccessView(15, m_lightTreePass->GetSuperpixelClusterHeapBufferVA());
-    m_commandList->SetComputeRootUnorderedAccessView(16, m_buildPass->GetLiveBoundMinBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(17, m_buildPass->GetLiveBoundMaxBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootConstantBufferView(VoxelGridConstantsCbv, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(GuidingCountersUav, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(GuidingCompactIdsUav, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(GuidingInverseIndexUav, m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(VoxelFingerprintsUav, m_fingerprintPass->GetVoxelFingerprintsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(ClusterAssignmentsUav, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(ClusterSeedsUav, m_clusterPass->GetClusterSeedCompactIdsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(LightTreeNodesUav, m_lightTreePass->GetNodesBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(CompactToLeafUav, m_lightTreePass->GetCompactToLeafBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(ClusterRootsUav, m_lightTreePass->GetClusterRootsBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(ImportanceHeapUav, m_lightTreePass->GetSuperpixelClusterHeapBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(LiveBoundMinUav, m_buildPass->GetLiveBoundMinBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(LiveBoundMaxUav, m_buildPass->GetLiveBoundMaxBuffer()->GetGPUVirtualAddress());
     EnsureAdaptiveQResources(Window::Get().GetWidth(), Window::Get().GetHeight());
-    m_commandList->SetComputeRootUnorderedAccessView(18, m_tileGuideQ->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(19, m_tileStrategyStats->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(TileGuideQUav, m_tileGuideQ->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(TileStrategyStatsUav, m_tileStrategyStats->GetGPUVirtualAddress());
 
     if (UseInlineRayQuery())
     {

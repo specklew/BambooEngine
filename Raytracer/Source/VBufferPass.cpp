@@ -4,6 +4,7 @@
 
 #include "AccelerationStructures.h"
 #include "Constants.h"
+#include "FrameBindingLayout.h"
 #include "GlobalDescriptorHeap.h"
 #include "Renderer.h"
 #include "RootSignatureLibrary.h"
@@ -33,44 +34,9 @@ TechniqueDesc VBufferPass::GetTechniqueDesc() const
 
 void VBufferPass::CreateGlobalRootSignature()
 {
-    // Subset of the standard scene binding: camera CBV, TLAS, vertex/index +
-    // textures (alpha-cutout any hit), plus the VBuffer output UAV (u9,
-    // global heap slot VBUFFER_DESCRIPTOR_INDEX).
-
-    D3D12_DESCRIPTOR_RANGE cbvRange;
-    cbvRange.BaseShaderRegister = 0;
-    cbvRange.NumDescriptors = 1;
-    cbvRange.RegisterSpace = 0;
-    cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-    cbvRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices);
-
-    D3D12_DESCRIPTOR_RANGE tlasRange;
-    tlasRange.BaseShaderRegister = 0;
-    tlasRange.NumDescriptors = 1;
-    tlasRange.RegisterSpace = 0;
-    tlasRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    tlasRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Tlas);
-
-    D3D12_DESCRIPTOR_RANGE vertex_range;
-    vertex_range.BaseShaderRegister = 1;
-    vertex_range.NumDescriptors = 1;
-    vertex_range.RegisterSpace = 0;
-    vertex_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    vertex_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Vertices);
-
-    D3D12_DESCRIPTOR_RANGE index_range;
-    index_range.BaseShaderRegister = 2;
-    index_range.NumDescriptors = 1;
-    index_range.RegisterSpace = 0;
-    index_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    index_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Indices);
-
-    D3D12_DESCRIPTOR_RANGE texture_range;
-    texture_range.BaseShaderRegister = 7;
-    texture_range.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
-    texture_range.RegisterSpace = 0;
-    texture_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    texture_range.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::MaterialTextures);
+    // Frame layout plus the VBuffer output UAV (u9, global heap slot VBuffer).
+    std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
+    FrameBindingLayout::AppendFrameRanges(ranges);
 
     D3D12_DESCRIPTOR_RANGE vbufferRange;
     vbufferRange.BaseShaderRegister = 9; // u9
@@ -78,15 +44,10 @@ void VBufferPass::CreateGlobalRootSignature()
     vbufferRange.RegisterSpace = 0;
     vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
     vbufferRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VBuffer);
+    ranges.push_back(vbufferRange);
 
-    D3D12_DESCRIPTOR_RANGE allRanges[6] = {cbvRange, tlasRange, vertex_range, index_range,
-                                           texture_range, vbufferRange};
-
-    CD3DX12_ROOT_PARAMETER rootParameters[4];
-    rootParameters[0].InitAsDescriptorTable(6, allRanges);
-    rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
-    rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
-    rootParameters[3].InitAsConstantBufferView(3, 0); // Pass constants (jitter)
+    CD3DX12_ROOT_PARAMETER rootParameters[FrameBindingLayout::kPassRootParameterStart];
+    FrameBindingLayout::FillFrameRootParameters(rootParameters, ranges);
 
     CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
 
@@ -96,7 +57,7 @@ void VBufferPass::CreateGlobalRootSignature()
     rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
     m_globalRootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSignatureDesc,
-                                                               L"VBuffer GlobalRootSig");
+                                                               L"VBuffer GlobalRootSig", true);
 }
 
 void VBufferPass::CreateShaderResourceHeap()
@@ -148,12 +109,7 @@ void VBufferPass::Render()
 {
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
 
-    ID3D12DescriptorHeap* heaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
-    m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
-    m_commandList->SetComputeRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
-    m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootConstantBufferView(3, m_passConstants->GetGpuVirtualAddress());
+    FrameBindingLayout::BindFrameRootParameters(m_commandList.Get(), *m_currentScene, *m_passConstants);
 
     D3D12_DISPATCH_RAYS_DESC desc = {};
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();

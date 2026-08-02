@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "RootSignatureLibrary.h"
 
+#include "FrameBindingLayout.h"
 #include "Utils/Utils.h"
 
 using Microsoft::WRL::ComPtr;
@@ -66,9 +67,10 @@ RootSignatureLibrary& RootSignatureLibrary::Get()
     return instance;
 }
 
-ComPtr<ID3D12RootSignature> RootSignatureLibrary::Create(ID3D12Device*                     device,
+ComPtr<ID3D12RootSignature> RootSignatureLibrary::Create(ID3D12Device*                    device,
                                                          const D3D12_ROOT_SIGNATURE_DESC& desc,
-                                                         const wchar_t*                   debugName)
+                                                         const wchar_t*                   debugName,
+                                                         bool                             usesFrameLayout)
 {
     assert(device && "Root signature needs a device");
 
@@ -89,8 +91,9 @@ ComPtr<ID3D12RootSignature> RootSignatureLibrary::Create(ID3D12Device*          
         signature->SetName(debugName);
 
     Entry entry;
-    entry.signature = signature;
-    entry.debugName = debugName ? ConvertWcharToString(debugName) : "<unnamed>";
+    entry.signature       = signature;
+    entry.usesFrameLayout = usesFrameLayout;
+    entry.debugName       = debugName ? ConvertWcharToString(debugName) : "<unnamed>";
     FlattenRootParameters(desc, entry.bindings);
     entry.bindingReferenced.assign(entry.bindings.size(), false);
     m_signatures[signature.Get()] = std::move(entry);
@@ -130,6 +133,9 @@ void RootSignatureLibrary::LogUnreferencedBindings() const
             const RootSignatureBinding& binding = entry.bindings[index];
             if (binding.type == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER)
                 continue; // static samplers are shared boilerplate, not a per-pass declaration
+            if (entry.usesFrameLayout &&
+                FrameBindingLayout::IsFrameRegister(binding.type, binding.baseRegister, binding.registerSpace))
+                continue;
 
             const char prefix = binding.type == D3D12_DESCRIPTOR_RANGE_TYPE_UAV   ? 'u'
                                 : binding.type == D3D12_DESCRIPTOR_RANGE_TYPE_SRV ? 't'
