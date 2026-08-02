@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
 
 #include "Resources/RWStructuredBuffer.h"
@@ -74,7 +75,7 @@ private:
     std::unique_ptr<RWStructuredBuffer<float>>             m_avgVisibility;              // mapX*mapY*32
     Microsoft::WRL::ComPtr<ID3D12Resource>                m_mask;                        // (mapX, mapY) R32_UINT
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
+    RootSignature m_rootSig;
     ComputeProgram* m_clearProgram = nullptr;
     ComputeProgram* m_gatherProgram = nullptr;
     ComputeProgram* m_checkProgram = nullptr;

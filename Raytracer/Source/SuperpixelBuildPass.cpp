@@ -13,6 +13,12 @@ using Microsoft::WRL::ComPtr;
 
 namespace
 {
+    // All seven SLIC buffers are consecutive UAVs in this pass's private heap, so
+    // one range covers them; the kernels differ only in which they touch.
+    constexpr BindingSlot kSuperpixelConstants = RootConstants("SuperpixelCB", SUPERPIXEL_REG_CB, 12);
+    constexpr BindingSlot kSuperpixelTable =
+        TableEntryAt("u_input", BindingKind::Uav, SUPERPIXEL_REG_INPUT, 0, /*registerCount*/ 7);
+
     constexpr uint32_t SP = Constants::Graphics::SUPERPIXEL_SIZE;
 
     // (1 / (1.4242 * spixel_size))^2 — squared screen-xy normalizer, as in SIByL.
@@ -52,19 +58,10 @@ void SuperpixelBuildPass::Initialize(
 
 void SuperpixelBuildPass::CreateRootSignature()
 {
-    // b0 = 12 root constants (SuperpixelConstants). Table = 7 UAVs u0..u6:
-    // u0 ShadingPoints, u1 center, u2 index, u3 counter, u4 gathered,
-    // u5 fuzzy weights, u6 fuzzy indices.
-    CD3DX12_DESCRIPTOR_RANGE uavRange;
-    uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 7, SUPERPIXEL_REG_INPUT);
-
-    CD3DX12_ROOT_PARAMETER params[2];
-    params[0].InitAsConstants(12, SUPERPIXEL_REG_CB);
-    params[1].InitAsDescriptorTable(1, &uavRange);
-
-    CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
-    m_rootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"SuperpixelBuild RootSig");
+    m_rootSig = RootSignatureBuilder(L"SuperpixelBuild RootSig", /*tableCount*/ 1)
+                    .Add(kSuperpixelConstants)
+                    .Add(kSuperpixelTable)
+                    .Build(m_device.Get());
 }
 
 void SuperpixelBuildPass::CreatePSOs()
@@ -222,7 +219,7 @@ bool SuperpixelBuildPass::BindCommon(bool writeGather)
     ID3D12DescriptorHeap* heaps[] = { m_privateHeap.Get() };
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
     cmd->SetComputeRootSignature(m_rootSig.Get());
-    cmd->SetComputeRootDescriptorTable(1, m_privateHeap->GetGPUDescriptorHandleForHeapStart());
+    m_rootSig.SetTable(cmd, 0, m_privateHeap->GetGPUDescriptorHandleForHeapStart());
 
     SuperpixelConstants c{};
     c.mapX = static_cast<int32_t>(m_mapX);
@@ -234,7 +231,7 @@ bool SuperpixelBuildPass::BindCommon(bool writeGather)
     c.maxXyDist    = ComputeMaxXyDistSquared();
     c.maxColorDist = m_posNormalizer;
     c.writeGather  = writeGather ? 1u : 0u;
-    cmd->SetComputeRoot32BitConstants(0, 12, &c, 0);
+    m_rootSig.SetConstants(cmd, kSuperpixelConstants, &c, 12);
 
     return true;
 }

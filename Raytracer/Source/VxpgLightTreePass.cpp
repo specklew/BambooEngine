@@ -17,6 +17,39 @@
 
 using Microsoft::WRL::ComPtr;
 
+namespace
+{
+// One layout for the whole build: the bottom-tree kernels use the grid CBV and
+// u0-u10, the top-level kernel adds its own constants, the two visibility
+// buffers, and the mask texture (a table entry, since texture UAVs cannot be
+// root descriptors).
+constexpr BindingSlot kTreeGridConstants = RootCbv("LightTreeGridCB", LIGHT_TREE_REG_GRID_CB);
+constexpr BindingSlot kTreeSortKeys      = RootUav("gSortKeys", LIGHT_TREE_REG_SORT_KEYS);
+constexpr BindingSlot kTreeNodes         = RootUav("gNodes", LIGHT_TREE_REG_NODES);
+constexpr BindingSlot kTreeLeafRanges    = RootUav("gLeafRanges", LIGHT_TREE_REG_LEAF_RANGES);
+constexpr BindingSlot kTreeCompactToLeaf = RootUav("gCompactToLeaf", LIGHT_TREE_REG_COMPACT_TO_LEAF);
+constexpr BindingSlot kTreeClusterRoots  = RootUav("gClusterRoots", LIGHT_TREE_REG_CLUSTER_ROOTS);
+constexpr BindingSlot kTreeDispatchArgs  = RootUav("gDispatchArgs", LIGHT_TREE_REG_DISPATCH_ARGS);
+constexpr BindingSlot kTreeCompactIds    = RootUav("gCompactIds", LIGHT_TREE_REG_COMPACT_IDS);
+constexpr BindingSlot kTreeAssignments   = RootUav("gClusterAssignments", LIGHT_TREE_REG_CLUSTER_ASSIGNMENTS);
+constexpr BindingSlot kTreePremulIrradiance = RootUav("gPremulIrradiance", LIGHT_TREE_REG_PREMUL_IRRADIANCE);
+constexpr BindingSlot kTreeCounters         = RootUav("gVoxCounters", LIGHT_TREE_REG_COUNTERS);
+constexpr BindingSlot kTreeNodeVisited      = RootUav("gNodeVisited", LIGHT_TREE_REG_NODE_VISITED);
+constexpr BindingSlot kTreeTopLevelConstants =
+    RootConstants("TopLevelTreeCB", LIGHT_TREE_REG_TOP_LEVEL_CB, 4); // mapX, mapY, useAvgVisibility, pad
+constexpr BindingSlot kTreeAvgVisibility  = RootUav("gAvgVisibility", LIGHT_TREE_REG_AVG_VISIBILITY);
+constexpr BindingSlot kTreeImportanceHeap = RootUav("gSpixelClusterImportanceHeap", LIGHT_TREE_REG_IMPORTANCE_HEAP);
+constexpr BindingSlot kTreeVisibilityMask = TableEntry("gClusterVisibilityMask", BindingKind::Uav,
+                                                       LIGHT_TREE_REG_VISIBILITY_MASK,
+                                                       GlobalDescriptor::ClusterVisibilityMask);
+
+constexpr BindingSlot kLightTreeSlots[] = {
+    kTreeGridConstants,   kTreeSortKeys,        kTreeNodes,          kTreeLeafRanges,     kTreeCompactToLeaf,
+    kTreeClusterRoots,    kTreeDispatchArgs,    kTreeCompactIds,     kTreeAssignments,    kTreePremulIrradiance,
+    kTreeCounters,        kTreeNodeVisited,     kTreeTopLevelConstants, kTreeAvgVisibility, kTreeImportanceHeap,
+    kTreeVisibilityMask};
+} // namespace
+
 // SIByL ships the top-level tree with visibility = 1 (Average / soft weighting).
 // 0 switches to Binary (a cluster is fully in or fully out per superpixel). Both
 // signals are produced by the cluster-visibility pass every frame, so this is a
@@ -89,28 +122,9 @@ void VxpgLightTreePass::CreateBuffers()
 
 void VxpgLightTreePass::CreateRootSignature()
 {
-    // b0 grid CBV + u0..u10 root UAVs (keys, nodes, leaf ranges, compact->leaf,
-    // cluster roots, args, compact ids, cluster assignments, premul irradiance,
-    // lit-voxel counter, merge visited-gate). Top-level tree adds b1 root
-    // constants (map dims + mode), u11 avg-visibility, u12 heap, and the mask
-    // texture as a shared-heap descriptor table (u13, at slot 530).
-    CD3DX12_DESCRIPTOR_RANGE maskRange;
-    maskRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, LIGHT_TREE_REG_VISIBILITY_MASK, 0,
-        GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ClusterVisibilityMask));
-
-    CD3DX12_ROOT_PARAMETER params[16];
-    params[0].InitAsConstantBufferView(LIGHT_TREE_REG_GRID_CB);
-    // u0 through u10, contiguous by construction: see the register block above.
-    for (uint32_t i = 0; i < 11; ++i)
-        params[1 + i].InitAsUnorderedAccessView(LIGHT_TREE_REG_SORT_KEYS + i);
-    params[12].InitAsConstants(4, LIGHT_TREE_REG_TOP_LEVEL_CB); // mapX, mapY, useAvgVisibility, pad
-    params[13].InitAsUnorderedAccessView(LIGHT_TREE_REG_AVG_VISIBILITY);
-    params[14].InitAsUnorderedAccessView(LIGHT_TREE_REG_IMPORTANCE_HEAP);
-    params[15].InitAsDescriptorTable(1, &maskRange);
-
-    CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
-        D3D12_ROOT_SIGNATURE_FLAG_NONE);
-    m_rootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VxpgLightTree RootSig");
+    m_rootSig = RootSignatureBuilder(L"VxpgLightTree RootSig", /*tableCount*/ 1)
+                    .Add(kLightTreeSlots)
+                    .Build(m_device.Get());
 }
 
 void VxpgLightTreePass::CreatePSOs()
@@ -156,18 +170,18 @@ bool VxpgLightTreePass::BindRoots()
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
     cmd->SetComputeRootSignature(m_rootSig.Get());
-    cmd->SetComputeRootConstantBufferView(0, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(1, m_sortKeys->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(2, m_nodes->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(3, m_leafRanges->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(4, m_compactToLeaf->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(5, m_clusterRoots->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(6, m_dispatchArgs->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(7, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(8, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(9, m_buildPass->GetPremulIrradianceBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(10, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(11, m_nodeVisited->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeGridConstants, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeSortKeys, m_sortKeys->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeNodes, m_nodes->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeLeafRanges, m_leafRanges->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeCompactToLeaf, m_compactToLeaf->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeClusterRoots, m_clusterRoots->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeDispatchArgs, m_dispatchArgs->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeCompactIds, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeAssignments, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreePremulIrradiance, m_buildPass->GetPremulIrradianceBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeCounters, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeNodeVisited, m_nodeVisited->GetGPUVirtualAddress());
 
     return true;
 }
@@ -252,10 +266,10 @@ void VxpgLightTreePass::RunTopLevel()
         static_cast<uint32_t>(g_topLevelUseAvgVisibility.Get() != 0),
         0u
     };
-    cmd->SetComputeRoot32BitConstants(12, 4, constants, 0);
-    cmd->SetComputeRootUnorderedAccessView(13, avgVisibility->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(14, m_spixelClusterHeap->GetGPUVirtualAddress());
-    cmd->SetComputeRootDescriptorTable(15, GlobalDescriptorHeap::Get().GpuStart());
+    m_rootSig.SetConstants(cmd, kTreeTopLevelConstants, constants, 4);
+    m_rootSig.Set(cmd, kTreeAvgVisibility, avgVisibility->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeImportanceHeap, m_spixelClusterHeap->GetGPUVirtualAddress());
+    m_rootSig.SetTable(cmd, 0, GlobalDescriptorHeap::Get().GpuStart());
 
     // One warp (32 lanes) per superpixel; 8 warps per group => ceil(mapX/8)
     // groups wide, mapY tall (SIByL dispatch (5,23) for its 40x23 map).

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
 
 #include "Resources/RWStructuredBuffer.h"
@@ -97,7 +98,7 @@ private:
     std::unique_ptr<RWStructuredBuffer<uint32_t>>                 m_nodeVisited;   // merge sibling-gate (own scalar buffer)
     std::unique_ptr<RWStructuredBuffer<float>>                   m_spixelClusterHeap; // SIByL tltree (mapX*mapY*64)
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
+    RootSignature m_rootSig;
     ComputeProgram* m_clearProgram = nullptr;
     ComputeProgram* m_encodeProgram = nullptr;
     ComputeProgram* m_initialProgram = nullptr;

@@ -103,6 +103,36 @@ static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enab
 // One-shot: set to 1 to log the next frame's graph (nodes, declarations, the
 // barriers they synthesized), then it clears itself.
 static AutoCVarInt   g_dumpRenderGraph("rdg.dump", "Log the next frame's render graph and its synthesized barriers", 0, CVarFlags::EditCheckbox);
+
+namespace
+{
+// Rasterization keeps its own layout until raster becomes a graph node (ADR 0017
+// phase 5). The raytracing output UAV, TLAS and merged vertex/index SRVs are
+// deliberately absent: reflection shows no rasterization shader touches them.
+constexpr BindingSlot kRasterCamera =
+	TableEntry("CameraParams", BindingKind::Cbv, RASTER_REG_CAMERA_CB, GlobalDescriptor::CameraMatrices);
+constexpr BindingSlot kRasterTextures = TableEntry("gTextures", BindingKind::Srv, RASTER_REG_TEXTURES,
+                                                   GlobalDescriptor::MaterialTextures, FRAME_MAX_TEXTURES);
+// occupancy, packed irradiance, vpl count: three contiguous registers and slots
+constexpr BindingSlot kRasterVoxelTextures = TableEntry("gVoxelOccupancy", BindingKind::Uav,
+                                                        RASTER_REG_VOXEL_OCCUPANCY,
+                                                        GlobalDescriptor::VoxelOccupancy, /*registerCount*/ 3);
+constexpr BindingSlot kRasterShadingPoints = TableEntry("gShadingPoints", BindingKind::Uav, RASTER_REG_SHADING_POINTS,
+                                                        GlobalDescriptor::ShadingPoints); // debug overlay
+// superpixel index + representative center (debug views 15/16)
+constexpr BindingSlot kRasterSuperpixel = TableEntry("gSuperpixelIndex", BindingKind::Uav,
+                                                     RASTER_REG_SUPERPIXEL_INDEX,
+                                                     GlobalDescriptor::SuperpixelIndex, /*registerCount*/ 2);
+
+constexpr BindingSlot kRasterModelConstants    = RootCbv("ModelTransforms", RASTER_REG_MODEL_CB);
+constexpr BindingSlot kRasterMaterialConstants = RootCbv("Material", RASTER_REG_MATERIAL_CB);
+constexpr BindingSlot kRasterPassConstants     = RootCbv("PassConstants", FRAME_REG_PASS_CONSTANTS);
+constexpr BindingSlot kRasterVoxelGridConstants = RootCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
+
+constexpr BindingSlot kRasterSlots[] = {kRasterCamera,          kRasterTextures,        kRasterVoxelTextures,
+                                        kRasterShadingPoints,   kRasterSuperpixel,      kRasterModelConstants,
+                                        kRasterMaterialConstants, kRasterPassConstants, kRasterVoxelGridConstants};
+} // namespace
 // Off by default: two timestamps per node plus a resolve is real per-frame cost,
 // and benchmark runs must measure the renderer, not the instrumentation.
 static AutoCVarInt   g_renderGraphTimings("rdg.timings", "Measure each render-graph node on the GPU (ImGui: Render Graph)", 0, CVarFlags::EditCheckbox);
@@ -275,7 +305,7 @@ void Renderer::Initialize()
 	m_screenshotManager->Initialize(g_device, m_d3d12CommandList);
 
 	m_voxelizationPass = std::make_shared<VoxelizationPass>();
-	m_voxelizationPass->Initialize(g_device, m_d3d12CommandList, m_rootSignature);
+	m_voxelizationPass->Initialize(g_device, m_d3d12CommandList);
 
 	WriteVoxelUavsToGlobalHeap();
 
@@ -598,20 +628,21 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
 		m_d3d12CommandList->SetGraphicsRootSignature(m_rootSignature.Get());
 		
-		m_d3d12CommandList->SetGraphicsRootConstantBufferView(3, m_passConstants->GetGpuVirtualAddress());
+		m_rootSignature.Set(m_d3d12CommandList.Get(), kRasterPassConstants, m_passConstants->GetGpuVirtualAddress());
 
 		if (m_voxelizationPass)
-			m_d3d12CommandList->SetGraphicsRootConstantBufferView(4, m_voxelizationPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+			m_rootSignature.Set(m_d3d12CommandList.Get(), kRasterVoxelGridConstants,
+			                    m_voxelizationPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
 
 		for (const auto& go : m_scene->GetGameObjects())
 		{
 			auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
-			m_d3d12CommandList->SetGraphicsRootConstantBufferView(1, gpuAddress);
-			
+			m_rootSignature.Set(m_d3d12CommandList.Get(), kRasterModelConstants, gpuAddress);
+
 			for (const auto& primitive : go->GetModel()->GetMeshes())
 			{
 				gpuAddress = primitive->m_material->m_materialBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
-				m_d3d12CommandList->SetGraphicsRootConstantBufferView(2, gpuAddress);
+				m_rootSignature.Set(m_d3d12CommandList.Get(), kRasterMaterialConstants, gpuAddress);
 				
 				auto vertex_view = primitive->GetVertexView();
 				auto index_view = primitive->GetIndexView();
@@ -623,7 +654,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 				m_d3d12CommandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
 				m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-				m_d3d12CommandList->SetGraphicsRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
+				m_rootSignature.SetTable(m_d3d12CommandList.Get(), 0, GlobalDescriptorHeap::Get().GpuStart());
 				
 				CommandContext::Get().DrawIndexedInstanced(index_view.count, 1, index_view.offset, vertex_view.offset, 0);
 			}
@@ -1031,69 +1062,12 @@ void Renderer::CreateWorldProjCBV()
 
 void Renderer::CreateRasterizationRootSignature()
 {
-	constexpr int num_params = 5;
-
-	CD3DX12_ROOT_PARAMETER rootParameters[num_params];
-	
-	D3D12_DESCRIPTOR_RANGE cbvRange;
-	cbvRange.BaseShaderRegister = RASTER_REG_CAMERA_CB;
-	cbvRange.NumDescriptors = 1;
-	cbvRange.RegisterSpace = 0;
-	cbvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-	cbvRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices);
-
-	// The raytracing output UAV, the TLAS and the merged vertex/index SRVs used to
-	// be declared here too, copied from the raytracing signature. Reflection shows
-	// no rasterization shader touches them (t3 upward is all colorShader reads).
-	D3D12_DESCRIPTOR_RANGE textureRange;
-	textureRange.BaseShaderRegister = RASTER_REG_TEXTURES;
-	textureRange.NumDescriptors = Constants::Graphics::MAX_TEXTURES;
-	textureRange.RegisterSpace = 0;
-	textureRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-	textureRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::MaterialTextures);
-
-	// occupancy, packed irradiance, vpl count: three contiguous registers and slots
-	D3D12_DESCRIPTOR_RANGE voxelOccupancyRange;
-	voxelOccupancyRange.BaseShaderRegister = RASTER_REG_VOXEL_OCCUPANCY;
-	voxelOccupancyRange.NumDescriptors = 3;
-	voxelOccupancyRange.RegisterSpace = 0;
-	voxelOccupancyRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	voxelOccupancyRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelOccupancy);
-
-	// ShadingPoints G-buffer (debug overlay reads it by screen pixel)
-	D3D12_DESCRIPTOR_RANGE shadingPointsRange;
-	shadingPointsRange.BaseShaderRegister = RASTER_REG_SHADING_POINTS;
-	shadingPointsRange.NumDescriptors = 1;
-	shadingPointsRange.RegisterSpace = 0;
-	shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	shadingPointsRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ShadingPoints);
-
-	// superpixel index + representative center (debug views 15/16)
-	D3D12_DESCRIPTOR_RANGE superpixelRange;
-	superpixelRange.BaseShaderRegister = RASTER_REG_SUPERPIXEL_INDEX;
-	superpixelRange.NumDescriptors = 2;
-	superpixelRange.RegisterSpace = 0;
-	superpixelRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-	superpixelRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SuperpixelIndex);
-
-	D3D12_DESCRIPTOR_RANGE ranges[] = {cbvRange, textureRange, voxelOccupancyRange, shadingPointsRange, superpixelRange};
-
-	rootParameters[0].InitAsDescriptorTable(_countof(ranges), ranges);
-	rootParameters[1].InitAsConstantBufferView(RASTER_REG_MODEL_CB);
-	rootParameters[2].InitAsConstantBufferView(RASTER_REG_MATERIAL_CB);
-	rootParameters[3].InitAsConstantBufferView(FRAME_REG_PASS_CONSTANTS);
-	rootParameters[4].InitAsConstantBufferView(REG_VOXEL_GRID_CB);
-
-	auto static_samplers = GetStaticSamplers();
-	
-	CD3DX12_ROOT_SIGNATURE_DESC desc = {};
-	desc.NumParameters = num_params;
-	desc.pParameters = rootParameters;
-	desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
-	desc.NumStaticSamplers = static_samplers.size();
-	desc.pStaticSamplers = static_samplers.data();
-
-	m_rootSignature = RootSignatureLibrary::Get().Create(g_device.Get(), desc, L"Rasterization RootSig");
+	m_rootSignature = RootSignatureBuilder(L"Rasterization RootSig", /*tableCount*/ 1)
+	                      .ForGraphics()
+	                      .WithFlags(D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT)
+	                      .Add(kRasterSlots)
+	                      .WithStaticSamplers()
+	                      .Build(g_device.Get());
 }
 
 void Renderer::CreatePipelineState()

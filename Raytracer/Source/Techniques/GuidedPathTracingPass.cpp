@@ -39,26 +39,15 @@ namespace
 //
 // Texture UAVs cannot be root descriptors, so they ride the shared heap table at
 // their global slots; everything else is a root descriptor.
-constexpr BindingSlot kVoxelIrradiance =
-    TableEntry("gVoxIrradiance", BindingKind::Uav, GUIDED_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
-constexpr BindingSlot kVoxelVplCount =
-    TableEntry("gVoxVplCount", BindingKind::Uav, GUIDED_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
-constexpr BindingSlot kSuperpixelIndex = TableEntry("gSpixelIndexImage", BindingKind::Uav,
-                                                    GUIDED_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
-constexpr BindingSlot kVoxelRepresentative = TableEntry("gVoxelRepresentative", BindingKind::Uav,
-                                                        GUIDED_REG_VOXEL_REPRESENTATIVE,
-                                                        GlobalDescriptor::VoxelRepresentative); // debug views 6/7
-constexpr BindingSlot kVplPosition =
-    TableEntry("gVplPosition", BindingKind::Uav, GUIDED_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
-constexpr BindingSlot kVBuffer =
-    TableEntry("gVBuffer", BindingKind::Uav, GUIDED_REG_VBUFFER, GlobalDescriptor::VBuffer);
-constexpr BindingSlot kVisibilityMask = TableEntry("gClusterVisibilityMask", BindingKind::Uav,
-                                                   GUIDED_REG_VISIBILITY_MASK,
-                                                   GlobalDescriptor::ClusterVisibilityMask); // debug view 10
-constexpr BindingSlot kFuzzyWeights =
-    TableEntry("gFuzzyWeights", BindingKind::Uav, GUIDED_REG_FUZZY_WEIGHT, GlobalDescriptor::FuzzyWeight);
+constexpr BindingSlot kVoxelIrradiance = TableEntry("gVoxIrradiance", BindingKind::Uav, GUIDED_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
+constexpr BindingSlot kVoxelVplCount = TableEntry("gVoxVplCount", BindingKind::Uav, GUIDED_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
+constexpr BindingSlot kSuperpixelIndex = TableEntry("gSpixelIndexImage", BindingKind::Uav, GUIDED_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
+constexpr BindingSlot kVoxelRepresentative = TableEntry("gVoxelRepresentative", BindingKind::Uav, GUIDED_REG_VOXEL_REPRESENTATIVE, GlobalDescriptor::VoxelRepresentative); // debug views 6/7
+constexpr BindingSlot kVplPosition = TableEntry("gVplPosition", BindingKind::Uav, GUIDED_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
+constexpr BindingSlot kVBuffer = TableEntry("gVBuffer", BindingKind::Uav, GUIDED_REG_VBUFFER, GlobalDescriptor::VBuffer);
+constexpr BindingSlot kVisibilityMask = TableEntry("gClusterVisibilityMask", BindingKind::Uav, GUIDED_REG_VISIBILITY_MASK, GlobalDescriptor::ClusterVisibilityMask); // debug view 10
+constexpr BindingSlot kFuzzyWeights = TableEntry("gFuzzyWeights", BindingKind::Uav, GUIDED_REG_FUZZY_WEIGHT, GlobalDescriptor::FuzzyWeight);
 constexpr BindingSlot kFuzzyIndices = TableEntry("gFuzzyIndices", BindingKind::Uav, GUIDED_REG_FUZZY_INDEX, GlobalDescriptor::FuzzyIndex);
-
 constexpr BindingSlot kVoxelGridConstants  = RootCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
 constexpr BindingSlot kGuidingCounters     = RootUav("gVoxCounters", GUIDED_REG_COUNTERS);
 constexpr BindingSlot kGuidingCompactIds   = RootUav("gVoxCompactIds", GUIDED_REG_COMPACT_IDS);

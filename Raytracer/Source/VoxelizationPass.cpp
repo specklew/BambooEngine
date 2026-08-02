@@ -24,21 +24,43 @@ using Microsoft::WRL::ComPtr;
 
 namespace
 {
+// Three signatures: the per-frame accumulator clear, the bake-time clear, and
+// the bake draw itself. All three address this pass's private heap.
+constexpr BindingSlot kFrameClearConstants = RootConstants("ClearCB", VOXEL_FRAME_CLEAR_REG_CB, 4);
+// Offset 0: DispatchFrameClear hands SetTable a pointer already advanced past
+// the occupancy slot, so the range is relative to that, not to the heap start.
+constexpr BindingSlot kFrameClearTargets =
+    TableEntryAt("gIrradiance", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_IRRADIANCE, 0, /*registerCount*/ 2);
+constexpr BindingSlot kFrameClearSlots[] = {kFrameClearConstants, kFrameClearTargets};
+
+constexpr BindingSlot kBakeClearConstants = RootConstants("ClearCB", VOXEL_BAKE_CLEAR_REG_CB, 4);
+constexpr BindingSlot kBakeClearOccupancy =
+    TableEntryAt("gOccupancy", BindingKind::Uav, VOXEL_BAKE_CLEAR_REG_OCCUPANCY, 0);
+constexpr BindingSlot kBakeClearBoundMin = RootUav("gBakedBoundMin", VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MIN);
+constexpr BindingSlot kBakeClearBoundMax = RootUav("gBakedBoundMax", VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MAX);
+constexpr BindingSlot kBakeClearSlots[] = {kBakeClearConstants, kBakeClearOccupancy, kBakeClearBoundMin,
+                                           kBakeClearBoundMax};
+
+constexpr BindingSlot kBakeGridConstants  = RootCbv("VoxelGridCB", VOXEL_BAKE_REG_GRID_CB);
+constexpr BindingSlot kBakeModelConstants = RootCbv("ModelTransforms", VOXEL_BAKE_REG_MODEL_CB);
+constexpr BindingSlot kBakeAxisConstants  = RootConstants("BakeCB", VOXEL_BAKE_REG_AXIS_CB, 4); // axis + bound flags
+constexpr BindingSlot kBakeOccupancy = TableEntryAt("gOccupancy", BindingKind::Uav, VOXEL_BAKE_REG_OCCUPANCY, 0);
+constexpr BindingSlot kBakeBoundMin  = RootUav("gBakedBoundMin", VOXEL_BAKE_REG_BAKED_BOUND_MIN);
+constexpr BindingSlot kBakeBoundMax  = RootUav("gBakedBoundMax", VOXEL_BAKE_REG_BAKED_BOUND_MAX);
+constexpr BindingSlot kBakeSlots[] = {kBakeGridConstants, kBakeModelConstants, kBakeAxisConstants, kBakeOccupancy,
+                                      kBakeBoundMin,      kBakeBoundMax};
+
     constexpr uint32_t kCbAlignedSize = 256;
 
     uint32_t Align(uint32_t v, uint32_t a) { return (v + a - 1) & ~(a - 1); }
 }
 
-void VoxelizationPass::Initialize(
-    ComPtr<ID3D12Device5>              device,
-    ComPtr<ID3D12GraphicsCommandList4> commandList,
-    ComPtr<ID3D12RootSignature>        rasterRootSignature)
+void VoxelizationPass::Initialize(ComPtr<ID3D12Device5> device, ComPtr<ID3D12GraphicsCommandList4> commandList)
 {
     spdlog::info("Initializing voxelization pass...");
 
-    m_device              = device;
-    m_commandList         = commandList;
-    m_rasterRootSignature = rasterRootSignature;
+    m_device      = device;
+    m_commandList = commandList;
 
     D3D12_FEATURE_DATA_D3D12_OPTIONS opts = {};
     if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &opts, sizeof(opts))))
@@ -135,59 +157,21 @@ void VoxelizationPass::CreateDescriptorHeap()
 
 void VoxelizationPass::CreateRootSignatures()
 {
-    // Frame-clear root sig: root constants b0 (gGridDim), table of 2 UAVs
-    // (u0 = irradiance, u1 = vpl count — heap slots 1..2).
-    {
-        CD3DX12_DESCRIPTOR_RANGE uavRange;
-        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, VOXEL_FRAME_CLEAR_REG_IRRADIANCE);
+    m_clearRootSig = RootSignatureBuilder(L"VoxelFrameClear RootSig", /*tableCount*/ 1)
+                         .Add(kFrameClearSlots)
+                         .Build(m_device.Get());
 
-        CD3DX12_ROOT_PARAMETER params[2];
-        params[0].InitAsConstants(4, VOXEL_FRAME_CLEAR_REG_CB);
-        params[1].InitAsDescriptorTable(1, &uavRange);
+    m_bakeClearRootSig = RootSignatureBuilder(L"VoxelBakeClear RootSig", /*tableCount*/ 1)
+                             .Add(kBakeClearSlots)
+                             .Build(m_device.Get());
 
-        CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
-            D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
-        m_clearRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VoxelFrameClear RootSig");
-    }
-
-    // Bake-clear root sig: constants b0, table u0 (occupancy, heap slot 0),
-    // root UAVs u1/u2 (baked bounds).
-    {
-        CD3DX12_DESCRIPTOR_RANGE uavRange;
-        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, VOXEL_BAKE_CLEAR_REG_OCCUPANCY);
-
-        CD3DX12_ROOT_PARAMETER params[4];
-        params[0].InitAsConstants(4, VOXEL_BAKE_CLEAR_REG_CB);
-        params[1].InitAsDescriptorTable(1, &uavRange);
-        params[2].InitAsUnorderedAccessView(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MIN);
-        params[3].InitAsUnorderedAccessView(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MAX);
-
-        CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
-            D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
-        m_bakeClearRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VoxelBakeClear RootSig");
-    }
-
-    // Bake root sig: CBV b0 (grid), CBV b1 (model), root constants b2
-    // (axis + bound flags), table u0 (occupancy), root UAVs u1/u2 (baked bounds).
-    {
-        CD3DX12_DESCRIPTOR_RANGE uavRange;
-        uavRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, VOXEL_BAKE_REG_OCCUPANCY);
-
-        CD3DX12_ROOT_PARAMETER params[6];
-        params[0].InitAsConstantBufferView(VOXEL_BAKE_REG_GRID_CB);
-        params[1].InitAsConstantBufferView(VOXEL_BAKE_REG_MODEL_CB);
-        params[2].InitAsConstants(4, VOXEL_BAKE_REG_AXIS_CB);         // axis + bound flags
-        params[3].InitAsDescriptorTable(1, &uavRange);                // occupancy
-        params[4].InitAsUnorderedAccessView(VOXEL_BAKE_REG_BAKED_BOUND_MIN);
-        params[5].InitAsUnorderedAccessView(VOXEL_BAKE_REG_BAKED_BOUND_MAX);
-
-        CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
-            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
-
-        m_bakeRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VoxelBake RootSig");
-    }
+    // The bake is a conservative-raster draw, so its binds go through
+    // SetGraphicsRoot* and it needs the input-assembler flag.
+    m_bakeRootSig = RootSignatureBuilder(L"VoxelBake RootSig", /*tableCount*/ 1)
+                        .ForGraphics()
+                        .WithFlags(D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT)
+                        .Add(kBakeSlots)
+                        .Build(m_device.Get());
 }
 
 void VoxelizationPass::CreatePSOs()
@@ -355,13 +339,13 @@ void VoxelizationPass::DispatchFrameClear(bool emitTailBarriers)
     m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
 
     uint32_t clearParams[4] = { m_gridDim, 0, 0, 0 };
-    m_commandList->SetComputeRoot32BitConstants(0, 4, clearParams, 0);
+    m_clearRootSig.SetConstants(m_commandList.Get(), kFrameClearConstants, clearParams, 4);
 
     // Table starts at heap slot 1 (irradiance); covers irradiance + vpl count.
     UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     D3D12_GPU_DESCRIPTOR_HANDLE table = m_descHeap->GetGPUDescriptorHandleForHeapStart();
     table.ptr += inc;
-    m_commandList->SetComputeRootDescriptorTable(1, table);
+    m_clearRootSig.SetTable(m_commandList.Get(), 0, table);
 
     const uint32_t groups = (m_gridDim + 7) / 8;
     CommandContext::Get().Dispatch(groups, groups, groups);
@@ -381,10 +365,10 @@ void VoxelizationPass::DispatchBakeClear()
     m_commandList->SetPipelineState(m_bakeClearProgram->GetPipelineState());
 
     uint32_t clearParams[4] = { m_gridDim, 0, 0, 0 };
-    m_commandList->SetComputeRoot32BitConstants(0, 4, clearParams, 0);
-    m_commandList->SetComputeRootDescriptorTable(1, m_descHeap->GetGPUDescriptorHandleForHeapStart());
-    m_commandList->SetComputeRootUnorderedAccessView(2, m_bakedBoundMin->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(3, m_bakedBoundMax->GetGPUVirtualAddress());
+    m_bakeClearRootSig.SetConstants(m_commandList.Get(), kBakeClearConstants, clearParams, 4);
+    m_bakeClearRootSig.SetTable(m_commandList.Get(), 0, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_bakeClearRootSig.Set(m_commandList.Get(), kBakeClearBoundMin, m_bakedBoundMin->GetGPUVirtualAddress());
+    m_bakeClearRootSig.Set(m_commandList.Get(), kBakeClearBoundMax, m_bakedBoundMax->GetGPUVirtualAddress());
 
     const uint32_t groups = (m_gridDim + 7) / 8;
     CommandContext::Get().Dispatch(groups, groups, groups);
@@ -407,10 +391,10 @@ void VoxelizationPass::DispatchBake(const Scene& scene)
     m_commandList->RSSetScissorRects(1, &scissor);
     m_commandList->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
 
-    m_commandList->SetGraphicsRootConstantBufferView(0, m_gridConstantsCB->GetGPUVirtualAddress());
-    m_commandList->SetGraphicsRootDescriptorTable(3, m_descHeap->GetGPUDescriptorHandleForHeapStart());
-    m_commandList->SetGraphicsRootUnorderedAccessView(4, m_bakedBoundMin->GetGPUVirtualAddress());
-    m_commandList->SetGraphicsRootUnorderedAccessView(5, m_bakedBoundMax->GetGPUVirtualAddress());
+    m_bakeRootSig.Set(m_commandList.Get(), kBakeGridConstants, m_gridConstantsCB->GetGPUVirtualAddress());
+    m_bakeRootSig.SetTable(m_commandList.Get(), 0, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_bakeRootSig.Set(m_commandList.Get(), kBakeBoundMin, m_bakedBoundMin->GetGPUVirtualAddress());
+    m_bakeRootSig.Set(m_commandList.Get(), kBakeBoundMax, m_bakedBoundMax->GetGPUVirtualAddress());
 
     for (uint32_t axis = 0; axis < 3; ++axis)
     {
@@ -420,12 +404,12 @@ void VoxelizationPass::DispatchBake(const Scene& scene)
             m_bakedClipping ? 1u : 0u,
             0,
         };
-        m_commandList->SetGraphicsRoot32BitConstants(2, 4, bakeParams, 0);
+        m_bakeRootSig.SetConstants(m_commandList.Get(), kBakeAxisConstants, bakeParams, 4);
 
         for (const auto& go : scene.GetGameObjects())
         {
             auto worldGpu = go->GetWorldMatrixBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress();
-            m_commandList->SetGraphicsRootConstantBufferView(1, worldGpu);
+            m_bakeRootSig.Set(m_commandList.Get(), kBakeModelConstants, worldGpu);
 
             for (const auto& primitive : go->GetModel()->GetMeshes())
             {

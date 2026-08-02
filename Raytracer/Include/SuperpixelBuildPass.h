@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
 
 // VXPG V2 Stage B: superpixel clustering (SLIC over the ShadingPoints G-buffer).
@@ -61,7 +62,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
+    RootSignature m_rootSig;
     ComputeProgram* m_initProgram = nullptr;
     ComputeProgram* m_assocProgram = nullptr;
     ComputeProgram* m_sumProgram = nullptr;

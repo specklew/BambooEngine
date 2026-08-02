@@ -19,6 +19,31 @@ namespace
     constexpr uint32_t kFingerprintMaskWords = 4;       // 128 bits / 32
     constexpr uint32_t kDispatchArgsEntries = 3;
 
+    // Two kernels, two signatures. The visibility kernel deliberately rebinds
+    // u1-u3 to different buffers than the presample kernel writes them from, so
+    // the two slot tables share register numbers but nothing else.
+    constexpr BindingSlot kPresampleConstants = RootConstants("PresampleCB", FINGERPRINT_PRESAMPLE_REG_CB, 4);
+    constexpr BindingSlot kPresampleShadingPoints =
+        TableEntryAt("gShadingPoints", BindingKind::Uav, FINGERPRINT_PRESAMPLE_REG_SHADING_POINTS, 0);
+    constexpr BindingSlot kPresampleRepresentatives =
+        RootUav("gScreenRepresentativePoints", FINGERPRINT_PRESAMPLE_REG_REPRESENTATIVES);
+    constexpr BindingSlot kPresampleDispatchArgs = RootUav("gGuidingDispatchArgs", FINGERPRINT_PRESAMPLE_REG_DISPATCH_ARGS);
+    constexpr BindingSlot kPresampleCounters     = RootUav("gGuidingCounters", FINGERPRINT_PRESAMPLE_REG_COUNTERS);
+
+    constexpr BindingSlot kPresampleSlots[] = {kPresampleConstants, kPresampleShadingPoints, kPresampleRepresentatives,
+                                               kPresampleDispatchArgs, kPresampleCounters};
+
+    constexpr BindingSlot kVisibilityTlas = RootSrv("gSceneBVH", FINGERPRINT_VISIBILITY_REG_TLAS);
+    constexpr BindingSlot kVisibilityRepresentatives =
+        RootUav("gReadRepresentativePoints", FINGERPRINT_VISIBILITY_REG_REPRESENTATIVES);
+    constexpr BindingSlot kVisibilityLightPoints =
+        RootUav("gCompactVoxelLightPoints", FINGERPRINT_VISIBILITY_REG_LIGHT_POINTS);
+    constexpr BindingSlot kVisibilityDispatchArgs = RootUav("gReadDispatchArgs", FINGERPRINT_VISIBILITY_REG_DISPATCH_ARGS);
+    constexpr BindingSlot kVisibilityFingerprints = RootUav("gVoxelFingerprints", FINGERPRINT_VISIBILITY_REG_FINGERPRINTS);
+
+    constexpr BindingSlot kVisibilitySlots[] = {kVisibilityTlas, kVisibilityRepresentatives, kVisibilityLightPoints,
+                                                kVisibilityDispatchArgs, kVisibilityFingerprints};
+
     // PCG hash — matches Random.hlsl's pcg_hash so the CPU seed decorrelates
     // the per-frame stratified picks the same way the shader RNG expects.
     uint32_t PcgHash(uint32_t state)
@@ -90,39 +115,16 @@ void VxpgFingerprintPass::RebindShadingPointsIfChanged()
 
 void VxpgFingerprintPass::CreateRootSignatures()
 {
-    // Presample: b0 root constants (resolution + seed), table u0 ShadingPoints,
-    // root UAVs u1 representatives (out), u2 dispatch args (out), u3 counters (in).
     {
-        CD3DX12_DESCRIPTOR_RANGE shadingPointsRange;
-        shadingPointsRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, FINGERPRINT_PRESAMPLE_REG_SHADING_POINTS);
-
-        CD3DX12_ROOT_PARAMETER params[5];
-        params[0].InitAsConstants(4, FINGERPRINT_PRESAMPLE_REG_CB);
-        params[1].InitAsDescriptorTable(1, &shadingPointsRange);
-        params[2].InitAsUnorderedAccessView(FINGERPRINT_PRESAMPLE_REG_REPRESENTATIVES);
-        params[3].InitAsUnorderedAccessView(FINGERPRINT_PRESAMPLE_REG_DISPATCH_ARGS);
-        params[4].InitAsUnorderedAccessView(FINGERPRINT_PRESAMPLE_REG_COUNTERS);
-
-        CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
-            D3D12_ROOT_SIGNATURE_FLAG_NONE);
-        m_presampleRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc,
-                                                                L"VxpgFingerprint Presample RootSig");
+        m_presampleRootSig = RootSignatureBuilder(L"VxpgFingerprint Presample RootSig", /*tableCount*/ 1)
+                                 .Add(kPresampleSlots)
+                                 .Build(m_device.Get());
     }
 
-    // Visibility: t0 TLAS, root UAVs u1 representatives (in), u2 compact light
-    // points (in), u3 dispatch args (in, count), u4 fingerprints (out).
     {
-        CD3DX12_ROOT_PARAMETER params[5];
-        params[0].InitAsShaderResourceView(FINGERPRINT_VISIBILITY_REG_TLAS);
-        params[1].InitAsUnorderedAccessView(FINGERPRINT_VISIBILITY_REG_REPRESENTATIVES);
-        params[2].InitAsUnorderedAccessView(FINGERPRINT_VISIBILITY_REG_LIGHT_POINTS);
-        params[3].InitAsUnorderedAccessView(FINGERPRINT_VISIBILITY_REG_DISPATCH_ARGS);
-        params[4].InitAsUnorderedAccessView(FINGERPRINT_VISIBILITY_REG_FINGERPRINTS);
-
-        CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
-            D3D12_ROOT_SIGNATURE_FLAG_NONE);
-        m_visibilityRootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc,
-                                                                 L"VxpgFingerprint Visibility RootSig");
+        m_visibilityRootSig = RootSignatureBuilder(L"VxpgFingerprint Visibility RootSig", /*tableCount*/ 0)
+                                  .Add(kVisibilitySlots)
+                                  .Build(m_device.Get());
     }
 }
 
@@ -183,11 +185,11 @@ void VxpgFingerprintPass::RunPresample(uint32_t frameIndex)
     cmd->SetComputeRootSignature(m_presampleRootSig.Get());
     uint32_t presampleConstants[4] = { m_width, m_height,
         PcgHash(frameIndex), 0u };
-    cmd->SetComputeRoot32BitConstants(0, 4, presampleConstants, 0);
-    cmd->SetComputeRootDescriptorTable(1, m_descHeap->GetGPUDescriptorHandleForHeapStart());
-    cmd->SetComputeRootUnorderedAccessView(2, m_screenRepresentativePoints->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(3, m_guidingDispatchArgs->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(4, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
+    m_presampleRootSig.SetConstants(cmd, kPresampleConstants, presampleConstants, 4);
+    m_presampleRootSig.SetTable(cmd, 0, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_presampleRootSig.Set(cmd, kPresampleRepresentatives, m_screenRepresentativePoints->GetGPUVirtualAddress());
+    m_presampleRootSig.Set(cmd, kPresampleDispatchArgs, m_guidingDispatchArgs->GetGPUVirtualAddress());
+    m_presampleRootSig.Set(cmd, kPresampleCounters, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
 
     cmd->SetPipelineState(m_presampleProgram->GetPipelineState());
     CommandContext::Get().Dispatch(1, 1, 1); // one 16x8 group = 128 representatives
@@ -213,11 +215,11 @@ void VxpgFingerprintPass::RunVisibility(D3D12_GPU_VIRTUAL_ADDRESS tlasVa)
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
     cmd->SetComputeRootSignature(m_visibilityRootSig.Get());
-    cmd->SetComputeRootShaderResourceView(0, tlasVa);
-    cmd->SetComputeRootUnorderedAccessView(1, m_screenRepresentativePoints->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(2, m_buildPass->GetCompactVoxelLightPointsBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(3, m_guidingDispatchArgs->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(4, m_voxelFingerprints->GetGPUVirtualAddress());
+    m_visibilityRootSig.Set(cmd, kVisibilityTlas, tlasVa);
+    m_visibilityRootSig.Set(cmd, kVisibilityRepresentatives, m_screenRepresentativePoints->GetGPUVirtualAddress());
+    m_visibilityRootSig.Set(cmd, kVisibilityLightPoints, m_buildPass->GetCompactVoxelLightPointsBuffer()->GetGPUVirtualAddress());
+    m_visibilityRootSig.Set(cmd, kVisibilityDispatchArgs, m_guidingDispatchArgs->GetGPUVirtualAddress());
+    m_visibilityRootSig.Set(cmd, kVisibilityFingerprints, m_voxelFingerprints->GetGPUVirtualAddress());
     cmd->SetPipelineState(m_visibilityProgram->GetPipelineState());
 
     constexpr uint32_t kVisibilityArgsOffset = 2 * sizeof(DirectX::XMUINT4); // entry [2]

@@ -12,6 +12,35 @@
 
 using Microsoft::WRL::ComPtr;
 
+namespace
+{
+// The three voxel textures live in this pass's private heap; everything else is
+// a root descriptor. All three kernels share the layout.
+constexpr BindingSlot kGuidingBuildConstants = RootConstants("BuildCB", GUIDING_BUILD_REG_CB, 4);
+constexpr BindingSlot kGuidingBuildIrradiance =
+    TableEntryAt("gVoxIrradiance", BindingKind::Uav, GUIDING_BUILD_REG_IRRADIANCE, 0);
+constexpr BindingSlot kGuidingBuildVplCount =
+    TableEntryAt("gVoxVplCount", BindingKind::Uav, GUIDING_BUILD_REG_VPL_COUNT, 1);
+constexpr BindingSlot kGuidingBuildRepresentative =
+    TableEntryAt("gVoxelRepresentative", BindingKind::Uav, GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE, 2);
+constexpr BindingSlot kGuidingBuildCounters      = RootUav("gCounters", GUIDING_BUILD_REG_COUNTERS);
+constexpr BindingSlot kGuidingBuildCompactIds    = RootUav("gCompactIds", GUIDING_BUILD_REG_COMPACT_IDS);
+constexpr BindingSlot kGuidingBuildInverseIndex  = RootUav("gInverseIndex", GUIDING_BUILD_REG_INVERSE_INDEX);
+constexpr BindingSlot kGuidingBuildLiveBoundMin  = RootUav("gLiveBoundMin", GUIDING_BUILD_REG_LIVE_BOUND_MIN);
+constexpr BindingSlot kGuidingBuildLiveBoundMax  = RootUav("gLiveBoundMax", GUIDING_BUILD_REG_LIVE_BOUND_MAX);
+constexpr BindingSlot kGuidingBuildLightPoints =
+    RootUav("gCompactVoxelLightPoints", GUIDING_BUILD_REG_COMPACT_LIGHT_POINTS);
+constexpr BindingSlot kGuidingBuildPremulIrradiance = RootUav("gPremulIrradiance", GUIDING_BUILD_REG_PREMUL_IRRADIANCE);
+constexpr BindingSlot kGuidingBuildBakedBoundMin    = RootUav("gBakedBoundMin", GUIDING_BUILD_REG_BAKED_BOUND_MIN);
+constexpr BindingSlot kGuidingBuildBakedBoundMax    = RootUav("gBakedBoundMax", GUIDING_BUILD_REG_BAKED_BOUND_MAX);
+
+constexpr BindingSlot kGuidingBuildSlots[] = {
+    kGuidingBuildConstants,     kGuidingBuildIrradiance,   kGuidingBuildVplCount,      kGuidingBuildRepresentative,
+    kGuidingBuildCounters,      kGuidingBuildCompactIds,   kGuidingBuildInverseIndex,  kGuidingBuildLiveBoundMin,
+    kGuidingBuildLiveBoundMax,  kGuidingBuildLightPoints,  kGuidingBuildPremulIrradiance,
+    kGuidingBuildBakedBoundMin, kGuidingBuildBakedBoundMax};
+} // namespace
+
 void VoxelGuidingBuildPass::Initialize(
     ComPtr<ID3D12Device5>              device,
     ComPtr<ID3D12GraphicsCommandList4> commandList,
@@ -110,23 +139,9 @@ void VoxelGuidingBuildPass::RebindDescriptorsIfChanged(ID3D12Resource* represent
 
 void VoxelGuidingBuildPass::CreateRootSignature()
 {
-    // Table: u0 irradiance, u1 vpl count, u2 representative VPL (private heap).
-    // Root UAVs: u3 counters, u4 compactIds, u5 inverse index, u6/u7 live
-    // bounds, u8 representVPL, u9 premul irradiance, u10/u11 baked bounds.
-    // Root constants b0: gridDim.
-    CD3DX12_DESCRIPTOR_RANGE texRange;
-    texRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 3, GUIDING_BUILD_REG_IRRADIANCE);
-
-    CD3DX12_ROOT_PARAMETER params[11];
-    params[0].InitAsConstants(4, GUIDING_BUILD_REG_CB);
-    params[1].InitAsDescriptorTable(1, &texRange);
-    // u3 through u11, contiguous by construction: see the register block above.
-    for (uint32_t i = 0; i < 9; ++i)
-        params[2 + i].InitAsUnorderedAccessView(GUIDING_BUILD_REG_COUNTERS + i);
-
-    CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
-    m_rootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VoxelGuidingBuild RootSig");
+    m_rootSig = RootSignatureBuilder(L"VoxelGuidingBuild RootSig", /*tableCount*/ 1)
+                    .Add(kGuidingBuildSlots)
+                    .Build(m_device.Get());
 }
 
 void VoxelGuidingBuildPass::CreatePSOs()
@@ -155,17 +170,18 @@ bool VoxelGuidingBuildPass::BindCommon()
     m_commandList->SetComputeRootSignature(m_rootSig.Get());
 
     uint32_t constants[4] = { gridDim, 0, 0, 0 };
-    m_commandList->SetComputeRoot32BitConstants(0, 4, constants, 0);
-    m_commandList->SetComputeRootDescriptorTable(1, m_descHeap->GetGPUDescriptorHandleForHeapStart());
-    m_commandList->SetComputeRootUnorderedAccessView(2,  m_counters->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(3,  m_compactIds->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(4,  m_inverseIndex->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(5,  m_liveBoundMin->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(6,  m_liveBoundMax->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(7,  m_compactVoxelLightPoints->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(8,  m_premulIrradiance->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(9,  m_voxelPass->GetBakedBoundMinBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(10, m_voxelPass->GetBakedBoundMaxBuffer()->GetGPUVirtualAddress());
+    auto* cmd = m_commandList.Get();
+    m_rootSig.SetConstants(cmd, kGuidingBuildConstants, constants, 4);
+    m_rootSig.SetTable(cmd, 0, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_rootSig.Set(cmd, kGuidingBuildCounters, m_counters->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kGuidingBuildCompactIds, m_compactIds->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kGuidingBuildInverseIndex, m_inverseIndex->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kGuidingBuildLiveBoundMin, m_liveBoundMin->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kGuidingBuildLiveBoundMax, m_liveBoundMax->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kGuidingBuildLightPoints, m_compactVoxelLightPoints->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kGuidingBuildPremulIrradiance, m_premulIrradiance->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kGuidingBuildBakedBoundMin, m_voxelPass->GetBakedBoundMinBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kGuidingBuildBakedBoundMax, m_voxelPass->GetBakedBoundMaxBuffer()->GetGPUVirtualAddress());
 
     return true;
 }

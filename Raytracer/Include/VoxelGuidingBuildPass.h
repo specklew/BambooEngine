@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
 
 #include "Resources/RWStructuredBuffer.h"
@@ -75,7 +76,7 @@ private:
     ID3D12Resource* m_boundRepresentative = nullptr;
     ID3D12Resource* m_representativeTex   = nullptr; // owned by the injection pass
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
+    RootSignature m_rootSig;
     ComputeProgram* m_clearProgram = nullptr;
     ComputeProgram* m_reloadProgram = nullptr;
     ComputeProgram* m_compactProgram = nullptr;

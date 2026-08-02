@@ -5,6 +5,7 @@
 #include "GlobalDescriptorHeap.h"
 #include "GraphicsDevice.h"
 #include "RenderGraph.h"
+#include "RootSignatureLibrary.h"
 #include "Headless.h" // HeadlessConfig
 #include "InputElements.h"
 #include "RasterDebugMode.h"
@@ -228,7 +229,7 @@ private:
 	std::shared_ptr<ConstantBuffer> m_modelIndexConstantBuffer;
 	BYTE* m_mappedData = nullptr;
 
-	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
+	RootSignature m_rootSignature;
 
 	Microsoft::WRL::ComPtr<IDxcBlob> m_pixelShader;
 	Microsoft::WRL::ComPtr<IDxcBlob> m_vertexShader;

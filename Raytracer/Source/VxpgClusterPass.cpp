@@ -15,6 +15,24 @@
 
 using Microsoft::WRL::ComPtr;
 
+namespace
+{
+// Both cluster kernels share this layout: seeding writes the centers the
+// assignment step then reads, so neither owns a subset.
+constexpr BindingSlot kClusterConstants        = RootConstants("ClusterCB", CLUSTER_REG_CB, 4);
+constexpr BindingSlot kClusterSeedIds          = RootUav("gClusterSeedCompactIds", CLUSTER_REG_SEED_COMPACT_IDS);
+constexpr BindingSlot kClusterCenters          = RootUav("gClusterCenters", CLUSTER_REG_CENTERS);
+constexpr BindingSlot kClusterDispatchArgs     = RootUav("gGuidingDispatchArgs", CLUSTER_REG_DISPATCH_ARGS);
+constexpr BindingSlot kClusterFingerprints     = RootUav("gVoxelFingerprints", CLUSTER_REG_FINGERPRINTS);
+constexpr BindingSlot kClusterCompactIds       = RootUav("gCompactIds", CLUSTER_REG_COMPACT_IDS);
+constexpr BindingSlot kClusterPremulIrradiance = RootUav("gPremulIrradiance", CLUSTER_REG_PREMUL_IRRADIANCE);
+constexpr BindingSlot kClusterAssignments      = RootUav("gVoxelClusterAssignments", CLUSTER_REG_ASSIGNMENTS);
+
+constexpr BindingSlot kClusterSlots[] = {kClusterConstants,    kClusterSeedIds,      kClusterCenters,
+                                         kClusterDispatchArgs, kClusterFingerprints, kClusterCompactIds,
+                                         kClusterPremulIrradiance, kClusterAssignments};
+} // namespace
+
 // Default 0 = SIByL-faithful frame-constant k-means++ seeding (its sampler is
 // seeded with hardcoded zeros); 1 decorrelates the seeds per frame (ADR 0003).
 static AutoCVarInt g_clusterFrameVaryingSeed("vxpg.cluster.frameVaryingSeed",
@@ -70,18 +88,10 @@ void VxpgClusterPass::CreateBuffers()
 
 void VxpgClusterPass::CreateRootSignature()
 {
-    // Both kernels share one layout: b0 root constants (grid dim + seed frame
-    // term), root UAVs u0 seeds, u1 centers, u2 dispatch args, u3 fingerprints,
-    // u4 compact ids, u5 premul irradiance, u6 assignments.
-    CD3DX12_ROOT_PARAMETER params[8];
-    params[0].InitAsConstants(4, CLUSTER_REG_CB);
-    // u0 through u6, contiguous by construction: see the register block above.
-    for (uint32_t i = 0; i < 7; ++i)
-        params[1 + i].InitAsUnorderedAccessView(CLUSTER_REG_SEED_COMPACT_IDS + i);
-
-    CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params, 0, nullptr,
-        D3D12_ROOT_SIGNATURE_FLAG_NONE);
-    m_rootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VxpgCluster RootSig");
+    // Both kernels share one layout.
+    m_rootSig = RootSignatureBuilder(L"VxpgCluster RootSig", /*tableCount*/ 0)
+                    .Add(kClusterSlots)
+                    .Build(m_device.Get());
 }
 
 void VxpgClusterPass::CreatePSOs()
@@ -121,14 +131,14 @@ bool VxpgClusterPass::BindCommon(uint32_t frameIndex)
     uint32_t constants[4] = { m_voxelPass->GetGridDim(), seedFrameTerm, 0u, 0u };
 
     cmd->SetComputeRootSignature(m_rootSig.Get());
-    cmd->SetComputeRoot32BitConstants(0, 4, constants, 0);
-    cmd->SetComputeRootUnorderedAccessView(1, m_clusterSeedCompactIds->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(2, m_clusterCenters->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(3, m_fingerprintPass->GetGuidingDispatchArgsBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(4, m_fingerprintPass->GetVoxelFingerprintsBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(5, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(6, m_buildPass->GetPremulIrradianceBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(7, m_voxelClusterAssignments->GetGPUVirtualAddress());
+    m_rootSig.SetConstants(cmd, kClusterConstants, constants, 4);
+    m_rootSig.Set(cmd, kClusterSeedIds, m_clusterSeedCompactIds->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kClusterCenters, m_clusterCenters->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kClusterDispatchArgs, m_fingerprintPass->GetGuidingDispatchArgsBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kClusterFingerprints, m_fingerprintPass->GetVoxelFingerprintsBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kClusterCompactIds, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kClusterPremulIrradiance, m_buildPass->GetPremulIrradianceBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kClusterAssignments, m_voxelClusterAssignments->GetGPUVirtualAddress());
 
     return true;
 }

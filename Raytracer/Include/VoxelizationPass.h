@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
 
 #include "Resources/RWStructuredBuffer.h"
@@ -25,10 +26,8 @@ struct VoxelGridConstants
 class VoxelizationPass
 {
 public:
-    void Initialize(
-        Microsoft::WRL::ComPtr<ID3D12Device5>              device,
-        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
-        Microsoft::WRL::ComPtr<ID3D12RootSignature>        rasterRootSignature);
+    void Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
+                    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList);
 
     void OnSceneLoaded(const Scene& scene);
 
@@ -76,7 +75,6 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
-    Microsoft::WRL::ComPtr<ID3D12RootSignature>        m_rasterRootSignature; // existing raster root sig for color overlay binding
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_occupancyTex;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_irradianceTex; // packed fixed-point irradiance (x100), uint atomics
@@ -88,11 +86,11 @@ private:
     std::unique_ptr<RWStructuredBuffer<uint32_t>> m_bakedBoundMin;
     std::unique_ptr<RWStructuredBuffer<uint32_t>> m_bakedBoundMax;
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_clearRootSig;     // per-frame accumulator clear
+    RootSignature m_clearRootSig;     // per-frame accumulator clear
     ComputeProgram* m_clearProgram = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bakeClearRootSig;
+    RootSignature m_bakeClearRootSig;
     ComputeProgram* m_bakeClearProgram = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_bakeRootSig;
+    RootSignature m_bakeRootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_bakePso;
 
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descHeap; // [0]=occupancy UAV [1]=irradiance UAV [2]=vpl count UAV

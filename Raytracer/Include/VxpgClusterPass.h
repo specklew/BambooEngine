@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
 
 #include "Resources/RWStructuredBuffer.h"
@@ -63,7 +64,7 @@ private:
     std::unique_ptr<RWStructuredBuffer<ClusterCenter>> m_clusterCenters;          // SIByL u_RowClusterInfo
     std::unique_ptr<RWStructuredBuffer<int32_t>>       m_voxelClusterAssignments; // SIByL u_Clusters
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSig;
+    RootSignature m_rootSig;
     ComputeProgram* m_seedProgram = nullptr;
     ComputeProgram* m_assignProgram = nullptr;
 

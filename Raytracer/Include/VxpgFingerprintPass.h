@@ -1,5 +1,6 @@
 #pragma once
 
+#include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
 
 #include "Resources/RWStructuredBuffer.h"
@@ -65,8 +66,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descHeap;
     ID3D12Resource* m_boundShadingPoints = nullptr;
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_presampleRootSig;
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_visibilityRootSig;
+    RootSignature m_presampleRootSig;
+    RootSignature m_visibilityRootSig;
     ComputeProgram* m_presampleProgram = nullptr;
     ComputeProgram* m_visibilityProgram = nullptr;
 

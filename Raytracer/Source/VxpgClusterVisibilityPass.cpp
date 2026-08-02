@@ -19,6 +19,47 @@
 
 using Microsoft::WRL::ComPtr;
 
+namespace
+{
+// It includes RaytracingUtils.hlsl, so the scene half of the layout is frame
+// registers; the rest is cvis-specific. No texture range: the BSDF weight uses
+// per-instance material factors, so this compute pass never samples the scene
+// textures (which sit in the raster path's PIXEL_SHADER_RESOURCE layout,
+// illegal for a compute Dispatch).
+constexpr BindingSlot kCvisCamera =
+    TableEntry("CameraParams", BindingKind::Cbv, FRAME_REG_CAMERA_MATRICES, GlobalDescriptor::CameraMatrices);
+constexpr BindingSlot kCvisTlas     = TableEntry("SceneBVH", BindingKind::Srv, FRAME_REG_TLAS, GlobalDescriptor::Tlas);
+constexpr BindingSlot kCvisVertices = TableEntry("g_vertices", BindingKind::Srv, FRAME_REG_VERTICES, GlobalDescriptor::Vertices);
+constexpr BindingSlot kCvisIndices  = TableEntry("g_indices", BindingKind::Srv, FRAME_REG_INDICES, GlobalDescriptor::Indices);
+constexpr BindingSlot kCvisSuperpixelIndex =
+    TableEntry("gSuperpixelIndex", BindingKind::Uav, CVIS_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
+constexpr BindingSlot kCvisVplPosition =
+    TableEntry("gVplPosition", BindingKind::Uav, CVIS_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
+constexpr BindingSlot kCvisVBuffer = TableEntry("gVBuffer", BindingKind::Uav, CVIS_REG_VBUFFER, GlobalDescriptor::VBuffer);
+constexpr BindingSlot kCvisSpixelGathered =
+    TableEntry("gSpixelGathered", BindingKind::Uav, CVIS_REG_SPIXEL_GATHERED, GlobalDescriptor::SpixelGathered);
+constexpr BindingSlot kCvisSpixelCounter =
+    TableEntry("gSpixelCounter", BindingKind::Uav, CVIS_REG_SPIXEL_COUNTER, GlobalDescriptor::SpixelCounter);
+constexpr BindingSlot kCvisVisibilityMask = TableEntry("gClusterVisibilityMask", BindingKind::Uav,
+                                                       CVIS_REG_VISIBILITY_MASK, GlobalDescriptor::ClusterVisibilityMask);
+
+constexpr BindingSlot kCvisGeometryInfo = RootSrv("g_geometryInfo", FRAME_REG_GEOMETRY_INFO);
+constexpr BindingSlot kCvisInstanceInfo = RootSrv("g_instanceInfo", FRAME_REG_INSTANCE_INFO);
+constexpr BindingSlot kCvisGridConstants   = RootCbv("CvisGridCB", CVIS_REG_GRID_CB);
+constexpr BindingSlot kCvisConstants       = RootConstants("CvisCB", CVIS_REG_CB, 8);
+constexpr BindingSlot kCvisInverseIndex    = RootUav("gVoxInverseIndex", CVIS_REG_INVERSE_INDEX);
+constexpr BindingSlot kCvisAssignments     = RootUav("gVoxelClusterAssignments", CVIS_REG_CLUSTER_ASSIGNMENTS);
+constexpr BindingSlot kCvisGatheredPoints  = RootUav("gClusterGatheredLightPoints", CVIS_REG_GATHERED_LIGHT_POINTS);
+constexpr BindingSlot kCvisPointCounts     = RootUav("gClusterLightPointCounts", CVIS_REG_LIGHT_POINT_COUNTS);
+constexpr BindingSlot kCvisAvgVisibility   = RootUav("gSpixelClusterAvgVisibility", CVIS_REG_AVG_VISIBILITY);
+
+constexpr BindingSlot kCvisSlots[] = {
+    kCvisCamera,          kCvisTlas,           kCvisVertices,       kCvisIndices,       kCvisSuperpixelIndex,
+    kCvisVplPosition,     kCvisVBuffer,        kCvisSpixelGathered, kCvisSpixelCounter, kCvisVisibilityMask,
+    kCvisGeometryInfo,    kCvisInstanceInfo,   kCvisGridConstants,  kCvisConstants,     kCvisInverseIndex,
+    kCvisAssignments,     kCvisGatheredPoints, kCvisPointCounts,    kCvisAvgVisibility};
+} // namespace
+
 // SIByL cvis defaults: use_bsdf = true, use_distance = false (BRDF-weighted soft
 // visibility). Both exposed so the weighting can be toggled for measurement.
 static AutoCVarInt g_cvisUseBsdf("vxpg.cvis.useBsdf",
@@ -89,36 +130,10 @@ void VxpgClusterVisibilityPass::CreateRootSignature()
     // raster path's PIXEL_SHADER_RESOURCE layout, illegal for a compute Dispatch).
     // It includes RaytracingUtils.hlsl, so the scene half of its bindings is the
     // frame layout; only the cvis-specific UAVs are pass-scoped.
-    CD3DX12_DESCRIPTOR_RANGE r[10];
-    r[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, FRAME_REG_CAMERA_MATRICES, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::CameraMatrices));
-    r[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, FRAME_REG_TLAS, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Tlas));
-    r[2].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, FRAME_REG_VERTICES, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Vertices));
-    r[3].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, FRAME_REG_INDICES, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::Indices));
-    r[4].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_SUPERPIXEL_INDEX, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SuperpixelIndex));
-    r[5].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_VPL_POSITION, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VplPosition));
-    r[6].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_VBUFFER, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VBuffer));
-    r[7].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_SPIXEL_GATHERED, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SpixelGathered));
-    r[8].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_SPIXEL_COUNTER, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::SpixelCounter));
-    r[9].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, CVIS_REG_VISIBILITY_MASK, 0, GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ClusterVisibilityMask));
-
-    CD3DX12_ROOT_PARAMETER params[10];
-    params[0].InitAsDescriptorTable(_countof(r), r);
-    params[1].InitAsShaderResourceView(FRAME_REG_GEOMETRY_INFO);
-    params[2].InitAsShaderResourceView(FRAME_REG_INSTANCE_INFO);
-    params[3].InitAsConstantBufferView(CVIS_REG_GRID_CB);
-    params[4].InitAsConstants(8, CVIS_REG_CB);
-    params[5].InitAsUnorderedAccessView(CVIS_REG_INVERSE_INDEX);
-    params[6].InitAsUnorderedAccessView(CVIS_REG_CLUSTER_ASSIGNMENTS);
-    params[7].InitAsUnorderedAccessView(CVIS_REG_GATHERED_LIGHT_POINTS);
-    params[8].InitAsUnorderedAccessView(CVIS_REG_LIGHT_POINT_COUNTS);
-    params[9].InitAsUnorderedAccessView(CVIS_REG_AVG_VISIBILITY);
-
-    auto samplers = Renderer::GetStaticSamplers();
-    CD3DX12_ROOT_SIGNATURE_DESC desc(_countof(params), params,
-        static_cast<UINT>(samplers.size()), samplers.data(),
-        D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
-    m_rootSig = RootSignatureLibrary::Get().Create(m_device.Get(), desc, L"VxpgClusterVisibility RootSig");
+    m_rootSig = RootSignatureBuilder(L"VxpgClusterVisibility RootSig", /*tableCount*/ 1)
+                    .Add(kCvisSlots)
+                    .WithStaticSamplers()
+                    .Build(m_device.Get());
 }
 
 void VxpgClusterVisibilityPass::CreatePSOs()
@@ -154,10 +169,10 @@ bool VxpgClusterVisibilityPass::BindCommon(uint32_t frameIndex)
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
     cmd->SetComputeRootSignature(m_rootSig.Get());
-    cmd->SetComputeRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
-    cmd->SetComputeRootShaderResourceView(1, m_scene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    cmd->SetComputeRootShaderResourceView(2, m_scene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    cmd->SetComputeRootConstantBufferView(3, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+    m_rootSig.SetTable(cmd, 0, GlobalDescriptorHeap::Get().GpuStart());
+    m_rootSig.Set(cmd, kCvisGeometryInfo, m_scene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kCvisInstanceInfo, m_scene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kCvisGridConstants, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
 
     uint32_t constants[8] = {
         m_width, m_height, m_mapX, m_mapY, frameIndex,
@@ -165,12 +180,12 @@ bool VxpgClusterVisibilityPass::BindCommon(uint32_t frameIndex)
         static_cast<uint32_t>(g_cvisUseDistance.Get() != 0),
         m_scene->GetInstanceInfoBuffer()->GetElementsCount()
     };
-    cmd->SetComputeRoot32BitConstants(4, 8, constants, 0);
-    cmd->SetComputeRootUnorderedAccessView(5, m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(6, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(7, m_clusterGatheredLightPoints->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(8, m_clusterLightPointCounts->GetGPUVirtualAddress());
-    cmd->SetComputeRootUnorderedAccessView(9, m_avgVisibility->GetGPUVirtualAddress());
+    m_rootSig.SetConstants(cmd, kCvisConstants, constants, 8);
+    m_rootSig.Set(cmd, kCvisInverseIndex, m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kCvisAssignments, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kCvisGatheredPoints, m_clusterGatheredLightPoints->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kCvisPointCounts, m_clusterLightPointCounts->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kCvisAvgVisibility, m_avgVisibility->GetGPUVirtualAddress());
 
     return true;
 }
