@@ -57,8 +57,7 @@ inline constexpr uint32_t GlobalDescriptorSlotCounts[] = {
     1,                                 // FuzzyIndex
 };
 
-static_assert(std::size(GlobalDescriptorSlotCounts) == static_cast<size_t>(GlobalDescriptor::Count),
-              "Every GlobalDescriptor needs a slot count");
+static_assert(std::size(GlobalDescriptorSlotCounts) == static_cast<size_t>(GlobalDescriptor::Count), "Every GlobalDescriptor needs a slot count");
 
 // ADR 0017 L2: the frame-global heap. Slot indices come from this layout instead
 // of hand-chained constants, and slots whose resource dies get a null view rather

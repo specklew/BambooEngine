@@ -19,21 +19,14 @@ class Scene;
 namespace FrameBindingLayout
 {
     // Table entries, in table order.
-    inline constexpr BindingSlot kCameraMatrices =
-        TableEntry("CameraParams", BindingKind::Cbv, FRAME_REG_CAMERA_MATRICES, GlobalDescriptor::CameraMatrices);
-    inline constexpr BindingSlot kRaytraceOutput =
-        TableEntry("gOutput", BindingKind::Uav, FRAME_REG_RAYTRACE_OUTPUT, GlobalDescriptor::RaytraceOutput);
-    inline constexpr BindingSlot kTlas =
-        TableEntry("SceneBVH", BindingKind::Srv, FRAME_REG_TLAS, GlobalDescriptor::Tlas);
-    inline constexpr BindingSlot kVertices =
-        TableEntry("g_vertices", BindingKind::Srv, FRAME_REG_VERTICES, GlobalDescriptor::Vertices);
-    inline constexpr BindingSlot kIndices =
-        TableEntry("g_indices", BindingKind::Srv, FRAME_REG_INDICES, GlobalDescriptor::Indices);
-    inline constexpr BindingSlot kSkybox =
-        TableEntry("g_skybox", BindingKind::Srv, FRAME_REG_SKYBOX, GlobalDescriptor::Skybox);
+    inline constexpr BindingSlot kCameraMatrices = TableEntry("CameraParams", BindingKind::Cbv, FRAME_REG_CAMERA_MATRICES, GlobalDescriptor::CameraMatrices);
+    inline constexpr BindingSlot kRaytraceOutput = TableEntry("gOutput", BindingKind::Uav, FRAME_REG_RAYTRACE_OUTPUT, GlobalDescriptor::RaytraceOutput);
+    inline constexpr BindingSlot kTlas           = TableEntry("SceneBVH", BindingKind::Srv, FRAME_REG_TLAS, GlobalDescriptor::Tlas);
+    inline constexpr BindingSlot kVertices       = TableEntry("g_vertices", BindingKind::Srv, FRAME_REG_VERTICES, GlobalDescriptor::Vertices);
+    inline constexpr BindingSlot kIndices        = TableEntry("g_indices", BindingKind::Srv, FRAME_REG_INDICES, GlobalDescriptor::Indices);
+    inline constexpr BindingSlot kSkybox         = TableEntry("g_skybox", BindingKind::Srv, FRAME_REG_SKYBOX, GlobalDescriptor::Skybox);
     inline constexpr BindingSlot kMaterialTextures =
-        TableEntry("g_textures", BindingKind::Srv, FRAME_REG_MATERIAL_TEXTURES, GlobalDescriptor::MaterialTextures,
-                   FRAME_MAX_TEXTURES);
+        TableEntry("g_textures", BindingKind::Srv, FRAME_REG_MATERIAL_TEXTURES, GlobalDescriptor::MaterialTextures, FRAME_MAX_TEXTURES);
 
     // Root descriptors, in root parameter order.
     inline constexpr BindingSlot kGeometryInfo      = RootSrv("g_geometryInfo", FRAME_REG_GEOMETRY_INFO);
@@ -51,8 +44,7 @@ namespace FrameBindingLayout
     // Whether a register belongs to the frame layout. Frame bindings are present
     // in every signature whether the pass reads them or not, so the unused-binding
     // report has to skip them or it reports nothing else.
-    [[nodiscard]] bool IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister,
-                                       uint32_t registerSpace);
+    [[nodiscard]] bool IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister, uint32_t registerSpace);
 
     // Binds the whole frame layout. Every raytracing pass calls this instead of
     // repeating seven near-identical binds.

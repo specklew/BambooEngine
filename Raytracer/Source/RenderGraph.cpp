@@ -101,8 +101,7 @@ void RenderGraph::MarkExternallyRead(GraphResourceHandle resource)
         m_resources[resource].externallyRead = true;
 }
 
-void RenderGraph::AddPass(const char* name,
-                          const std::function<void(RenderGraphPassBuilder&)>& declare,
+void RenderGraph::AddPass(const char* name, const std::function<void(RenderGraphPassBuilder&)>& declare,
                           std::function<void()> execute)
 {
     RenderGraphPassBuilder builder;
@@ -225,8 +224,7 @@ void RenderGraph::Compile()
             }
             else
             {
-                assert(required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS &&
-                       "Raw import declared with a state-carrying access — import it as a tracked Resource");
+                assert(required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && "Raw import declared with a state-carrying access — import it as a tracked Resource");
             }
 
             // Hazards a transition cannot express. Read-after-write and
@@ -236,8 +234,8 @@ void RenderGraph::Compile()
             // already orders both sides, so it stands in for the UAV barrier.
             const bool afterWrite = imported.writtenSinceLastRead;
             const bool afterRead  = imported.readSinceLastWrite && declaration.isWrite;
-            if (!emittedTransition && required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS &&
-                imported.touchedThisFrame && (afterWrite || afterRead))
+            if (!emittedTransition && required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && imported.touchedThisFrame &&
+                (afterWrite || afterRead))
             {
                 ID3D12Resource* underlying = imported.tracked
                     ? imported.tracked->GetUnderlyingResource().Get()
@@ -279,8 +277,7 @@ void RenderGraph::Execute(CommandContext& context)
         if (timed)
         {
             context.FlushBarriers();
-            context.GetCommandListUnflushed()->EndQuery(m_timerQueryHeap.Get(),
-                D3D12_QUERY_TYPE_TIMESTAMP, timerSlot);
+            context.GetCommandListUnflushed()->EndQuery(m_timerQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, timerSlot);
         }
 
         if (pass.execute)
@@ -291,8 +288,7 @@ void RenderGraph::Execute(CommandContext& context)
         if (timed)
         {
             context.FlushBarriers();
-            context.GetCommandListUnflushed()->EndQuery(m_timerQueryHeap.Get(),
-                D3D12_QUERY_TYPE_TIMESTAMP, timerSlot + 1);
+            context.GetCommandListUnflushed()->EndQuery(m_timerQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, timerSlot + 1);
             m_timedPassNames.push_back(pass.name);
             ++m_timedPassCount;
         }
@@ -302,8 +298,8 @@ void RenderGraph::Execute(CommandContext& context)
 
     if (m_timedPassCount > 0)
     {
-        context.GetCommandListUnflushed()->ResolveQueryData(m_timerQueryHeap.Get(),
-            D3D12_QUERY_TYPE_TIMESTAMP, 0, m_timedPassCount * 2, m_timerReadback.Get(), 0);
+        context.GetCommandListUnflushed()->ResolveQueryData(m_timerQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0,
+            m_timedPassCount * 2, m_timerReadback.Get(), 0);
     }
 }
 

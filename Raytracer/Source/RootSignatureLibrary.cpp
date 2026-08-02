@@ -30,8 +30,7 @@ namespace
         }
     }
 
-    void FlattenRootParameters(const D3D12_ROOT_SIGNATURE_DESC&    desc,
-                               std::vector<RootSignatureBinding>& outBindings)
+    void FlattenRootParameters(const D3D12_ROOT_SIGNATURE_DESC& desc, std::vector<RootSignatureBinding>& outBindings)
     {
         for (uint32_t parameterIndex = 0; parameterIndex < desc.NumParameters; ++parameterIndex)
         {
@@ -60,15 +59,15 @@ namespace
                                                 ? parameter.Constants.RegisterSpace
                                                 : parameter.Descriptor.RegisterSpace;
 
-            outBindings.push_back({RangeTypeForRootParameter(parameter.ParameterType), shaderRegister,
-                                   registerSpace, 1, parameterIndex, false});
+            outBindings.push_back({RangeTypeForRootParameter(parameter.ParameterType), shaderRegister, registerSpace, 1,
+                                   parameterIndex, false});
         }
 
         for (uint32_t samplerIndex = 0; samplerIndex < desc.NumStaticSamplers; ++samplerIndex)
         {
             const D3D12_STATIC_SAMPLER_DESC& sampler = desc.pStaticSamplers[samplerIndex];
-            outBindings.push_back({D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, sampler.ShaderRegister,
-                                   sampler.RegisterSpace, 1, UINT_MAX, false});
+            outBindings.push_back({D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, sampler.ShaderRegister, sampler.RegisterSpace,
+                                   1, UINT_MAX, false});
         }
     }
 }
@@ -79,10 +78,8 @@ RootSignatureLibrary& RootSignatureLibrary::Get()
     return instance;
 }
 
-ComPtr<ID3D12RootSignature> RootSignatureLibrary::Create(ID3D12Device*                    device,
-                                                         const D3D12_ROOT_SIGNATURE_DESC& desc,
-                                                         const wchar_t*                   debugName,
-                                                         bool                             usesFrameLayout)
+ComPtr<ID3D12RootSignature> RootSignatureLibrary::Create(ID3D12Device* device, const D3D12_ROOT_SIGNATURE_DESC& desc,
+                                                         const wchar_t* debugName, bool usesFrameLayout)
 {
     assert(device && "Root signature needs a device");
 
@@ -97,8 +94,7 @@ ComPtr<ID3D12RootSignature> RootSignatureLibrary::Create(ID3D12Device*          
     }
 
     ComPtr<ID3D12RootSignature> signature;
-    ThrowIfFailed(device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(),
-                                              IID_PPV_ARGS(&signature)));
+    ThrowIfFailed(device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&signature)));
     if (debugName)
         signature->SetName(debugName);
 
@@ -162,8 +158,7 @@ void RootSignatureLibrary::LogUnreferencedBindings() const
     }
 }
 
-const RootSignatureLayout* RootSignatureLibrary::AttachLayout(ID3D12RootSignature* signature,
-                                                              RootSignatureLayout&& layout)
+const RootSignatureLayout* RootSignatureLibrary::AttachLayout(ID3D12RootSignature* signature, RootSignatureLayout&& layout)
 {
     const auto it = m_signatures.find(signature);
     assert(it != m_signatures.end() && "Layout attached to a signature the library did not create");
@@ -189,8 +184,7 @@ uint32_t RootSignatureLayout::RootParameterOf(const BindingSlot& slot) const
     return 0;
 }
 
-void RootSignature::SetTable(ID3D12GraphicsCommandList* commandList, uint32_t tableIndex,
-                             D3D12_GPU_DESCRIPTOR_HANDLE heapStart) const
+void RootSignature::SetTable(ID3D12GraphicsCommandList* commandList, uint32_t tableIndex, D3D12_GPU_DESCRIPTOR_HANDLE heapStart) const
 {
     assert(m_layout && "Binding through an unbuilt root signature");
     if (m_layout->IsGraphics())
@@ -199,8 +193,7 @@ void RootSignature::SetTable(ID3D12GraphicsCommandList* commandList, uint32_t ta
         commandList->SetComputeRootDescriptorTable(tableIndex, heapStart);
 }
 
-void RootSignature::Set(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot,
-                        D3D12_GPU_VIRTUAL_ADDRESS address) const
+void RootSignature::Set(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot, D3D12_GPU_VIRTUAL_ADDRESS address) const
 {
     assert(m_layout && "Binding through an unbuilt root signature");
     const uint32_t index = m_layout->RootParameterOf(slot);
@@ -224,8 +217,7 @@ void RootSignature::Set(ID3D12GraphicsCommandList* commandList, const BindingSlo
     }
 }
 
-void RootSignature::SetConstants(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot,
-                                 const void* values, uint32_t numValues) const
+void RootSignature::SetConstants(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot, const void* values, uint32_t numValues) const
 {
     assert(m_layout && "Binding through an unbuilt root signature");
     const uint32_t index = m_layout->RootParameterOf(slot);
@@ -339,8 +331,7 @@ RootSignature RootSignatureBuilder::Build(ID3D12Device* device)
     for (uint32_t tableIndex = 0; tableIndex < m_tableCount; ++tableIndex)
     {
         assert(!tableRanges[tableIndex].empty() && "Declared a table parameter that no slot fills");
-        parameters[tableIndex].InitAsDescriptorTable(static_cast<UINT>(tableRanges[tableIndex].size()),
-                                                     tableRanges[tableIndex].data());
+        parameters[tableIndex].InitAsDescriptorTable(static_cast<UINT>(tableRanges[tableIndex].size()), tableRanges[tableIndex].data());
     }
 
     // Built unconditionally so the array outlives the desc; only referenced when asked for.
@@ -348,8 +339,7 @@ RootSignature RootSignatureBuilder::Build(ID3D12Device* device)
     const UINT samplerCount  = m_staticSamplers ? static_cast<UINT>(samplers.size()) : 0;
     const auto* samplerDescs = m_staticSamplers ? samplers.data() : nullptr;
 
-    CD3DX12_ROOT_SIGNATURE_DESC desc(static_cast<UINT>(parameters.size()), parameters.data(), samplerCount,
-                                     samplerDescs, m_flags);
+    CD3DX12_ROOT_SIGNATURE_DESC desc(static_cast<UINT>(parameters.size()), parameters.data(), samplerCount, samplerDescs, m_flags);
 
     RootSignature built;
     built.m_signature = RootSignatureLibrary::Get().Create(device, desc, m_debugName.c_str(), m_usesFrameLayout);

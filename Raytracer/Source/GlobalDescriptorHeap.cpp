@@ -50,8 +50,7 @@ namespace
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_SINT },       // FuzzyIndex
     };
 
-    static_assert(std::size(NullViews) == static_cast<size_t>(GlobalDescriptor::Count),
-                  "Every GlobalDescriptor needs a null view definition");
+    static_assert(std::size(NullViews) == static_cast<size_t>(GlobalDescriptor::Count), "Every GlobalDescriptor needs a null view definition");
 }
 
 GlobalDescriptorHeap& GlobalDescriptorHeap::Get()
@@ -64,14 +63,12 @@ void GlobalDescriptorHeap::Initialize(ID3D12Device* device)
 {
     assert(!m_initialized && "Global descriptor heap initialized twice");
 
-    m_allocator.Initialize(device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Capacity(), true,
-                           L"Global Descriptor Heap");
+    m_allocator.Initialize(device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Capacity(), true, L"Global Descriptor Heap");
 
     for (uint32_t slot = 0; slot < static_cast<uint32_t>(GlobalDescriptor::Count); ++slot)
     {
         const DescriptorHandle handle = m_allocator.AllocateRange(GlobalDescriptorSlotCounts[slot]);
-        assert(handle.index == IndexOf(static_cast<GlobalDescriptor>(slot)) &&
-               "Heap layout diverged from the compile-time indices the root signatures use");
+        assert(handle.index == IndexOf(static_cast<GlobalDescriptor>(slot)) && "Heap layout diverged from the compile-time indices the root signatures use");
     }
 
     // Passes fill their slots as they initialize and can drop them again on resize
@@ -86,8 +83,7 @@ void GlobalDescriptorHeap::Initialize(ID3D12Device* device)
 
 D3D12_CPU_DESCRIPTOR_HANDLE GlobalDescriptorHeap::CpuHandle(GlobalDescriptor slot, uint32_t offset) const
 {
-    assert(offset < GlobalDescriptorSlotCounts[static_cast<uint32_t>(slot)] &&
-           "Descriptor offset past the end of its slot range");
+    assert(offset < GlobalDescriptorSlotCounts[static_cast<uint32_t>(slot)] && "Descriptor offset past the end of its slot range");
     return m_allocator.GetHandle(IndexOf(slot) + offset).cpu;
 }
 
@@ -112,8 +108,8 @@ void GlobalDescriptorHeap::ReleaseMaterialTextureSlots()
     const NullView& nullView = NullViews[static_cast<uint32_t>(GlobalDescriptor::MaterialTextures)];
 
     for (uint32_t slot = 0; slot < m_allocatedMaterialTextureSlots; ++slot)
-        m_allocator.CreateNullShaderResourceView(IndexOf(GlobalDescriptor::MaterialTextures) + slot,
-                                                 nullView.format, D3D12_SRV_DIMENSION_TEXTURE2D);
+        m_allocator.CreateNullShaderResourceView(IndexOf(GlobalDescriptor::MaterialTextures) + slot, nullView.format,
+                                                 D3D12_SRV_DIMENSION_TEXTURE2D);
 
     m_allocatedMaterialTextureSlots = 0;
 }

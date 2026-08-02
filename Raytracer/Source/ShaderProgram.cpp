@@ -31,8 +31,7 @@ bool ComputeProgram::Build()
     const HRESULT hr = m_device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&rebuilt));
     if (FAILED(hr))
     {
-        spdlog::error("Compute program {} failed to build (0x{:08x}); keeping the previous PSO",
-                      m_shaderAssetPath, static_cast<uint32_t>(hr));
+        spdlog::error("Compute program {} failed to build (0x{:08x}); keeping the previous PSO", m_shaderAssetPath, static_cast<uint32_t>(hr));
         return false;
     }
 

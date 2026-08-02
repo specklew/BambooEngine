@@ -32,8 +32,7 @@ namespace ShaderReflection
     // records which of the signature's bindings were referenced so that never-used
     // root parameters can be reported once everything has been built.
     uint32_t ValidateAgainstRootSignature(const std::vector<ShaderResourceUse>& uses,
-                                          ID3D12RootSignature*                 rootSignature,
-                                          const std::string&                   shaderLabel);
+                                          ID3D12RootSignature* rootSignature, const std::string& shaderLabel);
 
     // Loads (or reuses) a compiled shader asset and validates it in one call.
     // Every PSO the engine builds should run through one of these, otherwise its

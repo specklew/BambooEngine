@@ -25,8 +25,7 @@ ID3D12GraphicsCommandList4* CommandContext::GetCommandList()
 
 void CommandContext::QueueBarrier(const D3D12_RESOURCE_BARRIER& barrier, ID3D12Resource* resource)
 {
-    if (std::find(m_pendingBarrierResources.begin(), m_pendingBarrierResources.end(), resource)
-        != m_pendingBarrierResources.end())
+    if (std::find(m_pendingBarrierResources.begin(), m_pendingBarrierResources.end(), resource) != m_pendingBarrierResources.end())
     {
         FlushBarriers();
     }
@@ -35,21 +34,17 @@ void CommandContext::QueueBarrier(const D3D12_RESOURCE_BARRIER& barrier, ID3D12R
     m_pendingBarrierResources.push_back(resource);
 }
 
-void CommandContext::Transition(Resource& resource, D3D12_RESOURCE_STATES expectedBefore,
-                                D3D12_RESOURCE_STATES after)
+void CommandContext::Transition(Resource& resource, D3D12_RESOURCE_STATES expectedBefore, D3D12_RESOURCE_STATES after)
 {
-    QueueBarrier(ResourceStateTracker::Get().BuildTransitionChecked(resource, expectedBefore, after),
-                 resource.GetUnderlyingResource().Get());
+    QueueBarrier(ResourceStateTracker::Get().BuildTransitionChecked(resource, expectedBefore, after), resource.GetUnderlyingResource().Get());
 }
 
 void CommandContext::UavBarrier(Resource& resource)
 {
-    QueueBarrier(ResourceStateTracker::Get().BuildUavBarrierChecked(resource),
-                 resource.GetUnderlyingResource().Get());
+    QueueBarrier(ResourceStateTracker::Get().BuildUavBarrierChecked(resource), resource.GetUnderlyingResource().Get());
 }
 
-void CommandContext::TransitionRaw(ID3D12Resource* resource, D3D12_RESOURCE_STATES before,
-                                   D3D12_RESOURCE_STATES after)
+void CommandContext::TransitionRaw(ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)
 {
     if (!resource)
         return;
@@ -93,8 +88,7 @@ void CommandContext::Dispatch(uint32_t threadGroupsX, uint32_t threadGroupsY, ui
     m_commandList->Dispatch(threadGroupsX, threadGroupsY, threadGroupsZ);
 }
 
-void CommandContext::DispatchIndirect(ID3D12CommandSignature* commandSignature, ID3D12Resource* argumentBuffer,
-                                      uint64_t argumentBufferOffset)
+void CommandContext::DispatchIndirect(ID3D12CommandSignature* commandSignature, ID3D12Resource* argumentBuffer, uint64_t argumentBufferOffset)
 {
     FlushBarriers();
     m_commandList->ExecuteIndirect(commandSignature, 1, argumentBuffer, argumentBufferOffset, nullptr, 0);
@@ -106,8 +100,7 @@ void CommandContext::DispatchRays(const D3D12_DISPATCH_RAYS_DESC& desc)
     m_commandList->DispatchRays(&desc);
 }
 
-void CommandContext::DrawIndexedInstanced(uint32_t indexCount, uint32_t instanceCount, uint32_t startIndex,
-                                          int32_t baseVertex, uint32_t startInstance)
+void CommandContext::DrawIndexedInstanced(uint32_t indexCount, uint32_t instanceCount, uint32_t startIndex, int32_t baseVertex, uint32_t startInstance)
 {
     FlushBarriers();
     m_commandList->DrawIndexedInstanced(indexCount, instanceCount, startIndex, baseVertex, startInstance);
@@ -119,8 +112,7 @@ void CommandContext::CopyResource(ID3D12Resource* destination, ID3D12Resource* s
     m_commandList->CopyResource(destination, source);
 }
 
-void CommandContext::CopyTextureRegion(const D3D12_TEXTURE_COPY_LOCATION& destination,
-                                       const D3D12_TEXTURE_COPY_LOCATION& source)
+void CommandContext::CopyTextureRegion(const D3D12_TEXTURE_COPY_LOCATION& destination, const D3D12_TEXTURE_COPY_LOCATION& source)
 {
     FlushBarriers();
     m_commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);

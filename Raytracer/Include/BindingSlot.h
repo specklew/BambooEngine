@@ -99,8 +99,8 @@ constexpr BindingSlot TableEntry(const char* name, BindingKind kind, uint32_t sh
 
 // Table entry addressed by raw offset — a pass that owns a private descriptor
 // heap, where offsets are heap-start-relative and mean nothing globally.
-constexpr BindingSlot TableEntryAt(const char* name, BindingKind kind, uint32_t shaderRegister,
-                                   uint32_t heapOffset, uint32_t registerCount = 1, uint32_t tableIndex = 0)
+constexpr BindingSlot TableEntryAt(const char* name, BindingKind kind, uint32_t shaderRegister, uint32_t heapOffset,
+                                   uint32_t registerCount = 1, uint32_t tableIndex = 0)
 {
     BindingSlot slot;
     slot.name           = name;

@@ -174,8 +174,8 @@ bool ShaderReflection::ReflectLibraryUses(IDxcBlob* reflectionBlob, std::vector<
 }
 
 uint32_t ShaderReflection::ValidateAgainstRootSignature(const std::vector<ShaderResourceUse>& uses,
-                                                        ID3D12RootSignature*                 rootSignature,
-                                                        const std::string&                   shaderLabel)
+                                                        ID3D12RootSignature* rootSignature,
+                                                        const std::string& shaderLabel)
 {
     auto&                                    library = RootSignatureLibrary::Get();
     const std::vector<RootSignatureBinding>* layout  = library.FindLayout(rootSignature);

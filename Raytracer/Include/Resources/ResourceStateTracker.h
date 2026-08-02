@@ -23,8 +23,7 @@ public:
     // either a tracker bug or a wrong hardcoded state — both findings, reported once
     // per (resource, before, after) site. CommandContext (L3) batches the returned
     // barriers and submits them together ahead of the work that needs them.
-    D3D12_RESOURCE_BARRIER BuildTransitionChecked(Resource& resource,
-                                                  D3D12_RESOURCE_STATES expectedBefore,
+    D3D12_RESOURCE_BARRIER BuildTransitionChecked(Resource& resource, D3D12_RESOURCE_STATES expectedBefore,
                                                   D3D12_RESOURCE_STATES after);
 
     // Builds the UAV barrier; warns when the tracked state is not (promotable to)

@@ -33,8 +33,7 @@ public:
     // Keyed by (root signature, shader path): the same shader under two root
     // signatures is two PSOs. The cache holds a reference to the root signature so
     // a program outliving its creator pass can still be rebuilt.
-    ComputeProgram* GetOrCreateCompute(ID3D12Device* device, ID3D12RootSignature* rootSignature,
-                                       const char* shaderAssetPath, const wchar_t* debugName);
+    ComputeProgram* GetOrCreateCompute(ID3D12Device* device, ID3D12RootSignature* rootSignature, const char* shaderAssetPath, const wchar_t* debugName);
 
     // Shader reload: recompilation already happened in ResourceManager, so this
     // just rebuilds every PSO from the fresh bytecode. The GPU must be idle.

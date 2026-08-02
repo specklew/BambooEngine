@@ -51,14 +51,11 @@ public:
 
     // Work — every one of these flushes pending barriers first.
     void Dispatch(uint32_t threadGroupsX, uint32_t threadGroupsY, uint32_t threadGroupsZ);
-    void DispatchIndirect(ID3D12CommandSignature* commandSignature, ID3D12Resource* argumentBuffer,
-                          uint64_t argumentBufferOffset = 0);
+    void DispatchIndirect(ID3D12CommandSignature* commandSignature, ID3D12Resource* argumentBuffer, uint64_t argumentBufferOffset = 0);
     void DispatchRays(const D3D12_DISPATCH_RAYS_DESC& desc);
-    void DrawIndexedInstanced(uint32_t indexCount, uint32_t instanceCount, uint32_t startIndex,
-                              int32_t baseVertex, uint32_t startInstance);
+    void DrawIndexedInstanced(uint32_t indexCount, uint32_t instanceCount, uint32_t startIndex, int32_t baseVertex, uint32_t startInstance);
     void CopyResource(ID3D12Resource* destination, ID3D12Resource* source);
-    void CopyTextureRegion(const D3D12_TEXTURE_COPY_LOCATION& destination,
-                           const D3D12_TEXTURE_COPY_LOCATION& source);
+    void CopyTextureRegion(const D3D12_TEXTURE_COPY_LOCATION& destination, const D3D12_TEXTURE_COPY_LOCATION& source);
 
     void Close();
 

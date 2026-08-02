@@ -59,12 +59,9 @@ public:
     [[nodiscard]] ID3D12RootSignature* Get() const { return m_signature.Get(); }
     explicit operator bool() const { return m_signature != nullptr; }
 
-    void SetTable(ID3D12GraphicsCommandList* commandList, uint32_t tableIndex,
-                  D3D12_GPU_DESCRIPTOR_HANDLE heapStart) const;
-    void Set(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot,
-             D3D12_GPU_VIRTUAL_ADDRESS address) const;
-    void SetConstants(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot, const void* values,
-                      uint32_t numValues) const;
+    void SetTable(ID3D12GraphicsCommandList* commandList, uint32_t tableIndex, D3D12_GPU_DESCRIPTOR_HANDLE heapStart) const;
+    void Set(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot, D3D12_GPU_VIRTUAL_ADDRESS address) const;
+    void SetConstants(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot, const void* values, uint32_t numValues) const;
 
 private:
     friend class RootSignatureBuilder;
@@ -133,10 +130,8 @@ public:
     // usesFrameLayout marks a signature built on FrameBindingLayout: its frame
     // registers are present whether the pass reads them or not, so the
     // unused-binding report skips them there (and only there).
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> Create(ID3D12Device*                    device,
-                                                       const D3D12_ROOT_SIGNATURE_DESC& desc,
-                                                       const wchar_t*                   debugName,
-                                                       bool usesFrameLayout = false);
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> Create(ID3D12Device* device, const D3D12_ROOT_SIGNATURE_DESC& desc,
+                                                       const wchar_t* debugName, bool usesFrameLayout = false);
 
     // Null for a signature created outside the library.
     [[nodiscard]] const std::vector<RootSignatureBinding>* FindLayout(ID3D12RootSignature* signature) const;

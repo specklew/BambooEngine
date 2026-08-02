@@ -38,8 +38,7 @@ bool ResourceStateTracker::ReportOnce(const std::string& siteKey)
     return m_reportedSites.insert(siteKey).second;
 }
 
-D3D12_RESOURCE_BARRIER ResourceStateTracker::BuildTransitionChecked(Resource& resource,
-                                                                    D3D12_RESOURCE_STATES expectedBefore,
+D3D12_RESOURCE_BARRIER ResourceStateTracker::BuildTransitionChecked(Resource& resource, D3D12_RESOURCE_STATES expectedBefore,
                                                                     D3D12_RESOURCE_STATES after)
 {
     ResourceState& tracked = resource.GetTrackedState();
@@ -88,8 +87,7 @@ D3D12_RESOURCE_BARRIER ResourceStateTracker::BuildTransitionChecked(Resource& re
         const std::string siteKey = NarrowName(resource) + "|untracked";
         if (ReportOnce(siteKey))
         {
-            spdlog::warn("[StateTracker] transition on untracked (non-DEFAULT-heap) resource {}",
-                         NarrowName(resource));
+            spdlog::warn("[StateTracker] transition on untracked (non-DEFAULT-heap) resource {}", NarrowName(resource));
         }
     }
 
@@ -103,8 +101,7 @@ D3D12_RESOURCE_BARRIER ResourceStateTracker::BuildUavBarrierChecked(Resource& re
 
     if (tracked.tracked)
     {
-        if (tracked.state == D3D12_RESOURCE_STATE_COMMON &&
-            tracked.CanPromoteFromCommon(D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
+        if (tracked.state == D3D12_RESOURCE_STATE_COMMON && tracked.CanPromoteFromCommon(D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
         {
             // The UAV write that this barrier flushes promoted the resource.
             tracked.state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;

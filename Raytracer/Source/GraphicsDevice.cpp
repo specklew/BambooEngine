@@ -289,8 +289,7 @@ ComPtr<ID3D12Device5> GraphicsDevice::GetDeviceForAdapter(ComPtr<IDXGIAdapter1> 
 	ComPtr<ID3D12InfoQueue1> infoQueue1;
 	if (SUCCEEDED(m_infoQueue.As(&infoQueue1)))
 	{
-		infoQueue1->RegisterMessageCallback(&D3D12DebugMessageCallback,
-			D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &m_debugMessageCallbackCookie);
+		infoQueue1->RegisterMessageCallback(&D3D12DebugMessageCallback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &m_debugMessageCallbackCookie);
 	}
 	else
 	{

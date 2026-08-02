@@ -92,8 +92,7 @@ public:
     // not-yet-converted raster draws sample). Keeps its producers alive.
     void MarkExternallyRead(GraphResourceHandle resource);
 
-    void AddPass(const char* name,
-                 const std::function<void(RenderGraphPassBuilder&)>& declare,
+    void AddPass(const char* name, const std::function<void(RenderGraphPassBuilder&)>& declare,
                  std::function<void()> execute);
 
     // Culls, then synthesizes the barrier plan. Advances the phase-0 tracker, so

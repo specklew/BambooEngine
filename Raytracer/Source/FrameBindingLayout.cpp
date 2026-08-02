@@ -16,8 +16,7 @@ const std::vector<BindingSlot>& FrameBindingLayout::Slots()
     return slots;
 }
 
-bool FrameBindingLayout::IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister,
-                                         uint32_t registerSpace)
+bool FrameBindingLayout::IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister, uint32_t registerSpace)
 {
     for (const BindingSlot& slot : Slots())
     {
@@ -34,22 +33,17 @@ bool FrameBindingLayout::IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint3
     return false;
 }
 
-void FrameBindingLayout::Bind(ID3D12GraphicsCommandList* commandList, const RootSignature& rootSignature,
-                              Scene& scene, const PassConstants& passConstants)
+void FrameBindingLayout::Bind(ID3D12GraphicsCommandList* commandList, const RootSignature& rootSignature, Scene& scene,
+                              const PassConstants& passConstants)
 {
     ID3D12DescriptorHeap* heaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
     commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     rootSignature.SetTable(commandList, 0, GlobalDescriptorHeap::Get().GpuStart());
 
-    rootSignature.Set(commandList, kGeometryInfo,
-                      scene.GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    rootSignature.Set(commandList, kInstanceInfo,
-                      scene.GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    rootSignature.Set(commandList, kLightData,
-                      scene.GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    rootSignature.Set(commandList, kEmissiveTriangles,
-                      scene.GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    rootSignature.Set(commandList, kLightPool,
-                      scene.GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    rootSignature.Set(commandList, kGeometryInfo, scene.GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    rootSignature.Set(commandList, kInstanceInfo, scene.GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    rootSignature.Set(commandList, kLightData, scene.GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    rootSignature.Set(commandList, kEmissiveTriangles, scene.GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    rootSignature.Set(commandList, kLightPool, scene.GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     rootSignature.Set(commandList, kPassConstants, passConstants.GetGpuVirtualAddress());
 }
