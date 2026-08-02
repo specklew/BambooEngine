@@ -20,55 +20,25 @@ namespace
         }
     }
 
-    D3D12_DESCRIPTOR_RANGE_TYPE RangeTypeForRootParameter(D3D12_ROOT_PARAMETER_TYPE type)
+    char RegisterPrefix(BindingKind kind)
     {
-        switch (type)
+        switch (kind)
         {
-        case D3D12_ROOT_PARAMETER_TYPE_SRV: return D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        case D3D12_ROOT_PARAMETER_TYPE_UAV: return D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-        default:                            return D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+        case BindingKind::Uav:     return 'u';
+        case BindingKind::Srv:     return 't';
+        case BindingKind::Sampler: return 's';
+        default:                   return 'b';
         }
     }
 
-    void FlattenRootParameters(const D3D12_ROOT_SIGNATURE_DESC& desc, std::vector<RootSignatureBinding>& outBindings)
+    std::string RegisterName(const BindingSlot& slot)
     {
-        for (uint32_t parameterIndex = 0; parameterIndex < desc.NumParameters; ++parameterIndex)
-        {
-            const D3D12_ROOT_PARAMETER& parameter = desc.pParameters[parameterIndex];
-
-            if (parameter.ParameterType == D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE)
-            {
-                const auto& table = parameter.DescriptorTable;
-                for (uint32_t rangeIndex = 0; rangeIndex < table.NumDescriptorRanges; ++rangeIndex)
-                {
-                    const D3D12_DESCRIPTOR_RANGE& range = table.pDescriptorRanges[rangeIndex];
-                    outBindings.push_back({range.RangeType, range.BaseShaderRegister, range.RegisterSpace,
-                                           range.NumDescriptors == UINT_MAX
-                                               ? RootSignatureLibrary::kUnboundedRegisterCount
-                                               : range.NumDescriptors,
-                                           parameterIndex, true});
-                }
-                continue;
-            }
-
-            // Root constants occupy a b-register exactly like a root CBV does.
-            const uint32_t shaderRegister = parameter.ParameterType == D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS
-                                                ? parameter.Constants.ShaderRegister
-                                                : parameter.Descriptor.ShaderRegister;
-            const uint32_t registerSpace  = parameter.ParameterType == D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS
-                                                ? parameter.Constants.RegisterSpace
-                                                : parameter.Descriptor.RegisterSpace;
-
-            outBindings.push_back({RangeTypeForRootParameter(parameter.ParameterType), shaderRegister, registerSpace, 1,
-                                   parameterIndex, false});
-        }
-
-        for (uint32_t samplerIndex = 0; samplerIndex < desc.NumStaticSamplers; ++samplerIndex)
-        {
-            const D3D12_STATIC_SAMPLER_DESC& sampler = desc.pStaticSamplers[samplerIndex];
-            outBindings.push_back({D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, sampler.ShaderRegister, sampler.RegisterSpace,
-                                   1, UINT_MAX, false});
-        }
+        const std::string space = slot.registerSpace ? fmt::format(",space{}", slot.registerSpace) : std::string();
+        if (slot.registerCount == kUnboundedRegisterCount)
+            return fmt::format("{}{}{}[]", RegisterPrefix(slot.kind), slot.shaderRegister, space);
+        if (slot.registerCount > 1)
+            return fmt::format("{}{}{}[{}]", RegisterPrefix(slot.kind), slot.shaderRegister, space, slot.registerCount);
+        return fmt::format("{}{}{}", RegisterPrefix(slot.kind), slot.shaderRegister, space);
     }
 }
 
@@ -98,21 +68,22 @@ ComPtr<ID3D12RootSignature> RootSignatureLibrary::Create(ID3D12Device* device, c
     if (debugName)
         signature->SetName(debugName);
 
+    // The slot table arrives separately via AttachLayout: a signature built by
+    // the builder gets one, the three empty DXR local signatures legitimately
+    // have none to give.
     Entry entry;
     entry.signature       = signature;
     entry.usesFrameLayout = usesFrameLayout;
     entry.debugName       = debugName ? ConvertWcharToString(debugName) : "<unnamed>";
-    FlattenRootParameters(desc, entry.bindings);
-    entry.bindingReferenced.assign(entry.bindings.size(), false);
     m_signatures[signature.Get()] = std::move(entry);
 
     return signature;
 }
 
-const std::vector<RootSignatureBinding>* RootSignatureLibrary::FindLayout(ID3D12RootSignature* signature) const
+const RootSignatureLayout* RootSignatureLibrary::FindLayout(ID3D12RootSignature* signature) const
 {
     const auto it = m_signatures.find(signature);
-    return it == m_signatures.end() ? nullptr : &it->second.bindings;
+    return it == m_signatures.end() ? nullptr : &it->second.layout;
 }
 
 std::string RootSignatureLibrary::FindName(ID3D12RootSignature* signature) const
@@ -121,36 +92,32 @@ std::string RootSignatureLibrary::FindName(ID3D12RootSignature* signature) const
     return it == m_signatures.end() ? std::string("<unregistered>") : it->second.debugName;
 }
 
-void RootSignatureLibrary::MarkBindingReferenced(ID3D12RootSignature* signature, size_t bindingIndex)
+void RootSignatureLibrary::MarkSlotReferenced(ID3D12RootSignature* signature, size_t slotIndex)
 {
     const auto it = m_signatures.find(signature);
-    if (it != m_signatures.end() && bindingIndex < it->second.bindingReferenced.size())
-        it->second.bindingReferenced[bindingIndex] = true;
+    if (it != m_signatures.end() && slotIndex < it->second.slotReferenced.size())
+        it->second.slotReferenced[slotIndex] = true;
 }
 
-void RootSignatureLibrary::LogUnreferencedBindings() const
+void RootSignatureLibrary::LogUnreferencedSlots() const
 {
     for (const auto& [signature, entry] : m_signatures)
     {
         std::string unreferenced;
-        for (size_t index = 0; index < entry.bindings.size(); ++index)
+        const std::vector<BindingSlot>& slots = entry.layout.Slots();
+        for (size_t index = 0; index < slots.size(); ++index)
         {
-            if (entry.bindingReferenced[index])
+            if (entry.slotReferenced[index])
                 continue;
 
-            const RootSignatureBinding& binding = entry.bindings[index];
-            if (binding.type == D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER)
-                continue; // static samplers are shared boilerplate, not a per-pass declaration
+            const BindingSlot& slot = slots[index];
+            if (slot.kind == BindingKind::Sampler)
+                continue; // shared boilerplate, not a per-pass declaration
             if (entry.usesFrameLayout &&
-                FrameBindingLayout::IsFrameRegister(binding.type, binding.baseRegister, binding.registerSpace))
+                FrameBindingLayout::IsFrameRegister(RangeTypeOf(slot.kind), slot.shaderRegister, slot.registerSpace))
                 continue;
 
-            const char prefix = binding.type == D3D12_DESCRIPTOR_RANGE_TYPE_UAV   ? 'u'
-                                : binding.type == D3D12_DESCRIPTOR_RANGE_TYPE_SRV ? 't'
-                                                                                  : 'b';
-            const std::string space =
-                binding.registerSpace ? fmt::format(",space{}", binding.registerSpace) : std::string();
-            unreferenced += fmt::format(" {}{}{}", prefix, binding.baseRegister, space);
+            unreferenced += fmt::format(" {} ({})", slot.name, RegisterName(slot));
         }
 
         if (!unreferenced.empty())
@@ -158,12 +125,53 @@ void RootSignatureLibrary::LogUnreferencedBindings() const
     }
 }
 
+std::string RootSignatureLibrary::DumpRootSignatures() const
+{
+    std::string dump;
+    for (const auto& [signature, entry] : m_signatures)
+    {
+        const uint32_t cost = entry.layout.CostInDwords();
+        dump += fmt::format("  {} — {} slots, {}/{} DWORDs{}\n", entry.debugName, entry.layout.Slots().size(), cost,
+                            kMaxRootSignatureDwords, entry.layout.IsGraphics() ? ", graphics" : "");
+
+        const std::vector<BindingSlot>& slots = entry.layout.Slots();
+        for (size_t index = 0; index < slots.size(); ++index)
+        {
+            const BindingSlot& slot = slots[index];
+            const char* storage = slot.storage == BindingStorage::Table           ? "table"
+                                  : slot.storage == BindingStorage::RootConstants ? "constants"
+                                  : slot.storage == BindingStorage::StaticSampler ? "sampler"
+                                                                                  : "root";
+            dump += fmt::format("      {:<10} {:<34} {:<9} {}\n", RegisterName(slot), slot.name, storage,
+                                entry.slotReferenced[index] ? "" : "UNREFERENCED");
+        }
+    }
+    return dump;
+}
+
 const RootSignatureLayout* RootSignatureLibrary::AttachLayout(ID3D12RootSignature* signature, RootSignatureLayout&& layout)
 {
     const auto it = m_signatures.find(signature);
     assert(it != m_signatures.end() && "Layout attached to a signature the library did not create");
-    it->second.slotLayout = std::move(layout);
-    return &it->second.slotLayout;
+    it->second.layout = std::move(layout);
+    it->second.slotReferenced.assign(it->second.layout.Slots().size(), false);
+    return &it->second.layout;
+}
+
+uint32_t RootSignatureLayout::CostInDwords() const
+{
+    // One DWORD per table parameter regardless of how many slots ride in it;
+    // two per root descriptor; one per 32-bit constant. Static samplers are
+    // baked into the signature and cost no root space.
+    uint32_t dwords = m_tableCount;
+    for (const BindingSlot& slot : m_slots)
+    {
+        if (slot.storage == BindingStorage::RootConstants)
+            dwords += slot.constantCount;
+        else if (slot.storage == BindingStorage::RootDescriptor)
+            dwords += 2;
+    }
+    return dwords;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +259,10 @@ RootSignatureBuilder& RootSignatureBuilder::Add(const BindingSlot& slot)
         assert(slot.tableIndex < m_tableCount && "Table slot outside the declared table count");
         m_rootParameterIndices.push_back(slot.tableIndex);
     }
+    else if (slot.storage == BindingStorage::StaticSampler)
+    {
+        m_rootParameterIndices.push_back(UINT32_MAX); // not a root parameter
+    }
     else
     {
         m_rootParameterIndices.push_back(m_nextRootParameter++);
@@ -269,7 +281,14 @@ RootSignatureBuilder& RootSignatureBuilder::Add(const BindingSlot* slots, size_t
 
 RootSignatureBuilder& RootSignatureBuilder::WithStaticSamplers()
 {
+    if (m_staticSamplers)
+        return *this;
+
     m_staticSamplers = true;
+    // Declared as slots too, so a shader sampling through s0-s5 validates like
+    // any other binding instead of looking like an undeclared read.
+    for (const BindingSlot& sampler : FrameBindingLayout::StaticSamplerSlots())
+        Add(sampler);
     return *this;
 }
 
@@ -306,6 +325,12 @@ RootSignature RootSignatureBuilder::Build(ID3D12Device* device)
             tableRanges[slot.tableIndex].push_back(range);
             continue;
         }
+
+        // Static samplers are declared as slots so validation sees them, but the
+        // desc takes them from Renderer::GetStaticSamplers(), not from a root
+        // parameter — they have no index to fill.
+        if (slot.storage == BindingStorage::StaticSampler)
+            continue;
 
         const uint32_t parameterIndex = m_rootParameterIndices[index];
         if (slot.storage == BindingStorage::RootConstants)
@@ -352,8 +377,8 @@ RootSignature RootSignatureBuilder::Build(ID3D12Device* device)
     for (size_t index = 0; index < m_slots.size(); ++index)
     {
         const BindingSlot& slot = m_slots[index];
-        if (slot.storage == BindingStorage::Table)
-            continue; // bound by table index, never looked up by register
+        if (slot.storage == BindingStorage::Table || slot.storage == BindingStorage::StaticSampler)
+            continue; // bound by table index or not bound at all; never looked up by register
 
         assert(slot.registerSpace < RootSignatureLayout::kLookupSpaces &&
                slot.shaderRegister < RootSignatureLayout::kLookupRegisters &&
@@ -363,8 +388,21 @@ RootSignature RootSignatureBuilder::Build(ID3D12Device* device)
             static_cast<uint8_t>(m_rootParameterIndices[index]);
     }
 
+    layout.m_tableCount           = m_tableCount;
     layout.m_slots                = std::move(m_slots);
     layout.m_rootParameterIndices = std::move(m_rootParameterIndices);
+
+    // D3D12 rejects an oversized signature at serialization, but the message
+    // does not say by how much or which parameters are to blame. Say so here,
+    // where the slot table is still in hand.
+    const uint32_t cost = layout.CostInDwords();
+    if (cost > kMaxRootSignatureDwords)
+    {
+        spdlog::error("Root signature {} costs {} DWORDs, over the {} limit", layout.m_debugName, cost,
+                      kMaxRootSignatureDwords);
+        assert(false && "Root signature exceeds the 64-DWORD budget");
+    }
+
     built.m_layout = RootSignatureLibrary::Get().AttachLayout(built.m_signature.Get(), std::move(layout));
 
     return built;

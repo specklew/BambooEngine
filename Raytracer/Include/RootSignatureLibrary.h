@@ -5,21 +5,11 @@
 
 #include "BindingSlot.h"
 
-// A single (type, register range) the signature makes available to a shader.
-// A root descriptor and a one-entry table look identical here on purpose: what
-// matters for validation is which registers a shader may legally reference.
-struct RootSignatureBinding
-{
-    D3D12_DESCRIPTOR_RANGE_TYPE type          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    uint32_t                    baseRegister  = 0;
-    uint32_t                    registerSpace = 0;
-    uint32_t                    registerCount = 1;
-    uint32_t                    rootParameterIndex = 0;
-    bool                        isDescriptorTable  = false;
-};
-
-// The slot table a signature was built from, plus where each slot landed. Owned
-// by RootSignatureLibrary and pointer-stable, so a RootSignature can hold it.
+// The slot table a signature was built from, plus where each slot landed. This
+// is the signature's only description: binding, reflection validation and the
+// unused-slot report all read it, so a name stated once is the name all three
+// use (ADR 0019 P3). Owned by RootSignatureLibrary and pointer-stable, so a
+// RootSignature can hold it.
 class RootSignatureLayout
 {
 public:
@@ -28,6 +18,11 @@ public:
     [[nodiscard]] uint32_t RootParameterOf(const BindingSlot& slot) const;
 
     [[nodiscard]] bool IsGraphics() const { return m_graphics; }
+    [[nodiscard]] const std::vector<BindingSlot>& Slots() const { return m_slots; }
+
+    // DWORDs the signature costs against D3D12's 64-DWORD root budget: a table
+    // is 1, a root descriptor 2, root constants one per value.
+    [[nodiscard]] uint32_t CostInDwords() const;
 
 private:
     friend class RootSignatureBuilder;
@@ -44,7 +39,8 @@ private:
     std::vector<BindingSlot> m_slots;
     std::vector<uint32_t>    m_rootParameterIndices; // parallel to m_slots
     std::string              m_debugName;
-    bool                     m_graphics = false;
+    uint32_t                 m_tableCount = 0;
+    bool                     m_graphics   = false;
     uint8_t                  m_lookup[kLookupSpaces][kLookupKinds][kLookupRegisters] = {};
 };
 
@@ -116,10 +112,12 @@ private:
 // offers no way to read a layout back off an ID3D12RootSignature and phase 4
 // needs it to check shader reflection against what the signature really provides.
 // Creation is where the layout is still known, so it is recorded there.
+// D3D12's hard limit on root signature size.
+inline constexpr uint32_t kMaxRootSignatureDwords = 64;
+
 class RootSignatureLibrary
 {
 public:
-    static constexpr uint32_t kUnboundedRegisterCount = ~0u;
 
     static RootSignatureLibrary& Get();
 
@@ -134,18 +132,22 @@ public:
                                                        const wchar_t* debugName, bool usesFrameLayout = false);
 
     // Null for a signature created outside the library.
-    [[nodiscard]] const std::vector<RootSignatureBinding>* FindLayout(ID3D12RootSignature* signature) const;
-    [[nodiscard]] std::string                              FindName(ID3D12RootSignature* signature) const;
+    [[nodiscard]] const RootSignatureLayout* FindLayout(ID3D12RootSignature* signature) const;
+    [[nodiscard]] std::string                FindName(ID3D12RootSignature* signature) const;
 
-    // Reflection validation reports which bindings a shader referenced. One
-    // signature usually serves several kernels, so a binding counts as used once
+    // Reflection validation reports which slots a shader referenced. One
+    // signature usually serves several kernels, so a slot counts as used once
     // any of them touches it — asking per shader would flag every kernel's share
     // of a shared signature as waste.
-    void MarkBindingReferenced(ID3D12RootSignature* signature, size_t bindingIndex);
+    void MarkSlotReferenced(ID3D12RootSignature* signature, size_t slotIndex);
 
-    // Bindings no shader ever referenced: wasted root slots, and the list phase 4
-    // collapses. Call once everything has been built.
-    void LogUnreferencedBindings() const;
+    // Slots no shader ever referenced: wasted root parameters, and the list
+    // phase 4 collapses. Call once everything has been built.
+    void LogUnreferencedSlots() const;
+
+    // Every signature with its slots, root parameter cost and reference state.
+    // Goes into the rdg.dump one-shot next to the graph and barrier dumps.
+    [[nodiscard]] std::string DumpRootSignatures() const;
 
 private:
     friend class RootSignatureBuilder;
@@ -159,11 +161,10 @@ private:
     {
         // Holds a reference so the map key can never be a recycled address.
         Microsoft::WRL::ComPtr<ID3D12RootSignature> signature;
-        std::vector<RootSignatureBinding>           bindings;
-        std::vector<bool>                           bindingReferenced;
+        RootSignatureLayout                         layout;
+        std::vector<bool>                           slotReferenced; // parallel to layout.Slots()
         std::string                                 debugName;
         bool                                        usesFrameLayout = false;
-        RootSignatureLayout                         slotLayout;
     };
 
     std::unordered_map<ID3D12RootSignature*, Entry> m_signatures;

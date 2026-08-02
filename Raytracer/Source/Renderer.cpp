@@ -113,25 +113,32 @@ constexpr BindingSlot kRasterCamera =
 	TableEntry("CameraParams", BindingKind::Cbv, RASTER_REG_CAMERA_CB, GlobalDescriptor::CameraMatrices);
 constexpr BindingSlot kRasterTextures = TableEntry("gTextures", BindingKind::Srv, RASTER_REG_TEXTURES,
                                                    GlobalDescriptor::MaterialTextures, FRAME_MAX_TEXTURES);
-// occupancy, packed irradiance, vpl count: three contiguous registers and slots
-constexpr BindingSlot kRasterVoxelTextures = TableEntry("gVoxelOccupancy", BindingKind::Uav,
-                                                        RASTER_REG_VOXEL_OCCUPANCY,
-                                                        GlobalDescriptor::VoxelOccupancy, /*registerCount*/ 3);
+// One entry per register rather than contiguous runs: each carries its own name
+// for reflection validation, and each names its own heap slot instead of relying
+// on the enum happening to be adjacent.
+constexpr BindingSlot kRasterVoxelOccupancy =
+	TableEntry("gVoxelOccupancy", BindingKind::Uav, RASTER_REG_VOXEL_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
+constexpr BindingSlot kRasterVoxelIrradiance =
+	TableEntry("gVoxelIrradiance", BindingKind::Uav, RASTER_REG_VOXEL_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
+constexpr BindingSlot kRasterVoxelVplCount =
+	TableEntry("gVoxelVplCount", BindingKind::Uav, RASTER_REG_VOXEL_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
 constexpr BindingSlot kRasterShadingPoints = TableEntry("gShadingPoints", BindingKind::Uav, RASTER_REG_SHADING_POINTS,
                                                         GlobalDescriptor::ShadingPoints); // debug overlay
 // superpixel index + representative center (debug views 15/16)
-constexpr BindingSlot kRasterSuperpixel = TableEntry("gSuperpixelIndex", BindingKind::Uav,
-                                                     RASTER_REG_SUPERPIXEL_INDEX,
-                                                     GlobalDescriptor::SuperpixelIndex, /*registerCount*/ 2);
+constexpr BindingSlot kRasterSuperpixelIndex =
+	TableEntry("gSuperpixelIndex", BindingKind::Uav, RASTER_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
+constexpr BindingSlot kRasterSuperpixelCenter =
+	TableEntry("gSuperpixelCenter", BindingKind::Uav, RASTER_REG_SUPERPIXEL_CENTER, GlobalDescriptor::SuperpixelCenter);
 
 constexpr BindingSlot kRasterModelConstants    = RootCbv("ModelTransforms", RASTER_REG_MODEL_CB);
 constexpr BindingSlot kRasterMaterialConstants = RootCbv("Material", RASTER_REG_MATERIAL_CB);
 constexpr BindingSlot kRasterPassConstants     = RootCbv("PassConstants", FRAME_REG_PASS_CONSTANTS);
 constexpr BindingSlot kRasterVoxelGridConstants = RootCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
 
-constexpr BindingSlot kRasterSlots[] = {kRasterCamera,          kRasterTextures,        kRasterVoxelTextures,
-                                        kRasterShadingPoints,   kRasterSuperpixel,      kRasterModelConstants,
-                                        kRasterMaterialConstants, kRasterPassConstants, kRasterVoxelGridConstants};
+constexpr BindingSlot kRasterSlots[] = {
+	kRasterCamera,           kRasterTextures,          kRasterVoxelOccupancy,  kRasterVoxelIrradiance,
+	kRasterVoxelVplCount,    kRasterShadingPoints,     kRasterSuperpixelIndex, kRasterSuperpixelCenter,
+	kRasterModelConstants,   kRasterMaterialConstants, kRasterPassConstants,   kRasterVoxelGridConstants};
 } // namespace
 // Off by default: two timestamps per node plus a resolve is real per-frame cost,
 // and benchmark runs must measure the renderer, not the instrumentation.
@@ -1929,7 +1936,8 @@ void Renderer::DumpRenderGraphIfRequested()
 
 	// Deferred to here rather than to end-of-init: techniques build their root
 	// signatures on first selection, so coverage is only complete once a frame ran.
-	RootSignatureLibrary::Get().LogUnreferencedBindings();
+	spdlog::info("[RootSignature] layouts:\n{}", RootSignatureLibrary::Get().DumpRootSignatures());
+	RootSignatureLibrary::Get().LogUnreferencedSlots();
 
 	g_dumpRenderGraph.Set(0); // one-shot: a per-frame dump is unreadable
 }

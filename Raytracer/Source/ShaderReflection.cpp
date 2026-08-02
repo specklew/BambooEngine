@@ -89,17 +89,28 @@ namespace
         return buffer;
     }
 
-    bool CoversRegister(const RootSignatureBinding& binding, const ShaderResourceUse& use)
+    D3D12_DESCRIPTOR_RANGE_TYPE RangeTypeForBindingKind(BindingKind kind)
     {
-        if (binding.type != use.type || binding.registerSpace != use.registerSpace)
+        switch (kind)
+        {
+        case BindingKind::Uav:     return D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+        case BindingKind::Srv:     return D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        case BindingKind::Sampler: return D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+        default:                   return D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+        }
+    }
+
+    bool CoversRegister(const BindingSlot& slot, const ShaderResourceUse& use)
+    {
+        if (RangeTypeForBindingKind(slot.kind) != use.type || slot.registerSpace != use.registerSpace)
             return false;
-        if (use.baseRegister < binding.baseRegister)
+        if (use.baseRegister < slot.shaderRegister)
             return false;
-        if (binding.registerCount == RootSignatureLibrary::kUnboundedRegisterCount)
+        if (slot.registerCount == kUnboundedRegisterCount)
             return true;
         if (use.registerCount == ShaderReflection::kUnboundedRegisterCount)
             return false; // an unbounded array needs an unbounded range
-        return use.baseRegister + use.registerCount <= binding.baseRegister + binding.registerCount;
+        return use.baseRegister + use.registerCount <= slot.shaderRegister + slot.registerCount;
     }
 
     char RegisterPrefix(D3D12_DESCRIPTOR_RANGE_TYPE type)
@@ -111,6 +122,12 @@ namespace
         case D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER: return 's';
         default:                                  return 'b';
         }
+    }
+
+    std::string RegisterNameOf(const ShaderResourceUse& use)
+    {
+        const std::string space = use.registerSpace ? fmt::format(",space{}", use.registerSpace) : std::string();
+        return fmt::format("{}{}{}", RegisterPrefix(use.type), use.baseRegister, space);
     }
 }
 
@@ -177,36 +194,51 @@ uint32_t ShaderReflection::ValidateAgainstRootSignature(const std::vector<Shader
                                                         ID3D12RootSignature* rootSignature,
                                                         const std::string& shaderLabel)
 {
-    auto&                                    library = RootSignatureLibrary::Get();
-    const std::vector<RootSignatureBinding>* layout  = library.FindLayout(rootSignature);
+    auto&                      library = RootSignatureLibrary::Get();
+    const RootSignatureLayout* layout  = library.FindLayout(rootSignature);
     if (!layout)
         return 0;
 
-    uint32_t uncovered = 0;
+    uint32_t problems = 0;
     for (const ShaderResourceUse& use : uses)
     {
+        const std::vector<BindingSlot>& slots = layout->Slots();
+
         bool covered = false;
-        for (size_t index = 0; index < layout->size(); ++index)
+        for (size_t index = 0; index < slots.size(); ++index)
         {
-            if (!CoversRegister((*layout)[index], use))
+            if (!CoversRegister(slots[index], use))
                 continue;
 
-            library.MarkBindingReferenced(rootSignature, index);
+            library.MarkSlotReferenced(rootSignature, index);
             covered = true;
+
+            // Registers match. Names disagreeing means the two sides think this
+            // register holds different resources — the signature still binds
+            // something, so nothing crashes and the image is merely wrong. Only
+            // the names catch it (ADR 0019 P3).
+            //
+            // Only for single-register slots: a range covering several registers
+            // carries the name of its first, and the rest are named differently
+            // on purpose (a bindless array, or a run of related UAVs).
+            if (slots[index].registerCount == 1 && slots[index].name != use.name)
+            {
+                ++problems;
+                spdlog::error("[ShaderBindings] {}: {} is '{}' in the shader but '{}' in {}", shaderLabel,
+                              RegisterNameOf(use), use.name, slots[index].name, library.FindName(rootSignature));
+            }
             break;
         }
 
         if (covered)
             continue;
 
-        ++uncovered;
-        spdlog::error("[ShaderBindings] {}: reads {} at {}{}{} which {} does not provide", shaderLabel, use.name,
-                      RegisterPrefix(use.type), use.baseRegister,
-                      use.registerSpace ? fmt::format(",space{}", use.registerSpace) : std::string(),
-                      library.FindName(rootSignature));
+        ++problems;
+        spdlog::error("[ShaderBindings] {}: reads {} at {} which {} does not provide", shaderLabel, use.name,
+                      RegisterNameOf(use), library.FindName(rootSignature));
     }
 
-    return uncovered;
+    return problems;
 }
 
 void ShaderReflection::ValidateShaderAsset(const char* shaderAssetPath, ID3D12RootSignature* rootSignature)

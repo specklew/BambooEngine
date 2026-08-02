@@ -27,11 +27,13 @@ namespace
 // Three signatures: the per-frame accumulator clear, the bake-time clear, and
 // the bake draw itself. All three address this pass's private heap.
 constexpr BindingSlot kFrameClearConstants = RootConstants("ClearCB", VOXEL_FRAME_CLEAR_REG_CB, 4);
-// Offset 0: DispatchFrameClear hands SetTable a pointer already advanced past
-// the occupancy slot, so the range is relative to that, not to the heap start.
-constexpr BindingSlot kFrameClearTargets =
-    TableEntryAt("gIrradiance", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_IRRADIANCE, 0, /*registerCount*/ 2);
-constexpr BindingSlot kFrameClearSlots[] = {kFrameClearConstants, kFrameClearTargets};
+// Offsets are relative to the pointer DispatchFrameClear hands SetTable, which
+// is already advanced past the occupancy slot — not to the heap start.
+constexpr BindingSlot kFrameClearIrradiance =
+    TableEntryAt("gIrradiance", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_IRRADIANCE, 0);
+constexpr BindingSlot kFrameClearVplCount =
+    TableEntryAt("gVplCount", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_VPL_COUNT, 1);
+constexpr BindingSlot kFrameClearSlots[] = {kFrameClearConstants, kFrameClearIrradiance, kFrameClearVplCount};
 
 constexpr BindingSlot kBakeClearConstants = RootConstants("ClearCB", VOXEL_BAKE_CLEAR_REG_CB, 4);
 constexpr BindingSlot kBakeClearOccupancy =

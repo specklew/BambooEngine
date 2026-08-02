@@ -13,11 +13,20 @@ using Microsoft::WRL::ComPtr;
 
 namespace
 {
-    // All seven SLIC buffers are consecutive UAVs in this pass's private heap, so
-    // one range covers them; the kernels differ only in which they touch.
+    // The seven SLIC buffers are consecutive UAVs in this pass's private heap.
+    // Declared one per register rather than as a single seven-wide range so each
+    // carries its own name for reflection validation; the kernels differ only in
+    // which they touch.
     constexpr BindingSlot kSuperpixelConstants = RootConstants("SuperpixelCB", SUPERPIXEL_REG_CB, 12);
-    constexpr BindingSlot kSuperpixelTable =
-        TableEntryAt("u_input", BindingKind::Uav, SUPERPIXEL_REG_INPUT, 0, /*registerCount*/ 7);
+    constexpr BindingSlot kSuperpixelSlots[] = {
+        TableEntryAt("u_input", BindingKind::Uav, SUPERPIXEL_REG_INPUT, 0),
+        TableEntryAt("u_center", BindingKind::Uav, SUPERPIXEL_REG_CENTER, 1),
+        TableEntryAt("u_index", BindingKind::Uav, SUPERPIXEL_REG_INDEX, 2),
+        TableEntryAt("u_spixel_counter", BindingKind::Uav, SUPERPIXEL_REG_SPIXEL_COUNTER, 3),
+        TableEntryAt("u_spixel_gathered", BindingKind::Uav, SUPERPIXEL_REG_SPIXEL_GATHERED, 4),
+        TableEntryAt("u_fuzzy_weight", BindingKind::Uav, SUPERPIXEL_REG_FUZZY_WEIGHT, 5),
+        TableEntryAt("u_fuzzy_index", BindingKind::Uav, SUPERPIXEL_REG_FUZZY_INDEX, 6),
+    };
 
     constexpr uint32_t SP = Constants::Graphics::SUPERPIXEL_SIZE;
 
@@ -60,7 +69,7 @@ void SuperpixelBuildPass::CreateRootSignature()
 {
     m_rootSig = RootSignatureBuilder(L"SuperpixelBuild RootSig", /*tableCount*/ 1)
                     .Add(kSuperpixelConstants)
-                    .Add(kSuperpixelTable)
+                    .Add(kSuperpixelSlots)
                     .Build(m_device.Get());
 }
 

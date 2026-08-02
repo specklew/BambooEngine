@@ -20,7 +20,8 @@ enum class BindingStorage : uint8_t
 {
     RootDescriptor, // a raw GPU virtual address, 2 DWORDs of root signature
     RootConstants,  // values inline in the command list, 1 DWORD each
-    Table           // an offset into whichever descriptor heap is bound
+    Table,          // an offset into whichever descriptor heap is bound
+    StaticSampler   // baked into the signature; no root parameter, no bind call
 };
 
 inline constexpr uint32_t kUnboundedRegisterCount = ~0u;
@@ -68,6 +69,18 @@ constexpr BindingSlot RootUav(const char* name, uint32_t shaderRegister, uint32_
     slot.kind           = BindingKind::Uav;
     slot.shaderRegister = shaderRegister;
     slot.registerSpace  = registerSpace;
+    return slot;
+}
+
+// A static sampler: part of the signature, but not a root parameter, so it costs
+// no DWORDs and is never bound at draw time.
+constexpr BindingSlot Sampler(const char* name, uint32_t shaderRegister)
+{
+    BindingSlot slot;
+    slot.name           = name;
+    slot.kind           = BindingKind::Sampler;
+    slot.shaderRegister = shaderRegister;
+    slot.storage        = BindingStorage::StaticSampler;
     return slot;
 }
 

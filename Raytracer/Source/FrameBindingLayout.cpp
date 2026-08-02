@@ -16,6 +16,17 @@ const std::vector<BindingSlot>& FrameBindingLayout::Slots()
     return slots;
 }
 
+const std::vector<BindingSlot>& FrameBindingLayout::StaticSamplerSlots()
+{
+    // Registers are literal here because the shaders declare them literally; the
+    // set is fixed by Renderer::GetStaticSamplers() and has never moved.
+    static const std::vector<BindingSlot> samplers = {
+        Sampler("gsamPointWrap", 0),        Sampler("gsamPointClamp", 1),
+        Sampler("gsamLinearWrap", 2),       Sampler("gsamLinearClamp", 3),
+        Sampler("gsamAnisotropicWrap", 4),  Sampler("gsamAnisotropicClamp", 5)};
+    return samplers;
+}
+
 bool FrameBindingLayout::IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister, uint32_t registerSpace)
 {
     for (const BindingSlot& slot : Slots())

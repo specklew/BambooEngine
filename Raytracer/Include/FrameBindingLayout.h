@@ -41,6 +41,12 @@ namespace FrameBindingLayout
     // per-frame bind walks it.
     const std::vector<BindingSlot>& Slots();
 
+    // The six static samplers, named as the shaders declare them. They are part
+    // of the signature even though they are not root parameters, so validation
+    // needs them or every shader that samples looks like it reads an undeclared
+    // register. Added by RootSignatureBuilder::WithStaticSamplers().
+    const std::vector<BindingSlot>& StaticSamplerSlots();
+
     // Whether a register belongs to the frame layout. Frame bindings are present
     // in every signature whether the pass reads them or not, so the unused-binding
     // report has to skip them or it reports nothing else.
