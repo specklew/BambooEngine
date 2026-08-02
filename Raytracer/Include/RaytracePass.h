@@ -1,6 +1,7 @@
 #pragma once
 #include "Resources/StructuredBuffer.h"
 #include "Resources/Texture.h"
+#include "RootSignatureLibrary.h"
 #include "Techniques/TechniqueDescriptor.h"
 #include "RasterDebugMode.h"
 
@@ -98,7 +99,7 @@ protected:
     Microsoft::WRL::ComPtr<ID3D12RootSignature> m_hitLocalSig;
 
     // Global root signature
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_globalRootSignature;
+    RootSignature m_globalRootSignature;
 
     // Output resources
     std::unique_ptr<Texture>                     m_outputResource;

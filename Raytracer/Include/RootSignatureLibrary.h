@@ -3,6 +3,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "BindingSlot.h"
+
 // A single (type, register range) the signature makes available to a shader.
 // A root descriptor and a one-entry table look identical here on purpose: what
 // matters for validation is which registers a shader may legally reference.
@@ -14,6 +16,93 @@ struct RootSignatureBinding
     uint32_t                    registerCount = 1;
     uint32_t                    rootParameterIndex = 0;
     bool                        isDescriptorTable  = false;
+};
+
+// The slot table a signature was built from, plus where each slot landed. Owned
+// by RootSignatureLibrary and pointer-stable, so a RootSignature can hold it.
+class RootSignatureLayout
+{
+public:
+    // Root parameter index for a slot, matched on (kind, register, space).
+    // Asserts if the slot was never added — binding through the wrong signature.
+    [[nodiscard]] uint32_t RootParameterOf(const BindingSlot& slot) const;
+
+    [[nodiscard]] bool IsGraphics() const { return m_graphics; }
+
+private:
+    friend class RootSignatureBuilder;
+
+    // Root-descriptor and root-constant slots resolve through a dense table
+    // rather than a scan: Set() runs a few dozen times per pass per frame, and a
+    // Debug-build scan over the slot list was measurable. Table slots are not in
+    // here — they bind by table index, not by register.
+    static constexpr uint32_t kLookupSpaces    = 2;
+    static constexpr uint32_t kLookupKinds     = 4;
+    static constexpr uint32_t kLookupRegisters = 32;
+    static constexpr uint8_t  kNoRootParameter = 0xFF;
+
+    std::vector<BindingSlot> m_slots;
+    std::vector<uint32_t>    m_rootParameterIndices; // parallel to m_slots
+    std::string              m_debugName;
+    bool                     m_graphics = false;
+    uint8_t                  m_lookup[kLookupSpaces][kLookupKinds][kLookupRegisters] = {};
+};
+
+// A built root signature that remembers its slot table, so passes bind by slot
+// instead of by a root parameter index they had to track themselves. The bind
+// verb follows from the slot's kind, so a CBV cannot be bound as an SRV.
+class RootSignature
+{
+public:
+    RootSignature() = default;
+
+    [[nodiscard]] ID3D12RootSignature* Get() const { return m_signature.Get(); }
+    explicit operator bool() const { return m_signature != nullptr; }
+
+    void SetTable(ID3D12GraphicsCommandList* commandList, uint32_t tableIndex,
+                  D3D12_GPU_DESCRIPTOR_HANDLE heapStart) const;
+    void Set(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot,
+             D3D12_GPU_VIRTUAL_ADDRESS address) const;
+    void SetConstants(ID3D12GraphicsCommandList* commandList, const BindingSlot& slot, const void* values,
+                      uint32_t numValues) const;
+
+private:
+    friend class RootSignatureBuilder;
+
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> m_signature;
+    const RootSignatureLayout*                  m_layout = nullptr;
+};
+
+// Builds a root signature from slots. Parameter order is fixed and knowable
+// while adding: the tableCount table parameters come first, then root
+// parameters in declaration order — so Add() can resolve an index immediately
+// and nothing has to be patched up at the end.
+class RootSignatureBuilder
+{
+public:
+    RootSignatureBuilder(const wchar_t* debugName, uint32_t tableCount);
+
+    // The space0 frame layout: its table entries and its root descriptors, in
+    // the fixed order every raytracing signature shares.
+    RootSignatureBuilder& AddFrameLayout();
+
+    RootSignatureBuilder& Add(const BindingSlot& slot);
+    RootSignatureBuilder& WithStaticSamplers();
+    RootSignatureBuilder& WithFlags(D3D12_ROOT_SIGNATURE_FLAGS flags);
+    RootSignatureBuilder& ForGraphics(); // binds through SetGraphicsRoot* instead
+
+    RootSignature Build(ID3D12Device* device);
+
+private:
+    std::vector<BindingSlot>            m_slots;
+    std::vector<uint32_t>               m_rootParameterIndices;
+    std::wstring                        m_debugName;
+    uint32_t                            m_tableCount        = 0;
+    uint32_t                            m_nextRootParameter = 0;
+    bool                                m_usesFrameLayout   = false;
+    bool                                m_graphics          = false;
+    bool                                m_staticSamplers    = false;
+    D3D12_ROOT_SIGNATURE_FLAGS          m_flags             = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 };
 
 // ADR 0017 L4: every root signature in the engine is created here, because D3D12
@@ -54,6 +143,13 @@ public:
     void LogUnreferencedBindings() const;
 
 private:
+    friend class RootSignatureBuilder;
+
+    // Attaches the slot table a builder produced. Returns a pointer that stays
+    // valid for the process: unordered_map only invalidates on erase, and
+    // entries are never erased.
+    const RootSignatureLayout* AttachLayout(ID3D12RootSignature* signature, RootSignatureLayout&& layout);
+
     struct Entry
     {
         // Holds a reference so the map key can never be a recycled address.
@@ -62,6 +158,7 @@ private:
         std::vector<bool>                           bindingReferenced;
         std::string                                 debugName;
         bool                                        usesFrameLayout = false;
+        RootSignatureLayout                         slotLayout;
     };
 
     std::unordered_map<ID3D12RootSignature*, Entry> m_signatures;

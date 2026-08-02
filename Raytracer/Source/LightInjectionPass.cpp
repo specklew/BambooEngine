@@ -39,74 +39,39 @@ TechniqueDesc LightInjectionPass::GetTechniqueDesc() const
     return desc;
 }
 
+// The frame layout plus the injection outputs: the voxel accumulators it writes,
+// the G-buffers it fills for the guiding passes, and the grid constants.
+namespace
+{
+constexpr BindingSlot kVoxelIrradiance =
+    TableEntry("gVoxelIrradiance", BindingKind::Uav, INJECT_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
+constexpr BindingSlot kVoxelVplCount =
+    TableEntry("gVoxelVplCount", BindingKind::Uav, INJECT_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
+constexpr BindingSlot kShadingPoints =
+    TableEntry("gShadingPoints", BindingKind::Uav, INJECT_REG_SHADING_POINTS, GlobalDescriptor::ShadingPoints);
+constexpr BindingSlot kVoxelRepresentative = TableEntry("gVoxelRepresentative", BindingKind::Uav,
+                                                        INJECT_REG_VOXEL_REPRESENTATIVE,
+                                                        GlobalDescriptor::VoxelRepresentative);
+constexpr BindingSlot kVplPosition =
+    TableEntry("gVplPosition", BindingKind::Uav, INJECT_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
+constexpr BindingSlot kVBuffer =
+    TableEntry("gVBuffer", BindingKind::Uav, INJECT_REG_VBUFFER, GlobalDescriptor::VBuffer);
+constexpr BindingSlot kVoxelGridConstants = RootCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
+}
+
 void LightInjectionPass::CreateGlobalRootSignature()
 {
-    // The frame layout, extended with the voxel irradiance/count UAVs (u1/u2), the
-    // injection G-buffers, and the voxel grid constants CBV (b4).
-    constexpr uint32_t VoxelGridConstantsCbv = FrameBindingLayout::kPassRootParameterStart;
-
-    std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
-    FrameBindingLayout::AppendFrameRanges(ranges);
-
-    D3D12_DESCRIPTOR_RANGE voxelIrradianceRange;
-    voxelIrradianceRange.BaseShaderRegister = INJECT_REG_IRRADIANCE;
-    voxelIrradianceRange.NumDescriptors = 1;
-    voxelIrradianceRange.RegisterSpace = 0;
-    voxelIrradianceRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    voxelIrradianceRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelIrradiance);
-
-    D3D12_DESCRIPTOR_RANGE voxelVplCountRange;
-    voxelVplCountRange.BaseShaderRegister = INJECT_REG_VPL_COUNT;
-    voxelVplCountRange.NumDescriptors = 1;
-    voxelVplCountRange.RegisterSpace = 0;
-    voxelVplCountRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    voxelVplCountRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelVplCount);
-
-    D3D12_DESCRIPTOR_RANGE shadingPointsRange;
-    shadingPointsRange.BaseShaderRegister = INJECT_REG_SHADING_POINTS;
-    shadingPointsRange.NumDescriptors = 1;
-    shadingPointsRange.RegisterSpace = 0;
-    shadingPointsRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    shadingPointsRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::ShadingPoints);
-
-    D3D12_DESCRIPTOR_RANGE voxelRepresentativeRange;
-    voxelRepresentativeRange.BaseShaderRegister = INJECT_REG_VOXEL_REPRESENTATIVE;
-    voxelRepresentativeRange.NumDescriptors = 1;
-    voxelRepresentativeRange.RegisterSpace = 0;
-    voxelRepresentativeRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    voxelRepresentativeRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VoxelRepresentative);
-
-    D3D12_DESCRIPTOR_RANGE vplPositionRange;
-    vplPositionRange.BaseShaderRegister = INJECT_REG_VPL_POSITION;
-    vplPositionRange.NumDescriptors = 1;
-    vplPositionRange.RegisterSpace = 0;
-    vplPositionRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    vplPositionRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VplPosition);
-
-    D3D12_DESCRIPTOR_RANGE vbufferRange;
-    vbufferRange.BaseShaderRegister = INJECT_REG_VBUFFER;
-    vbufferRange.NumDescriptors = 1;
-    vbufferRange.RegisterSpace = 0;
-    vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    vbufferRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VBuffer);
-
-    for (const D3D12_DESCRIPTOR_RANGE& range : {voxelIrradianceRange, voxelVplCountRange, shadingPointsRange,
-                                                voxelRepresentativeRange, vplPositionRange, vbufferRange})
-        ranges.push_back(range);
-
-    CD3DX12_ROOT_PARAMETER rootParameters[FrameBindingLayout::kPassRootParameterStart + 1];
-    FrameBindingLayout::FillFrameRootParameters(rootParameters, ranges);
-    rootParameters[VoxelGridConstantsCbv].InitAsConstantBufferView(REG_VOXEL_GRID_CB, 0);
-
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
-
-    auto static_samplers = Renderer::GetStaticSamplers();
-    rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
-    rootSignatureDesc.pStaticSamplers   = static_samplers.data();
-    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-
-    m_globalRootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSignatureDesc,
-                                                               L"LightInjection GlobalRootSig", true);
+    m_globalRootSignature = RootSignatureBuilder(L"LightInjection GlobalRootSig", /*tableCount*/ 1)
+                                .AddFrameLayout()
+                                .Add(kVoxelIrradiance)
+                                .Add(kVoxelVplCount)
+                                .Add(kShadingPoints)
+                                .Add(kVoxelRepresentative)
+                                .Add(kVplPosition)
+                                .Add(kVBuffer)
+                                .Add(kVoxelGridConstants)
+                                .WithStaticSamplers()
+                                .Build(m_device.Get());
 }
 
 void LightInjectionPass::CreateShaderResourceHeap()
@@ -227,9 +192,9 @@ void LightInjectionPass::Render()
 
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
 
-    FrameBindingLayout::BindFrameRootParameters(m_commandList.Get(), *m_currentScene, *m_passConstants);
-    m_commandList->SetComputeRootConstantBufferView(FrameBindingLayout::kPassRootParameterStart,
-                                                   m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+    FrameBindingLayout::Bind(m_commandList.Get(), m_globalRootSignature, *m_currentScene, *m_passConstants);
+    m_globalRootSignature.Set(m_commandList.Get(), kVoxelGridConstants,
+                              m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
 
     D3D12_DISPATCH_RAYS_DESC desc = {};
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();

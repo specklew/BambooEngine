@@ -1,59 +1,52 @@
 #pragma once
 #include <vector>
 
+#include "BindingSlot.h"
 #include "FrameBindingRegisters.h"
 
-class Scene;
 class PassConstants;
+class RootSignature;
+class Scene;
 
-// C++ mirror of Resources/Shaders/FrameBindings.hlsl. Both files declare the same
-// register layout; shader reflection validates them against each other every time a
-// PSO is built, so a drift between the two is a logged error rather than a garbage
-// read (ADR 0017, phase 4).
+// C++ mirror of Resources/Shaders/FrameBindings.hlsl. Register numbers come from
+// FrameBindingRegisters.h, which both files include, so the two cannot disagree
+// (ADR 0019). What lives here is the rest of the layout — storage kind, heap
+// slot, descriptor count — which is a C++-only concern.
 //
 // space0 holds the frame resources every raytracing pass sees. space1 is reserved
 // for per-pass bindings and must stay empty here. Everything in this layout is
 // bound for every pass regardless of use, so the list stays short by hand.
 namespace FrameBindingLayout
 {
-    // Typed views of FrameBindingRegisters.h, which HLSL reads from the same file.
-    // t-registers
-    inline constexpr uint32_t kTlas              = FRAME_REG_TLAS;
-    inline constexpr uint32_t kVertices          = FRAME_REG_VERTICES;
-    inline constexpr uint32_t kIndices           = FRAME_REG_INDICES;
-    inline constexpr uint32_t kGeometryInfo      = FRAME_REG_GEOMETRY_INFO;
-    inline constexpr uint32_t kInstanceInfo      = FRAME_REG_INSTANCE_INFO;
-    inline constexpr uint32_t kEmissiveTriangles = FRAME_REG_EMISSIVE_TRIANGLES;
-    inline constexpr uint32_t kLightData         = FRAME_REG_LIGHT_DATA;
-    inline constexpr uint32_t kLightPool         = FRAME_REG_LIGHT_POOL;
-    inline constexpr uint32_t kSkybox            = FRAME_REG_SKYBOX;
-    inline constexpr uint32_t kMaterialTextures  = FRAME_REG_MATERIAL_TEXTURES; // …+ MAX_TEXTURES - 1
+    // Table entries, in table order.
+    inline constexpr BindingSlot kCameraMatrices =
+        TableEntry("CameraParams", BindingKind::Cbv, FRAME_REG_CAMERA_MATRICES, GlobalDescriptor::CameraMatrices);
+    inline constexpr BindingSlot kRaytraceOutput =
+        TableEntry("gOutput", BindingKind::Uav, FRAME_REG_RAYTRACE_OUTPUT, GlobalDescriptor::RaytraceOutput);
+    inline constexpr BindingSlot kTlas =
+        TableEntry("SceneBVH", BindingKind::Srv, FRAME_REG_TLAS, GlobalDescriptor::Tlas);
+    inline constexpr BindingSlot kVertices =
+        TableEntry("g_vertices", BindingKind::Srv, FRAME_REG_VERTICES, GlobalDescriptor::Vertices);
+    inline constexpr BindingSlot kIndices =
+        TableEntry("g_indices", BindingKind::Srv, FRAME_REG_INDICES, GlobalDescriptor::Indices);
+    inline constexpr BindingSlot kSkybox =
+        TableEntry("g_skybox", BindingKind::Srv, FRAME_REG_SKYBOX, GlobalDescriptor::Skybox);
+    inline constexpr BindingSlot kMaterialTextures =
+        TableEntry("g_textures", BindingKind::Srv, FRAME_REG_MATERIAL_TEXTURES, GlobalDescriptor::MaterialTextures,
+                   FRAME_MAX_TEXTURES);
 
-    // u-registers
-    inline constexpr uint32_t kRaytraceOutput = FRAME_REG_RAYTRACE_OUTPUT;
+    // Root descriptors, in root parameter order.
+    inline constexpr BindingSlot kGeometryInfo      = RootSrv("g_geometryInfo", FRAME_REG_GEOMETRY_INFO);
+    inline constexpr BindingSlot kInstanceInfo      = RootSrv("g_instanceInfo", FRAME_REG_INSTANCE_INFO);
+    inline constexpr BindingSlot kLightData         = RootSrv("g_lightData", FRAME_REG_LIGHT_DATA);
+    inline constexpr BindingSlot kEmissiveTriangles = RootSrv("g_emissiveTriangles", FRAME_REG_EMISSIVE_TRIANGLES);
+    inline constexpr BindingSlot kLightPool         = RootSrv("g_lightPool", FRAME_REG_LIGHT_POOL);
+    inline constexpr BindingSlot kPassConstants     = RootCbv("PassConstants", FRAME_REG_PASS_CONSTANTS);
 
-    // b-registers
-    inline constexpr uint32_t kCameraMatrices = FRAME_REG_CAMERA_MATRICES;
-    inline constexpr uint32_t kPassConstants  = FRAME_REG_PASS_CONSTANTS;
-
-    // Root parameter slots. Frame parameters occupy a fixed prefix in every
-    // raytracing root signature so one bind call can serve all of them; a pass
-    // appends its own parameters starting at kPassRootParameterStart.
-    enum RootParameter : uint32_t
-    {
-        FrameTable = 0,
-        GeometryInfoSrv,
-        InstanceInfoSrv,
-        LightDataSrv,
-        EmissiveTrianglesSrv,
-        LightPoolSrv,
-        PassConstantsCbv,
-        kPassRootParameterStart
-    };
-
-    // Descriptor ranges of the frame table, in FrameTable's parameter. A pass
-    // appends its own ranges to the same vector before creating the signature.
-    void AppendFrameRanges(std::vector<D3D12_DESCRIPTOR_RANGE>& ranges);
+    // The layout, in the order every raytracing signature declares it. One list:
+    // the signature is built from it, membership is answered from it, and the
+    // per-frame bind walks it.
+    const std::vector<BindingSlot>& Slots();
 
     // Whether a register belongs to the frame layout. Frame bindings are present
     // in every signature whether the pass reads them or not, so the unused-binding
@@ -61,13 +54,8 @@ namespace FrameBindingLayout
     [[nodiscard]] bool IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister,
                                        uint32_t registerSpace);
 
-    // Fills rootParameters[FrameTable … PassConstantsCbv]. The ranges vector must
-    // outlive the signature's serialization.
-    void FillFrameRootParameters(CD3DX12_ROOT_PARAMETER*                   rootParameters,
-                                 const std::vector<D3D12_DESCRIPTOR_RANGE>& ranges);
-
-    // Binds the frame prefix on the compute root signature. Every raytracing pass
-    // calls this instead of repeating six near-identical binds.
-    void BindFrameRootParameters(ID3D12GraphicsCommandList* commandList, Scene& scene,
-                                 const PassConstants& passConstants);
+    // Binds the whole frame layout. Every raytracing pass calls this instead of
+    // repeating seven near-identical binds.
+    void Bind(ID3D12GraphicsCommandList* commandList, const RootSignature& rootSignature, Scene& scene,
+              const PassConstants& passConstants);
 }

@@ -33,32 +33,17 @@ TechniqueDesc VBufferPass::GetTechniqueDesc() const
     return desc;
 }
 
+// The frame layout plus one output: the packed primary-hit identity.
+static constexpr BindingSlot kVBufferOutput =
+    TableEntry("gVBuffer", BindingKind::Uav, VBUFFER_REG_VBUFFER, GlobalDescriptor::VBuffer);
+
 void VBufferPass::CreateGlobalRootSignature()
 {
-    // Frame layout plus the VBuffer output UAV (u9, global heap slot VBuffer).
-    std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
-    FrameBindingLayout::AppendFrameRanges(ranges);
-
-    D3D12_DESCRIPTOR_RANGE vbufferRange;
-    vbufferRange.BaseShaderRegister = VBUFFER_REG_VBUFFER;
-    vbufferRange.NumDescriptors = 1;
-    vbufferRange.RegisterSpace = 0;
-    vbufferRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    vbufferRange.OffsetInDescriptorsFromTableStart = GlobalDescriptorHeap::IndexOf(GlobalDescriptor::VBuffer);
-    ranges.push_back(vbufferRange);
-
-    CD3DX12_ROOT_PARAMETER rootParameters[FrameBindingLayout::kPassRootParameterStart];
-    FrameBindingLayout::FillFrameRootParameters(rootParameters, ranges);
-
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
-
-    auto static_samplers = Renderer::GetStaticSamplers();
-    rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
-    rootSignatureDesc.pStaticSamplers   = static_samplers.data();
-    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-
-    m_globalRootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSignatureDesc,
-                                                               L"VBuffer GlobalRootSig", true);
+    m_globalRootSignature = RootSignatureBuilder(L"VBuffer GlobalRootSig", /*tableCount*/ 1)
+                                .AddFrameLayout()
+                                .Add(kVBufferOutput)
+                                .WithStaticSamplers()
+                                .Build(m_device.Get());
 }
 
 void VBufferPass::CreateShaderResourceHeap()
@@ -110,7 +95,7 @@ void VBufferPass::Render()
 {
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
 
-    FrameBindingLayout::BindFrameRootParameters(m_commandList.Get(), *m_currentScene, *m_passConstants);
+    FrameBindingLayout::Bind(m_commandList.Get(), m_globalRootSignature, *m_currentScene, *m_passConstants);
 
     D3D12_DISPATCH_RAYS_DESC desc = {};
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();

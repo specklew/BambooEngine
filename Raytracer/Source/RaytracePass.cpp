@@ -108,7 +108,7 @@ void RaytracePass::Render()
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
     m_commandList->SetGraphicsRootSignature(nullptr);
 
-    FrameBindingLayout::BindFrameRootParameters(m_commandList.Get(), *m_currentScene, *m_passConstants);
+    FrameBindingLayout::Bind(m_commandList.Get(), m_globalRootSignature, *m_currentScene, *m_passConstants);
 
     D3D12_DISPATCH_RAYS_DESC desc = {};
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();
@@ -314,21 +314,10 @@ void RaytracePass::CreateLocalRootSignatures()
 
 void RaytracePass::CreateGlobalRootSignature()
 {
-    std::vector<D3D12_DESCRIPTOR_RANGE> ranges;
-    FrameBindingLayout::AppendFrameRanges(ranges);
-
-    CD3DX12_ROOT_PARAMETER rootParameters[FrameBindingLayout::kPassRootParameterStart];
-    FrameBindingLayout::FillFrameRootParameters(rootParameters, ranges);
-
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
-
-    auto static_samplers = Renderer::GetStaticSamplers();
-    rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
-    rootSignatureDesc.pStaticSamplers   = static_samplers.data();
-    rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-
-    m_globalRootSignature = RootSignatureLibrary::Get().Create(m_device.Get(), rootSignatureDesc,
-                                                               L"RaytracePass GlobalRootSig", true);
+    m_globalRootSignature = RootSignatureBuilder(L"RaytracePass GlobalRootSig", /*tableCount*/ 1)
+                                .AddFrameLayout()
+                                .WithStaticSamplers()
+                                .Build(m_device.Get());
 }
 
 
