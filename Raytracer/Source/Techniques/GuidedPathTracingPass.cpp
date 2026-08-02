@@ -57,8 +57,7 @@ constexpr BindingSlot kVisibilityMask = TableEntry("gClusterVisibilityMask", Bin
                                                    GlobalDescriptor::ClusterVisibilityMask); // debug view 10
 constexpr BindingSlot kFuzzyWeights =
     TableEntry("gFuzzyWeights", BindingKind::Uav, GUIDED_REG_FUZZY_WEIGHT, GlobalDescriptor::FuzzyWeight);
-constexpr BindingSlot kFuzzyIndices =
-    TableEntry("gFuzzyIndices", BindingKind::Uav, GUIDED_REG_FUZZY_INDEX, GlobalDescriptor::FuzzyIndex);
+constexpr BindingSlot kFuzzyIndices = TableEntry("gFuzzyIndices", BindingKind::Uav, GUIDED_REG_FUZZY_INDEX, GlobalDescriptor::FuzzyIndex);
 
 constexpr BindingSlot kVoxelGridConstants  = RootCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
 constexpr BindingSlot kGuidingCounters     = RootUav("gVoxCounters", GUIDED_REG_COUNTERS);
@@ -154,11 +153,11 @@ TechniqueDesc GuidedPathTracingPass::GetTechniqueDesc() const
 
 void GuidedPathTracingPass::CreateGlobalRootSignature()
 {
-    RootSignatureBuilder builder(L"GuidedPathTracing GlobalRootSig", /*tableCount*/ 1);
-    builder.AddFrameLayout();
-    for (const BindingSlot& slot : kGuidedSlots)
-        builder.Add(slot);
-    m_globalRootSignature = builder.WithStaticSamplers().Build(m_device.Get());
+    m_globalRootSignature = RootSignatureBuilder(L"GuidedPathTracing GlobalRootSig", /*tableCount*/ 1)
+                                .AddFrameLayout()
+                                .Add(kGuidedSlots)
+                                .WithStaticSamplers()
+                                .Build(m_device.Get());
 
     // Compute programs are keyed on the root signature they were created with;
     // a rebuilt signature (variant reload) must drop them or a later dispatch

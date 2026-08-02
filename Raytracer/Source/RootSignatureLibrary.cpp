@@ -268,6 +268,13 @@ RootSignatureBuilder& RootSignatureBuilder::Add(const BindingSlot& slot)
     return *this;
 }
 
+RootSignatureBuilder& RootSignatureBuilder::Add(const BindingSlot* slots, size_t count)
+{
+    for (size_t index = 0; index < count; ++index)
+        Add(slots[index]);
+    return *this;
+}
+
 RootSignatureBuilder& RootSignatureBuilder::WithStaticSamplers()
 {
     m_staticSamplers = true;

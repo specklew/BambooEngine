@@ -87,6 +87,16 @@ public:
     RootSignatureBuilder& AddFrameLayout();
 
     RootSignatureBuilder& Add(const BindingSlot& slot);
+
+    // A pass's whole slot table in one call. The array form takes the table by
+    // reference so the count comes from the type and cannot drift.
+    RootSignatureBuilder& Add(const BindingSlot* slots, size_t count);
+    template <size_t N>
+    RootSignatureBuilder& Add(const BindingSlot (&slots)[N])
+    {
+        return Add(slots, N);
+    }
+
     RootSignatureBuilder& WithStaticSamplers();
     RootSignatureBuilder& WithFlags(D3D12_ROOT_SIGNATURE_FLAGS flags);
     RootSignatureBuilder& ForGraphics(); // binds through SetGraphicsRoot* instead
