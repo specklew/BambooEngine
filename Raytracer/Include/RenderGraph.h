@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -122,6 +123,19 @@ public:
     };
     [[nodiscard]] const std::vector<PassTiming>& GetTimings() const { return m_timings; }
 
+    // Running per-node statistics over every timed frame since the last reset. One
+    // frame is far too noisy to rank nodes by — and the first frame is the worst
+    // possible sample, since it pays for PSO creation and the geometry bake.
+    struct PassTimingSummary
+    {
+        std::string name;
+        float       meanMilliseconds;
+        float       maxMilliseconds;
+        uint32_t    frames;
+    };
+    [[nodiscard]] std::vector<PassTimingSummary> GetTimingSummary() const;
+    void ResetTimingHistory() { m_timingHistory.clear(); }
+
     // Pass toggles. Disabling a node drops it and re-culls, so its producers go
     // too if nothing else reads them — the debug view becomes "a pass you don't
     // add" rather than a branch inside a shader. Consumers still run and read
@@ -211,4 +225,14 @@ private:
     uint32_t                                m_timedPassCount = 0;
     std::vector<std::string>                m_timedPassNames;
     std::vector<PassTiming>                 m_timings;
+
+    // Keyed by node name rather than index: culling changes which nodes run from
+    // frame to frame, so a positional accumulator would mix two different nodes.
+    struct TimingAccumulator
+    {
+        double   totalMilliseconds = 0.0;
+        float    maxMilliseconds   = 0.0f;
+        uint32_t frames            = 0;
+    };
+    std::map<std::string, TimingAccumulator> m_timingHistory;
 };

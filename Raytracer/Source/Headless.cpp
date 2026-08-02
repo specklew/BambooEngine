@@ -53,6 +53,7 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
         else if (flag == "--out")        args.outDir = valueOf(i);
         else if (flag == "--debug-layer") args.debugLayer = true;
         else if (flag == "--rdg-dump")    args.rdgDump = true;
+        else if (flag == "--rdg-timings") args.rdgTimings = true;
     }
 
     return args;

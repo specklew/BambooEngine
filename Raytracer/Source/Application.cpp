@@ -44,9 +44,13 @@ int Application::Run()
 	m_renderer->Initialize();
 	m_ready = true;
 
-	// Arm the one-shot dump after Initialize, so it fires on the first rendered
-	// frame rather than being reset by CVar defaults.
-	if (headlessArgs.rdgDump)
+	// Set after Initialize so CVar defaults do not reset them. In a headless run
+	// HeadlessRunner arms the dump itself, once per technique after its capture —
+	// frame 0 pays for PSO creation and the geometry bake, which would make the
+	// node cost table meaningless.
+	if (headlessArgs.rdgTimings)
+		CVarSystem::Get()->SetCVarInt(StringId("rdg.timings"), 1);
+	if (headlessArgs.rdgDump && !headlessArgs.headless)
 		CVarSystem::Get()->SetCVarInt(StringId("rdg.dump"), 1);
 
 	int exitCode = 0;

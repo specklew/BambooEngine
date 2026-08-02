@@ -2006,11 +2006,19 @@ void Renderer::DumpRenderGraphIfRequested()
 	LogDumpBlock("[RDG] frame passes:", m_renderGraph.DumpPasses());
 	LogDumpBlock("[RDG] synthesized barriers:", m_renderGraph.DumpBarriers());
 
-	// Last resolved frame's node costs, when rdg.timings is on — the same numbers
-	// the ImGui table shows, so a headless run can attribute a regression too.
+	// Node costs averaged over every timed frame since the last reset, most
+	// expensive first. A single frame cannot rank nodes — and frame 0 is the worst
+	// possible sample, paying for PSO creation and the geometry bake.
 	std::string timings;
-	for (const auto& timing : m_renderGraph.GetTimings())
-		timings += fmt::format("    {:<32} {:.3f} ms\n", timing.name, timing.milliseconds);
+	double totalMean = 0.0;
+	for (const auto& timing : m_renderGraph.GetTimingSummary())
+	{
+		timings += fmt::format("    {:<34} {:8.4f} ms mean   {:8.4f} ms max   n={}\n",
+			timing.name, timing.meanMilliseconds, timing.maxMilliseconds, timing.frames);
+		totalMean += timing.meanMilliseconds;
+	}
+	if (!timings.empty())
+		timings += fmt::format("    {:<34} {:8.4f} ms\n", "TOTAL (sum of node means)", totalMean);
 	LogDumpBlock("[RDG] node GPU cost:", timings);
 
 	// Deferred to here rather than to end-of-init: techniques build their root

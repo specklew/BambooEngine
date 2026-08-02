@@ -79,6 +79,10 @@ public:
 	void ApplyRenderConfig(const HeadlessConfig& config);
 	void SetLights(const std::vector<LightData>& lights);
 
+	// Per-node GPU timings accumulate across frames; a technique switch makes the
+	// history meaningless, so the headless runner clears it between techniques.
+	void ResetGraphTimingHistory() { m_renderGraph.ResetTimingHistory(); }
+
 	std::vector<std::string> GetTechniqueNames() const;
 	std::vector<std::string> GetStateNames() const;
 	bool GoToState(const std::string& name);

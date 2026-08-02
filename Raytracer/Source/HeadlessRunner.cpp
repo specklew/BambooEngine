@@ -156,6 +156,7 @@ int HeadlessRunner::Run()
     for (const std::string& technique : m_args.techniques)
     {
         m_renderer.SetTechnique(technique);
+        m_renderer.ResetGraphTimingHistory();
         for (const std::string& place : m_args.states)
         {
             m_renderer.GoToState(place);
@@ -175,6 +176,16 @@ int HeadlessRunner::Run()
                 PumpFrame();
 
             spdlog::info("Captured {}-{}", place, technique);
+        }
+
+        // One dump per technique, after its captures: the graph is warm, every
+        // root signature it needs has been built, and the node cost table covers
+        // the whole capture window rather than a single cold frame.
+        if (m_args.rdgDump)
+        {
+            spdlog::info("[RDG] dump for technique '{}'", technique);
+            CVarSystem::Get()->SetCVarInt(StringId("rdg.dump"), 1);
+            PumpFrame();
         }
     }
 

@@ -89,11 +89,14 @@ struct HeadlessArgs
 
     // Headless normally runs without the debug layer, because its uneven
     // per-submit validation cost makes frame counts meaningless. --debug-layer
-    // turns it back on for a correctness run; --rdg-dump asks for the one-shot
-    // graph/barrier/root-signature dump on the first frame. Both exist so a
-    // verification run needs no source edit.
+    // turns it back on for a correctness run; --rdg-dump asks for the
+    // graph/barrier/root-signature dump, fired once per technique after its
+    // capture. --rdg-timings adds per-node GPU timestamps and makes that dump
+    // carry the node cost table; it costs frames, so it is never a timing run.
+    // All three exist so a verification run needs no source edit.
     bool debugLayer = false;
     bool rdgDump    = false;
+    bool rdgTimings = false;
 };
 
 HeadlessArgs   ParseHeadlessArgs(int argc, wchar_t** argv);

@@ -344,11 +344,34 @@ void RenderGraph::ResolveTimings()
         const uint64_t begin = ticks[i * 2];
         const uint64_t end   = ticks[i * 2 + 1];
         const uint64_t span  = (end > begin) ? end - begin : 0;
-        m_timings.push_back({m_timedPassNames[i], static_cast<float>(span * msPerTick)});
+        const float milliseconds = static_cast<float>(span * msPerTick);
+        m_timings.push_back({m_timedPassNames[i], milliseconds});
+
+        TimingAccumulator& accumulator = m_timingHistory[m_timedPassNames[i]];
+        accumulator.totalMilliseconds += milliseconds;
+        accumulator.maxMilliseconds = std::max(accumulator.maxMilliseconds, milliseconds);
+        ++accumulator.frames;
     }
 
     const D3D12_RANGE writeRange{0, 0};
     m_timerReadback->Unmap(0, &writeRange);
+}
+
+std::vector<RenderGraph::PassTimingSummary> RenderGraph::GetTimingSummary() const
+{
+    std::vector<PassTimingSummary> summary;
+    summary.reserve(m_timingHistory.size());
+    for (const auto& [name, accumulator] : m_timingHistory)
+    {
+        const float mean = accumulator.frames > 0
+            ? static_cast<float>(accumulator.totalMilliseconds / accumulator.frames)
+            : 0.0f;
+        summary.push_back({name, mean, accumulator.maxMilliseconds, accumulator.frames});
+    }
+
+    std::sort(summary.begin(), summary.end(),
+        [](const PassTimingSummary& a, const PassTimingSummary& b) { return a.meanMilliseconds > b.meanMilliseconds; });
+    return summary;
 }
 
 void RenderGraph::Reset()
