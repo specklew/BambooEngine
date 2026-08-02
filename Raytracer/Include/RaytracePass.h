@@ -4,6 +4,7 @@
 #include "RootSignatureLibrary.h"
 #include "Techniques/TechniqueDescriptor.h"
 #include "RasterDebugMode.h"
+#include "RenderGraph.h"
 
 class PassConstants;
 class Renderer;
@@ -30,6 +31,13 @@ public:
     // stages run is derived by the render graph from the reads the technique
     // declares, not from a stage order maintained here.
     virtual bool UsesVoxelGuiding() const { return false; }
+
+    // The technique's own contribution to the frame graph (ADR 0017 phase 5), in
+    // two parts because a node cannot be added while another node's declaration is
+    // still open: what its dispatch touches beyond the frame layout, then the nodes
+    // that run after it. A technique that needs neither places no barriers at all.
+    virtual void DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass) {}
+    virtual void AppendPostDispatchNodes(RenderGraph& graph) {}
 
     void OnResize();
     void OnShaderReload();

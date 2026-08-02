@@ -197,6 +197,9 @@
 #define GUIDED_REG_FUZZY_INDEX          21 // u
 #define GUIDED_REG_TILE_GUIDE_Q         22 // u
 #define GUIDED_REG_TILE_STRATEGY_STATS  23 // u
+// Tile count for the adaptive-q update's bounds check. Root descriptors carry no
+// size, so GetDimensions on u22/u23 returns garbage — the count has to be told.
+#define GUIDED_REG_ADAPTIVE_Q_CB        5  // b
 
 // ---------------------------------------------------------------------------
 // Rasterization — colorShader.hlsl. Its own layout, not the frame one; raster

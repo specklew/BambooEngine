@@ -63,13 +63,14 @@ constexpr BindingSlot kLiveBoundMin   = RootUav("gVoxelLiveBoundMin", GUIDED_REG
 constexpr BindingSlot kLiveBoundMax   = RootUav("gVoxelLiveBoundMax", GUIDED_REG_LIVE_BOUND_MAX);
 constexpr BindingSlot kTileGuideQ     = RootUav("gTileGuideQ", GUIDED_REG_TILE_GUIDE_Q);         // ADR 0015
 constexpr BindingSlot kTileStrategyStats = RootUav("gTileStrategyStats", GUIDED_REG_TILE_STRATEGY_STATS);
+constexpr BindingSlot kAdaptiveQConstants = RootConstants("AdaptiveQCB", GUIDED_REG_ADAPTIVE_Q_CB, 1);
 
 constexpr BindingSlot kGuidedSlots[] = {
     kVoxelIrradiance,     kVoxelVplCount,   kSuperpixelIndex,  kVoxelRepresentative, kVplPosition,
     kVBuffer,             kVisibilityMask,  kFuzzyWeights,     kFuzzyIndices,        kVoxelGridConstants,
     kGuidingCounters,     kGuidingCompactIds, kGuidingInverseIndex, kVoxelFingerprints, kClusterAssignments,
     kClusterSeeds,        kLightTreeNodes,  kCompactToLeaf,    kClusterRoots,        kImportanceHeap,
-    kLiveBoundMin,        kLiveBoundMax,    kTileGuideQ,       kTileStrategyStats};
+    kLiveBoundMin,        kLiveBoundMax,    kTileGuideQ,       kTileStrategyStats,   kAdaptiveQConstants};
 
 bool IsAmdDevice(ID3D12Device* device)
 {
@@ -182,14 +183,48 @@ void GuidedPathTracingPass::EnsureAdaptiveQUpdatePso()
         "resources/shaders/vxpgAdaptiveQ.update.shader", L"GuidedPT AdaptiveQ Update PSO");
 }
 
-void GuidedPathTracingPass::Render()
+void GuidedPathTracingPass::DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass)
 {
-    if (!m_voxelPass || !m_buildPass || !m_fingerprintPass || !m_clusterPass || !m_lightTreePass)
-    {
-        spdlog::warn("GuidedPathTracingPass: guiding resources not wired, skipping render");
+    if (!m_compileOneSampleMis)
         return;
-    }
 
+    // The dispatch reads last frame's q and accumulates this frame's stats; the
+    // update node below turns one into the other (ADR 0015).
+    EnsureAdaptiveQResources(Window::Get().GetWidth(), Window::Get().GetHeight());
+    m_tileGuideQHandle        = graph.Import(*m_tileGuideQ, "GuidedPT TileGuideQ");
+    m_tileStrategyStatsHandle = graph.Import(*m_tileStrategyStats, "GuidedPT TileStrategyStats");
+
+    dispatchPass.Read(m_tileGuideQHandle, GraphAccess::UnorderedAccessRead);
+    dispatchPass.Write(m_tileStrategyStatsHandle, GraphAccess::ComputeWrite);
+}
+
+void GuidedPathTracingPass::AppendPostDispatchNodes(RenderGraph& graph)
+{
+    if (!m_compileOneSampleMis)
+        return;
+
+    // Folds this frame's per-tile strategy stats into the guide-selection
+    // probability the NEXT frame's coin reads, then clears the stats. Its consumer
+    // is next frame's dispatch, which culling cannot see.
+    graph.AddPass("VXPG AdaptiveQ Update",
+        [&](RenderGraphPassBuilder& pass)
+        {
+            pass.NeverCull();
+            pass.Read(m_tileStrategyStatsHandle, GraphAccess::UnorderedAccessRead);
+            pass.Write(m_tileGuideQHandle, GraphAccess::ComputeWrite);
+        },
+        [this]()
+        {
+            EnsureAdaptiveQUpdatePso();
+            BindGuidingResources();
+            m_commandList->SetPipelineState(m_adaptiveQUpdateProgram->GetPipelineState());
+            const uint32_t tileCount = m_tileGridWidth * m_tileGridHeight;
+            CommandContext::Get().Dispatch((tileCount + 63) / 64, 1, 1);
+        });
+}
+
+void GuidedPathTracingPass::BindGuidingResources()
+{
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
     m_commandList->SetGraphicsRootSignature(nullptr);
 
@@ -213,6 +248,20 @@ void GuidedPathTracingPass::Render()
     EnsureAdaptiveQResources(Window::Get().GetWidth(), Window::Get().GetHeight());
     rootSignature.Set(commandList, kTileGuideQ, m_tileGuideQ->GetGPUVirtualAddress());
     rootSignature.Set(commandList, kTileStrategyStats, m_tileStrategyStats->GetGPUVirtualAddress());
+
+    const uint32_t tileCount = m_tileGridWidth * m_tileGridHeight;
+    rootSignature.SetConstants(commandList, kAdaptiveQConstants, &tileCount, 1);
+}
+
+void GuidedPathTracingPass::Render()
+{
+    if (!m_voxelPass || !m_buildPass || !m_fingerprintPass || !m_clusterPass || !m_lightTreePass)
+    {
+        spdlog::warn("GuidedPathTracingPass: guiding resources not wired, skipping render");
+        return;
+    }
+
+    BindGuidingResources();
 
     if (UseInlineRayQuery())
     {
@@ -245,21 +294,6 @@ void GuidedPathTracingPass::Render()
         m_commandList->SetPipelineState1(m_rtStateObject.Get());
         CommandContext::Get().DispatchRays(desc);
     }
-
-    // Adaptive-q update (ADR 0015): fold this frame's per-tile strategy stats
-    // into the guide-selection probability the NEXT frame's coin reads, then
-    // clear the stats. Root bindings persist from the dispatch above (same
-    // compute root signature).
-    if (m_compileOneSampleMis)
-    {
-        EnsureAdaptiveQUpdatePso();
-        m_tileStrategyStats->UavBarrier(m_commandList.Get());
-        m_commandList->SetPipelineState(m_adaptiveQUpdateProgram->GetPipelineState());
-        const uint32_t tileCount = m_tileGridWidth * m_tileGridHeight;
-        CommandContext::Get().Dispatch((tileCount + 63) / 64, 1, 1);
-        m_tileGuideQ->UavBarrier(m_commandList.Get());
-    }
-
 }
 
 REGISTER_RAYTRACE_TECHNIQUE("Guided Path Tracing (VXPG)", GuidedPathTracingPass)

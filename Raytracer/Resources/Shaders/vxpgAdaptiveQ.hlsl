@@ -11,6 +11,14 @@
 RWStructuredBuffer<float> gTileGuideQ        : BAMBOO_UAV(GUIDED_REG_TILE_GUIDE_Q);
 RWStructuredBuffer<uint>  gTileStrategyStats : BAMBOO_UAV(GUIDED_REG_TILE_STRATEGY_STATS);
 
+// Both buffers are bound as root descriptors, which carry no size — GetDimensions
+// on them returns garbage and would let the tail of the last thread group run off
+// the end. The CPU knows the tile grid, so it says so.
+cbuffer AdaptiveQCB : BAMBOO_CBV(GUIDED_REG_ADAPTIVE_Q_CB)
+{
+    uint gTileCount;
+};
+
 // Keep in sync with guidedPathTracing.hlsl's one-sample block.
 #define ADAPTIVE_Q_MIN 0.05
 #define ADAPTIVE_Q_MAX 0.5
@@ -19,10 +27,8 @@ RWStructuredBuffer<uint>  gTileStrategyStats : BAMBOO_UAV(GUIDED_REG_TILE_STRATE
 [numthreads(64, 1, 1)]
 void UpdateTileGuideQ(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint tileCount, stride;
-    gTileGuideQ.GetDimensions(tileCount, stride);
     const uint tileId = dispatchThreadId.x;
-    if (tileId >= tileCount)
+    if (tileId >= gTileCount)
         return;
 
     const uint guideLumFx = gTileStrategyStats[tileId * 2u + 0u];

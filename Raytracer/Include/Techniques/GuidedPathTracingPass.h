@@ -35,6 +35,9 @@ public:
 
     void Render() override;
 
+    void DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass) override;
+    void AppendPostDispatchNodes(RenderGraph& graph) override;
+
     // Consumes voxelize -> inject -> guiding distribution -> fingerprint ->
     // cluster -> cluster-visibility. Fingerprint/cluster/cvis are required always
     // (not just for debug views 8/9/10): the tree passes consume them and their
@@ -62,6 +65,14 @@ private:
     ComputeProgram* m_adaptiveQUpdateProgram = nullptr;
     uint32_t m_tileGridWidth  = 0;
     uint32_t m_tileGridHeight = 0;
+    // Handed from the dispatch declaration to the update node; imports last one
+    // frame, so these are refreshed every time the graph is rebuilt.
+    GraphResourceHandle m_tileGuideQHandle       = InvalidGraphResource;
+    GraphResourceHandle m_tileStrategyStatsHandle = InvalidGraphResource;
+
+    // Every root binding the guided dispatch needs, shared with the adaptive-q
+    // update node so neither depends on the other having run first.
+    void BindGuidingResources();
 
     std::shared_ptr<VoxelizationPass>      m_voxelPass;
     std::shared_ptr<VoxelGuidingBuildPass> m_buildPass;

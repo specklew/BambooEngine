@@ -1866,8 +1866,11 @@ void Renderer::BuildRaytraceGraph(GraphResourceHandle backBufferHandle, Texture&
 			// A guiding technique reads the VXPG products; this declaration is what
 			// keeps their producers alive through culling.
 			DeclareGuidingReads(pass);
+			m_raytracePass->DeclareDispatchResources(m_renderGraph, pass);
 		},
 		[this]() { m_raytracePass->Render(); });
+
+	m_raytracePass->AppendPostDispatchNodes(m_renderGraph);
 
 	if (accumulate)
 	{
