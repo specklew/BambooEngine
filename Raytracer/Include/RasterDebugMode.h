@@ -51,7 +51,7 @@ inline constexpr DebugViewDoc kRasterDebugModeDocs[] = {
 // A raster debug view is the only raster consumer of the VXPG subgraph; this says
 // whether the active view reads any of it at all. Which stages actually run is
 // derived by the render graph from the reads the view declares (Renderer's
-// "Raster Debug View" node), not from a hand-maintained stage order.
+// "Raster Draw" node), not from a hand-maintained stage order.
 inline bool RasterDebugViewUsesVoxelGuiding(RasterDebugMode mode)
 {
 	switch (mode)

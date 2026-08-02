@@ -575,200 +575,55 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	SetViewport();
 	SetScissorRect();
-	
+
 	m_graphicsDevice->RefreshFrameIndex();
 	const UINT frameIndex = m_graphicsDevice->GetFrameIndex();
 
 	Texture& backBuffer = *m_backBufferTextures[frameIndex];
 
-	{
-		backBuffer.TransitionChecked(m_d3d12CommandList.Get(),
-			D3D12_RESOURCE_STATE_PRESENT,
-			D3D12_RESOURCE_STATE_RENDER_TARGET);
+	const GraphResourceHandle backBufferHandle  = m_renderGraph.Import(backBuffer, "Back Buffer");
+	const GraphResourceHandle depthStencilHandle = m_renderGraph.Import(*m_depthStencilTexture, "Depth Stencil");
 
-		FLOAT clearColor[4] = { 0.3f, 0.6f, 0.9f, 1.0f };
+	// The presented image is the graph's sink: culling walks backwards from here.
+	m_renderGraph.MarkExternallyRead(backBufferHandle);
 
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-			m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-			frameIndex,
-			m_rtvDescriptorSize);
-
-		// Raytracing overwrites the whole back buffer with the present copy and
-		// draws no geometry, so both clears are dead bandwidth there (measured
-		// 2026-08-01, ABeautifulGame 3 s Debug: PT 3151 -> 3276 frames).
-		if (m_rasterize)
-		{
-			CommandContext::Get().GetCommandList()->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-			CommandContext::Get().GetCommandList()->ClearDepthStencilView(
-				m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-				D3D12_CLEAR_FLAG_DEPTH,
-				1.0f,
-				0,
-				0,
-				nullptr);
-		}
-
-		m_d3d12CommandList->OMSetRenderTargets(1,
-		&rtvHandle,
-		true,
-		&m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-	}
-	
 	if (m_rasterize)
-	{
-		// Raster draws are not graph nodes yet (phase 5). This sink stands in for
-		// them so culling keeps exactly the VXPG stages the active debug view reads.
-		m_renderGraph.AddPass("Raster Debug View",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.NeverCull();
-				DeclareRasterDebugViewReads(pass);
-			},
-			nullptr);
-
-		m_renderGraph.Compile();
-		m_renderGraph.Execute(CommandContext::Get());
-
-		ID3D12DescriptorHeap* descriptorHeaps[] = {GlobalDescriptorHeap::Get().GetHeap()};
-
-		m_d3d12CommandList->SetPipelineState(m_pipelineStateObject.Get());
-		m_d3d12CommandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-		m_d3d12CommandList->SetGraphicsRootSignature(m_rootSignature.Get());
-		
-		m_rootSignature.Set(m_d3d12CommandList.Get(), kRasterPassConstants, m_passConstants->GetGpuVirtualAddress());
-
-		if (m_voxelizationPass)
-			m_rootSignature.Set(m_d3d12CommandList.Get(), kRasterVoxelGridConstants,
-			                    m_voxelizationPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
-
-		for (const auto& go : m_scene->GetGameObjects())
-		{
-			auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
-			m_rootSignature.Set(m_d3d12CommandList.Get(), kRasterModelConstants, gpuAddress);
-
-			for (const auto& primitive : go->GetModel()->GetMeshes())
-			{
-				gpuAddress = primitive->m_material->m_materialBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
-				m_rootSignature.Set(m_d3d12CommandList.Get(), kRasterMaterialConstants, gpuAddress);
-				
-				auto vertex_view = primitive->GetVertexView();
-				auto index_view = primitive->GetIndexView();
-
-				auto vertexBuffer = std::dynamic_pointer_cast<VertexBuffer>(vertex_view.buffer);
-				auto indexBuffer = std::dynamic_pointer_cast<IndexBuffer>(index_view.buffer);
-	
-				m_d3d12CommandList->IASetVertexBuffers(0, 1, &vertexBuffer->GetVertexBufferView());
-				m_d3d12CommandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
-				m_d3d12CommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-				m_rootSignature.SetTable(m_d3d12CommandList.Get(), 0, GlobalDescriptorHeap::Get().GpuStart());
-				
-				CommandContext::Get().DrawIndexedInstanced(index_view.count, 1, index_view.offset, vertex_view.offset, 0);
-			}
-		}
-	}
+		BuildRasterGraph(backBufferHandle, depthStencilHandle, frameIndex);
 	else
+		BuildRaytraceGraph(backBufferHandle, backBuffer);
+
+	if (!m_headless)
 	{
-		PostProcessParams postProcessParams;
-		postProcessParams.exposure   = g_exposure.Get();
-		postProcessParams.contrast   = g_contrast.Get();
-		postProcessParams.saturation = g_saturation.Get();
-		postProcessParams.lift       = g_lift.Get();
-
-		// ADR 0017 step A: the raytrace -> accumulate -> tonemap -> copy chain
-		// declares what it touches and the graph places the barriers. The passes
-		// themselves no longer carry any.
-		Texture& raytraceOutput = *m_raytracePass->GetOutputTexture();
-		const bool accumulate   = g_accumulationEnabled.Get() != 0;
-		Texture& tonemapInput   = accumulate ? m_accumulationPass->GetDisplayBuffer() : raytraceOutput;
-
-		const GraphResourceHandle raytraceOutputHandle = m_renderGraph.Import(raytraceOutput, "Raytrace Output");
-		const GraphResourceHandle tonemapInputHandle   = m_renderGraph.Import(tonemapInput, "Tonemap Input");
-		const GraphResourceHandle tonemapOutputHandle  = m_renderGraph.Import(m_postProcessPass->GetOutputBuffer(), "PostProcess Output");
-		const GraphResourceHandle backBufferHandle     = m_renderGraph.Import(backBuffer, "Back Buffer");
-
-		// The presented image is the graph's sink: culling walks backwards from here.
-		m_renderGraph.MarkExternallyRead(backBufferHandle);
-
-		m_renderGraph.AddPass("Raytrace Technique",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.Write(raytraceOutputHandle, GraphAccess::ComputeWrite);
-				// A guiding technique reads the VXPG products; this declaration is
-				// what keeps their producers alive through culling.
-				DeclareGuidingReads(pass);
-			},
-			[this]() { m_raytracePass->Render(); });
-
-		if (accumulate)
-		{
-			m_renderGraph.AddPass("Accumulation",
-				[&](RenderGraphPassBuilder& pass)
-				{
-					pass.Read(raytraceOutputHandle, GraphAccess::ComputeRead);
-					pass.Write(tonemapInputHandle, GraphAccess::ComputeWrite);
-				},
-				[this, &raytraceOutput]() { m_accumulationPass->Render(raytraceOutput); });
-		}
-
-		m_renderGraph.AddPass("PostProcess",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.Read(tonemapInputHandle, GraphAccess::ComputeRead);
-				pass.Write(tonemapOutputHandle, GraphAccess::ComputeWrite);
-			},
-			[this, &tonemapInput, postProcessParams]()
-			{
-				m_postProcessPass->Dispatch(tonemapInput, postProcessParams);
-			});
-
-		m_renderGraph.AddPass("Present Copy",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.Read(tonemapOutputHandle, GraphAccess::CopySource);
-				pass.Write(backBufferHandle, GraphAccess::CopyDestination);
-			},
-			[this, &backBuffer]() { m_postProcessPass->CopyToBackBuffer(backBuffer); });
-
-		// Readback for a screenshot armed by Tick(). A node so the copy-source state
-		// it needs is declared rather than inherited from whatever ran before it.
-		if (m_screenshotManager->IsCaptureDue())
-		{
-			m_renderGraph.AddPass("Screenshot Readback",
-				[&](RenderGraphPassBuilder& pass)
-				{
-					pass.NeverCull();
-					pass.Read(tonemapOutputHandle, GraphAccess::CopySource);
-				},
-				[this]()
-				{
-					m_screenshotManager->RecordCopy(m_postProcessPass->GetOutputBuffer().GetUnderlyingResource());
-				});
-		}
-
-		// ImGui and the present transition still expect a render target.
-		m_renderGraph.AddPass("Back Buffer To Render Target",
+		// ImGui draws over whatever the frame produced, so it needs the back buffer
+		// back as a render target and the global heap bound for its font SRV.
+		m_renderGraph.AddPass("ImGui",
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.NeverCull();
 				pass.Write(backBufferHandle, GraphAccess::RenderTarget);
 			},
-			nullptr);
-
-		m_renderGraph.Compile();
-		m_renderGraph.Execute(CommandContext::Get());
-
-		// Restore main descriptor heap for ImGui (post-process pass may have changed it)
-		ID3D12DescriptorHeap* mainHeaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
-		m_d3d12CommandList->SetDescriptorHeaps(_countof(mainHeaps), mainHeaps);
+			[this, frameIndex]()
+			{
+				ID3D12GraphicsCommandList4* commandList = CommandContext::Get().GetCommandList();
+				ID3D12DescriptorHeap* heaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
+				commandList->SetDescriptorHeaps(_countof(heaps), heaps);
+				BindBackBufferTarget(frameIndex);
+				ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
+			});
 	}
 
-	if (!m_headless)
-		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), m_d3d12CommandList.Get());
-	
-	backBuffer.TransitionChecked(m_d3d12CommandList.Get(),
-		D3D12_RESOURCE_STATE_RENDER_TARGET,
-		D3D12_RESOURCE_STATE_PRESENT);
+	// Transition-only sink. Headless has no ImGui node, so this is what returns the
+	// back buffer from COPY_DEST; interactively it comes back from RENDER_TARGET.
+	m_renderGraph.AddPass("Present",
+		[&](RenderGraphPassBuilder& pass)
+		{
+			pass.NeverCull();
+			pass.Read(backBufferHandle, GraphAccess::Present);
+		},
+		nullptr);
+
+	m_renderGraph.Compile();
+	m_renderGraph.Execute(CommandContext::Get());
 
 	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
 
@@ -1888,8 +1743,8 @@ void Renderer::DeclareGuidingReads(RenderGraphPassBuilder& pass)
 
 void Renderer::DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass)
 {
-	// The raster draws are not a node yet (phase 5), so this stands in for them:
-	// whatever the active debug view samples is what keeps VXPG stages alive.
+	// What the active debug view samples is what keeps the VXPG stages behind it
+	// alive: the draw declares its reads, and culling derives the rest.
 	constexpr GraphAccess kUavRead = GraphAccess::UnorderedAccessRead;
 
 	switch (g_rasterizationDebugMode.Get())
@@ -1915,6 +1770,166 @@ void Renderer::DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass)
 		break;
 	default:
 		break;
+	}
+}
+
+void Renderer::BuildRasterGraph(GraphResourceHandle backBuffer, GraphResourceHandle depthStencil, uint32_t frameIndex)
+{
+	// Raytracing overwrites the whole back buffer with the present copy and draws
+	// no geometry, so both clears only exist on this path (measured 2026-08-01,
+	// ABeautifulGame 3 s Debug: PT 3151 -> 3276 frames without them).
+	m_renderGraph.AddPass("Raster Clear",
+		[&](RenderGraphPassBuilder& pass)
+		{
+			pass.Write(backBuffer, GraphAccess::RenderTarget);
+			pass.Write(depthStencil, GraphAccess::DepthWrite);
+		},
+		[this, frameIndex]()
+		{
+			constexpr FLOAT clearColor[4] = { 0.3f, 0.6f, 0.9f, 1.0f };
+			ID3D12GraphicsCommandList4* commandList = CommandContext::Get().GetCommandList();
+
+			const CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+			                                              frameIndex, m_rtvDescriptorSize);
+			commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+			commandList->ClearDepthStencilView(m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+			                                   D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+		});
+
+	m_renderGraph.AddPass("Raster Draw",
+		[&](RenderGraphPassBuilder& pass)
+		{
+			pass.Write(backBuffer, GraphAccess::RenderTarget);
+			pass.Write(depthStencil, GraphAccess::DepthWrite);
+			DeclareRasterDebugViewReads(pass);
+		},
+		[this, frameIndex]() { DrawScene(frameIndex); });
+}
+
+void Renderer::BuildRaytraceGraph(GraphResourceHandle backBufferHandle, Texture& backBuffer)
+{
+	PostProcessParams postProcessParams;
+	postProcessParams.exposure   = g_exposure.Get();
+	postProcessParams.contrast   = g_contrast.Get();
+	postProcessParams.saturation = g_saturation.Get();
+	postProcessParams.lift       = g_lift.Get();
+
+	// ADR 0017 step A: the raytrace -> accumulate -> tonemap -> copy chain declares
+	// what it touches and the graph places the barriers. The passes themselves no
+	// longer carry any.
+	Texture& raytraceOutput = *m_raytracePass->GetOutputTexture();
+	const bool accumulate   = g_accumulationEnabled.Get() != 0;
+	Texture& tonemapInput   = accumulate ? m_accumulationPass->GetDisplayBuffer() : raytraceOutput;
+
+	const GraphResourceHandle raytraceOutputHandle = m_renderGraph.Import(raytraceOutput, "Raytrace Output");
+	const GraphResourceHandle tonemapInputHandle   = m_renderGraph.Import(tonemapInput, "Tonemap Input");
+	const GraphResourceHandle tonemapOutputHandle  = m_renderGraph.Import(m_postProcessPass->GetOutputBuffer(), "PostProcess Output");
+
+	m_renderGraph.AddPass("Raytrace Technique",
+		[&](RenderGraphPassBuilder& pass)
+		{
+			pass.Write(raytraceOutputHandle, GraphAccess::ComputeWrite);
+			// A guiding technique reads the VXPG products; this declaration is what
+			// keeps their producers alive through culling.
+			DeclareGuidingReads(pass);
+		},
+		[this]() { m_raytracePass->Render(); });
+
+	if (accumulate)
+	{
+		m_renderGraph.AddPass("Accumulation",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.Read(raytraceOutputHandle, GraphAccess::ComputeRead);
+				pass.Write(tonemapInputHandle, GraphAccess::ComputeWrite);
+			},
+			[this, &raytraceOutput]() { m_accumulationPass->Render(raytraceOutput); });
+	}
+
+	m_renderGraph.AddPass("PostProcess",
+		[&](RenderGraphPassBuilder& pass)
+		{
+			pass.Read(tonemapInputHandle, GraphAccess::ComputeRead);
+			pass.Write(tonemapOutputHandle, GraphAccess::ComputeWrite);
+		},
+		[this, &tonemapInput, postProcessParams]()
+		{
+			m_postProcessPass->Dispatch(tonemapInput, postProcessParams);
+		});
+
+	m_renderGraph.AddPass("Present Copy",
+		[&](RenderGraphPassBuilder& pass)
+		{
+			pass.Read(tonemapOutputHandle, GraphAccess::CopySource);
+			pass.Write(backBufferHandle, GraphAccess::CopyDestination);
+		},
+		[this, &backBuffer]() { m_postProcessPass->CopyToBackBuffer(backBuffer); });
+
+	// Readback for a screenshot armed by Tick(). A node so the copy-source state it
+	// needs is declared rather than inherited from whatever ran before it.
+	if (m_screenshotManager->IsCaptureDue())
+	{
+		m_renderGraph.AddPass("Screenshot Readback",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.NeverCull();
+				pass.Read(tonemapOutputHandle, GraphAccess::CopySource);
+			},
+			[this]()
+			{
+				m_screenshotManager->RecordCopy(m_postProcessPass->GetOutputBuffer().GetUnderlyingResource());
+			});
+	}
+}
+
+void Renderer::BindBackBufferTarget(uint32_t frameIndex) const
+{
+	const CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+	                                              frameIndex, m_rtvDescriptorSize);
+	const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	CommandContext::Get().GetCommandList()->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
+}
+
+void Renderer::DrawScene(uint32_t frameIndex)
+{
+	ID3D12GraphicsCommandList4* commandList = CommandContext::Get().GetCommandList();
+	ID3D12DescriptorHeap* descriptorHeaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
+
+	BindBackBufferTarget(frameIndex);
+	commandList->SetPipelineState(m_pipelineStateObject.Get());
+	commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
+	commandList->SetGraphicsRootSignature(m_rootSignature.Get());
+
+	m_rootSignature.Set(commandList, kRasterPassConstants, m_passConstants->GetGpuVirtualAddress());
+
+	if (m_voxelizationPass)
+		m_rootSignature.Set(commandList, kRasterVoxelGridConstants,
+		                    m_voxelizationPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+
+	for (const auto& go : m_scene->GetGameObjects())
+	{
+		auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+		m_rootSignature.Set(commandList, kRasterModelConstants, gpuAddress);
+
+		for (const auto& primitive : go->GetModel()->GetMeshes())
+		{
+			gpuAddress = primitive->m_material->m_materialBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+			m_rootSignature.Set(commandList, kRasterMaterialConstants, gpuAddress);
+
+			auto vertex_view = primitive->GetVertexView();
+			auto index_view = primitive->GetIndexView();
+
+			auto vertexBuffer = std::dynamic_pointer_cast<VertexBuffer>(vertex_view.buffer);
+			auto indexBuffer = std::dynamic_pointer_cast<IndexBuffer>(index_view.buffer);
+
+			commandList->IASetVertexBuffers(0, 1, &vertexBuffer->GetVertexBufferView());
+			commandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+			m_rootSignature.SetTable(commandList, 0, GlobalDescriptorHeap::Get().GpuStart());
+
+			CommandContext::Get().DrawIndexedInstanced(index_view.count, 1, index_view.offset, vertex_view.offset, 0);
+		}
 	}
 }
 

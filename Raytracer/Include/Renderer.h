@@ -141,6 +141,15 @@ private:
 	void LoadSkybox(const std::wstring& path);
 	void DeclareGuidingReads(RenderGraphPassBuilder& pass);
 	void DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass);
+
+	// The two halves of a frame, each adding its own nodes to the graph the VXPG
+	// stages were already declared into. Everything that touches the back buffer is
+	// a node, so one Compile()/Execute() covers the whole frame in either mode.
+	void BuildRasterGraph(GraphResourceHandle backBuffer, GraphResourceHandle depthStencil, uint32_t frameIndex);
+	void BuildRaytraceGraph(GraphResourceHandle backBufferHandle, Texture& backBuffer);
+	void BindBackBufferTarget(uint32_t frameIndex) const;
+	void DrawScene(uint32_t frameIndex);
+
 	void DumpRenderGraphIfRequested();
 	void WriteVoxelUavsToGlobalHeap();
 	void WriteSuperpixelUavsToGlobalHeap();
