@@ -232,33 +232,31 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
                                          voxelRepresentativeRange, vplPositionRange, vbufferRange, clusterMaskRange,
                                          spixelIndexRange, fuzzyWeightRange, fuzzyIndexRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[24];
+    CD3DX12_ROOT_PARAMETER rootParameters[22];
     rootParameters[0].InitAsDescriptorTable(16, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0);  // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0);  // Instance Info
-    rootParameters[3].InitAsShaderResourceView(5, 0);  // Random buffer
-    rootParameters[4].InitAsShaderResourceView(6, 0);  // Lights struct buffer
-    rootParameters[5].InitAsConstants(1, 1);            // Time
-    rootParameters[6].InitAsConstantBufferView(3, 0);   // Pass constants
-    rootParameters[7].InitAsConstantBufferView(4, 0);   // Voxel grid constants
-    rootParameters[8].InitAsUnorderedAccessView(3, 0);  // Guiding counters
-    rootParameters[9].InitAsUnorderedAccessView(4, 0);  // Guiding compact ids
-    rootParameters[10].InitAsUnorderedAccessView(6, 0); // Guiding inverse index
-    rootParameters[11].InitAsUnorderedAccessView(10, 0); // Voxel fingerprints (debug view 8)
-    rootParameters[12].InitAsUnorderedAccessView(11, 0); // Cluster assignments (sampling + view 9)
-    rootParameters[13].InitAsUnorderedAccessView(12, 0); // Cluster seeds (debug view 9)
-    rootParameters[14].InitAsUnorderedAccessView(14, 0); // Light tree nodes (sampling + view 11)
-    rootParameters[15].InitAsUnorderedAccessView(15, 0); // Compact->leaf map (sampling + view 11)
-    rootParameters[16].InitAsUnorderedAccessView(16, 0); // Cluster root nodes (sampling + view 11)
-    rootParameters[17].InitAsUnorderedAccessView(17, 0); // Top-level importance heap (sampling + view 12)
-    rootParameters[18].InitAsUnorderedAccessView(18, 0); // Live voxel bound min (compact-bound guide sampling)
-    rootParameters[19].InitAsUnorderedAccessView(19, 0); // Live voxel bound max (compact-bound guide sampling)
-    rootParameters[20].InitAsUnorderedAccessView(22, 0); // Per-tile adaptive guide q (one-sample MIS, ADR 0015)
-    rootParameters[21].InitAsUnorderedAccessView(23, 0); // Per-tile strategy stats (one-sample MIS, ADR 0015)
-    rootParameters[22].InitAsShaderResourceView(1, 1); // Emissive triangles (t1, space1)
-    rootParameters[23].InitAsShaderResourceView(2, 1); // Light pool (t2, space1)
+    rootParameters[3].InitAsShaderResourceView(6, 0);  // Lights struct buffer
+    rootParameters[4].InitAsConstantBufferView(3, 0);   // Pass constants
+    rootParameters[5].InitAsConstantBufferView(4, 0);   // Voxel grid constants
+    rootParameters[6].InitAsUnorderedAccessView(3, 0);  // Guiding counters
+    rootParameters[7].InitAsUnorderedAccessView(4, 0);  // Guiding compact ids
+    rootParameters[8].InitAsUnorderedAccessView(6, 0);  // Guiding inverse index
+    rootParameters[9].InitAsUnorderedAccessView(10, 0); // Voxel fingerprints (debug view 8)
+    rootParameters[10].InitAsUnorderedAccessView(11, 0); // Cluster assignments (sampling + view 9)
+    rootParameters[11].InitAsUnorderedAccessView(12, 0); // Cluster seeds (debug view 9)
+    rootParameters[12].InitAsUnorderedAccessView(14, 0); // Light tree nodes (sampling + view 11)
+    rootParameters[13].InitAsUnorderedAccessView(15, 0); // Compact->leaf map (sampling + view 11)
+    rootParameters[14].InitAsUnorderedAccessView(16, 0); // Cluster root nodes (sampling + view 11)
+    rootParameters[15].InitAsUnorderedAccessView(17, 0); // Top-level importance heap (sampling + view 12)
+    rootParameters[16].InitAsUnorderedAccessView(18, 0); // Live voxel bound min (compact-bound guide sampling)
+    rootParameters[17].InitAsUnorderedAccessView(19, 0); // Live voxel bound max (compact-bound guide sampling)
+    rootParameters[18].InitAsUnorderedAccessView(22, 0); // Per-tile adaptive guide q (one-sample MIS, ADR 0015)
+    rootParameters[19].InitAsUnorderedAccessView(23, 0); // Per-tile strategy stats (one-sample MIS, ADR 0015)
+    rootParameters[20].InitAsShaderResourceView(1, 1); // Emissive triangles (t1, space1)
+    rootParameters[21].InitAsShaderResourceView(2, 1); // Light pool (t2, space1)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(24, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -318,31 +316,27 @@ void GuidedPathTracingPass::Render()
     m_commandList->SetComputeRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
     m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(3, m_randomBuffer->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(4, m_currentScene->GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(22, m_currentScene->GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(23, m_currentScene->GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(3, m_currentScene->GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(20, m_currentScene->GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(21, m_currentScene->GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
 
-    uint32_t time;
-    memcpy(&time, &m_time, sizeof(float));
-    m_commandList->SetComputeRoot32BitConstant(5, time, 0);
-    m_commandList->SetComputeRootConstantBufferView(6, m_passConstants->GetGpuVirtualAddress());
-    m_commandList->SetComputeRootConstantBufferView(7, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(8, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(9, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(10, m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(11, m_fingerprintPass->GetVoxelFingerprintsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(12, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(13, m_clusterPass->GetClusterSeedCompactIdsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(14, m_lightTreePass->GetNodesBufferVA());
-    m_commandList->SetComputeRootUnorderedAccessView(15, m_lightTreePass->GetCompactToLeafBufferVA());
-    m_commandList->SetComputeRootUnorderedAccessView(16, m_lightTreePass->GetClusterRootsBufferVA());
-    m_commandList->SetComputeRootUnorderedAccessView(17, m_lightTreePass->GetSuperpixelClusterHeapBufferVA());
-    m_commandList->SetComputeRootUnorderedAccessView(18, m_buildPass->GetLiveBoundMinBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(19, m_buildPass->GetLiveBoundMaxBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootConstantBufferView(4, m_passConstants->GetGpuVirtualAddress());
+    m_commandList->SetComputeRootConstantBufferView(5, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(6, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(7, m_buildPass->GetCompactIdsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(8, m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(9, m_fingerprintPass->GetVoxelFingerprintsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(10, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(11, m_clusterPass->GetClusterSeedCompactIdsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(12, m_lightTreePass->GetNodesBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(13, m_lightTreePass->GetCompactToLeafBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(14, m_lightTreePass->GetClusterRootsBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(15, m_lightTreePass->GetSuperpixelClusterHeapBufferVA());
+    m_commandList->SetComputeRootUnorderedAccessView(16, m_buildPass->GetLiveBoundMinBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(17, m_buildPass->GetLiveBoundMaxBuffer()->GetGPUVirtualAddress());
     EnsureAdaptiveQResources(Window::Get().GetWidth(), Window::Get().GetHeight());
-    m_commandList->SetComputeRootUnorderedAccessView(20, m_tileGuideQ->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootUnorderedAccessView(21, m_tileStrategyStats->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(18, m_tileGuideQ->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootUnorderedAccessView(19, m_tileStrategyStats->GetGPUVirtualAddress());
 
     if (UseInlineRayQuery())
     {

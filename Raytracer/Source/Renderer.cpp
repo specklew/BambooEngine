@@ -238,13 +238,6 @@ void Renderer::Initialize()
 
 	ExecuteCommandsAndReset();
 
-	std::vector<float> randomData(3840 * 2190);
-	for (int i = 0; i < 3840 * 2190; ++i)
-	{
-		randomData[i] = RaytracerRandom::g_random->GetRandomFloat();
-	}
-	
-	m_randomBuffer = CreateStructuredBuffer<float>(randomData);
 	const auto& registry = RaytracePass::GetRegistry();
 	// Default to vanilla path tracing regardless of static-init registration order
 	auto defaultEntry = std::find_if(registry.begin(), registry.end(),
@@ -252,7 +245,7 @@ void Renderer::Initialize()
 	if (defaultEntry == registry.end() && !registry.empty())
 		defaultEntry = registry.begin();
 	m_raytracePass = (defaultEntry == registry.end()) ? std::make_shared<RaytracePass>() : defaultEntry->create();
-	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
 
 	m_accumulationPass = std::make_shared<FrameAccumulationPass>();
 	m_accumulationPass->Initialize(g_device, m_d3d12CommandList);
@@ -271,11 +264,11 @@ void Renderer::Initialize()
 	m_voxelizationPass->OnSceneLoaded(*m_scene);
 
 	m_vbufferPass = std::make_shared<VBufferPass>();
-	m_vbufferPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+	m_vbufferPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
 
 	m_lightInjectionPass = std::make_shared<LightInjectionPass>();
 	m_lightInjectionPass->SetVoxelizationPass(m_voxelizationPass);
-	m_lightInjectionPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+	m_lightInjectionPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
 
 	m_voxelGuidingBuildPass = std::make_shared<VoxelGuidingBuildPass>();
 	m_voxelGuidingBuildPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass);
@@ -443,8 +436,6 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	XMStoreFloat4x4(&constants.ProjectionInverse, XMMatrixInverse(&det, projection));
 	
 	memcpy(&m_mappedData[0], &constants, sizeof(constants));
-
-	m_raytracePass->Update(elapsedTime, totalTime);
 
 	// Must run before the PassConstants fill below: it reads the pool's fresh
 	// count/total-power off m_scene, and the analytic tail rebuild changes them
@@ -1324,7 +1315,7 @@ void Renderer::SetTechniqueByIndex(int index)
 		return;
 	spdlog::info("Switching raytracing technique to: {}", registry[index].name);
 	auto newPass = registry[index].create();
-	newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_randomBuffer->GetUnderlyingResource(), m_passConstants);
+	newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
 	m_raytracePass = std::move(newPass);
 	m_activeTechniqueIndex = index;
 	WireGuidingResources();

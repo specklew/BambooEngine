@@ -88,7 +88,7 @@ void VBufferPass::CreateGlobalRootSignature()
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
     rootParameters[3].InitAsConstantBufferView(3, 0); // Pass constants (jitter)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(4, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());

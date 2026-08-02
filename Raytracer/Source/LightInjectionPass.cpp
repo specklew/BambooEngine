@@ -138,19 +138,17 @@ void LightInjectionPass::CreateGlobalRootSignature()
                                         shadingPointsRange, voxelRepresentativeRange, vplPositionRange,
                                         vbufferRange};
 
-    CD3DX12_ROOT_PARAMETER rootParameters[10];
+    CD3DX12_ROOT_PARAMETER rootParameters[8];
     rootParameters[0].InitAsDescriptorTable(13, ranges);
     rootParameters[1].InitAsShaderResourceView(3, 0); // Geometry Info
     rootParameters[2].InitAsShaderResourceView(4, 0); // Instance Info
-    rootParameters[3].InitAsShaderResourceView(5, 0); // Random buffer
-    rootParameters[4].InitAsShaderResourceView(6, 0); // Lights struct buffer
-    rootParameters[5].InitAsConstants(1, 1);           // Time
-    rootParameters[6].InitAsConstantBufferView(3, 0);  // Pass constants
-    rootParameters[7].InitAsConstantBufferView(4, 0);  // Voxel grid constants
-    rootParameters[8].InitAsShaderResourceView(1, 1); // Emissive triangles (t1, space1)
-    rootParameters[9].InitAsShaderResourceView(2, 1); // Light pool (t2, space1)
+    rootParameters[3].InitAsShaderResourceView(6, 0); // Lights struct buffer
+    rootParameters[4].InitAsConstantBufferView(3, 0);  // Pass constants
+    rootParameters[5].InitAsConstantBufferView(4, 0);  // Voxel grid constants
+    rootParameters[6].InitAsShaderResourceView(1, 1); // Emissive triangles (t1, space1)
+    rootParameters[7].InitAsShaderResourceView(2, 1); // Light pool (t2, space1)
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(10, rootParameters);
+    CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc(_countof(rootParameters), rootParameters);
 
     auto static_samplers = Renderer::GetStaticSamplers();
     rootSignatureDesc.NumStaticSamplers = static_cast<UINT>(static_samplers.size());
@@ -284,16 +282,11 @@ void LightInjectionPass::Render()
     m_commandList->SetComputeRootDescriptorTable(0, GlobalDescriptorHeap::Get().GpuStart());
     m_commandList->SetComputeRootShaderResourceView(1, m_currentScene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_commandList->SetComputeRootShaderResourceView(2, m_currentScene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(3, m_randomBuffer->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(4, m_currentScene->GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-
-    uint32_t time;
-    memcpy(&time, &m_time, sizeof(float));
-    m_commandList->SetComputeRoot32BitConstant(5, time, 0);
-    m_commandList->SetComputeRootConstantBufferView(6, m_passConstants->GetGpuVirtualAddress());
-    m_commandList->SetComputeRootConstantBufferView(7, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(8, m_currentScene->GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
-    m_commandList->SetComputeRootShaderResourceView(9, m_currentScene->GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(3, m_currentScene->GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootConstantBufferView(4, m_passConstants->GetGpuVirtualAddress());
+    m_commandList->SetComputeRootConstantBufferView(5, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(6, m_currentScene->GetEmissiveTriangleBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
+    m_commandList->SetComputeRootShaderResourceView(7, m_currentScene->GetLightPoolBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
 
     D3D12_DISPATCH_RAYS_DESC desc = {};
     desc.RayGenerationShaderRecord.StartAddress = m_shaderBindingTable->GetUnderlyingResource()->GetGPUVirtualAddress();

@@ -19,7 +19,6 @@ public:
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
         std::shared_ptr<Scene> initialScene,
-        Microsoft::WRL::ComPtr<ID3D12Resource> randomBuffer,
         std::shared_ptr<PassConstants> passConstants);
 
     virtual void Render();
@@ -31,7 +30,6 @@ public:
     // declares, not from a stage order maintained here.
     virtual bool UsesVoxelGuiding() const { return false; }
 
-    void Update(double elapsedTime, double totalTime);
     void OnResize();
     void OnShaderReload();
     void OnSceneChange(std::shared_ptr<Scene> scene);
@@ -118,10 +116,7 @@ protected:
 
     D3D12_CPU_DESCRIPTOR_HANDLE m_geometryInfoHandle = {};
 
-    Microsoft::WRL::ComPtr<ID3D12Resource> m_randomBuffer;
-    std::shared_ptr<PassConstants>         m_passConstants;
-
-    float m_time = 0.0f;
+    std::shared_ptr<PassConstants> m_passConstants;
 
 private:
     void LoadShaders();
