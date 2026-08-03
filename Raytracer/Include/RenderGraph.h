@@ -3,6 +3,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "BindingSlot.h"
@@ -146,10 +147,20 @@ private:
         ID3D12Resource* raw     = nullptr;
         std::string     debugName;
         bool            externallyRead = false;
-        // UAV hazard bookkeeping, valid only within one compiled frame.
-        bool            touchedThisFrame     = false;
-        bool            writtenSinceLastRead = false;
-        bool            readSinceLastWrite   = false;
+    };
+
+    // UAV hazard bookkeeping. Tracked *state* already crosses frames, because it
+    // lives on the Resource and not here — but a UAV write followed by a UAV read
+    // needs a barrier without any state change, and that was recorded per frame.
+    // The per-frame flush covered the frame boundary; with it gone, frame N's
+    // write to frame N+1's read is a real hazard (adaptive q's TileGuideQ is the
+    // live one). Imports still last exactly one frame (§A2), so this is keyed by
+    // the underlying resource rather than by handle.
+    struct UavUsage
+    {
+        bool     writtenSinceLastRead = false;
+        bool     readSinceLastWrite   = false;
+        uint64_t lastTouchedFrame     = 0;
     };
 
     struct PassNode
@@ -186,7 +197,17 @@ private:
     // Two timestamps per node; the cap is the node budget one frame may time.
     static constexpr uint32_t kMaxTimedPasses = 64;
 
+    // How long a UavUsage entry outlives its last touch. Frame pacing keeps the
+    // CPU under NUM_FRAMES frames ahead, so work older than that has completed on
+    // the GPU and needs no barrier — double it and dropping an entry can never
+    // drop a hazard. Without this the map would accumulate dead keys across scene
+    // switches and resizes.
+    static constexpr uint64_t kUavUsageLifetimeFrames = Constants::Graphics::NUM_FRAMES * 2;
+
     std::vector<ImportedResource> m_resources;
+    // Survives Reset(), unlike m_resources: see UavUsage.
+    std::unordered_map<ID3D12Resource*, UavUsage> m_uavUsage;
+    uint64_t                      m_frameCounter = 0;
     std::vector<PassNode>         m_passes;
     // User state, not frame state: survives Reset so a toggle sticks while the
     // graph is rebuilt every frame.

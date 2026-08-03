@@ -242,28 +242,33 @@ void RenderGraph::Compile()
                 assert(required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && "Raw import declared with a state-carrying access — import it as a tracked Resource");
             }
 
+            ID3D12Resource* underlying = imported.tracked
+                ? imported.tracked->GetUnderlyingResource().Get()
+                : imported.raw;
+
             // Hazards a transition cannot express. Read-after-write and
             // write-after-write are the obvious ones; write-after-read needs the
             // barrier too, or the writer can overwrite while readers are still in
             // flight (the injection-clear vs guiding-build edge). A transition
             // already orders both sides, so it stands in for the UAV barrier.
-            const bool afterWrite = imported.writtenSinceLastRead;
-            const bool afterRead  = imported.readSinceLastWrite && declaration.isWrite;
-            if (!emittedTransition && required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && imported.touchedThisFrame &&
-                (afterWrite || afterRead))
+            //
+            // A never-seen resource defaults to neither, so its first declaration
+            // emits nothing — there is no producer to order against.
+            UavUsage&  usage      = m_uavUsage[underlying];
+            const bool afterWrite = usage.writtenSinceLastRead;
+            const bool afterRead  = usage.readSinceLastWrite && declaration.isWrite;
+            if (!emittedTransition && required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && (afterWrite || afterRead))
             {
-                ID3D12Resource* underlying = imported.tracked
-                    ? imported.tracked->GetUnderlyingResource().Get()
-                    : imported.raw;
                 compiled.barriers.push_back({CD3DX12_RESOURCE_BARRIER::UAV(underlying), underlying});
 
                 if (m_logBarriers)
-                    m_barrierLog.push_back(pass.name + ": UAV " + imported.debugName);
+                    m_barrierLog.push_back(pass.name + ": UAV " + imported.debugName +
+                                           (usage.lastTouchedFrame == m_frameCounter ? "" : " (cross-frame)"));
             }
 
-            imported.touchedThisFrame     = true;
-            imported.writtenSinceLastRead = declaration.isWrite;
-            imported.readSinceLastWrite   = !declaration.isWrite;
+            usage.writtenSinceLastRead = declaration.isWrite;
+            usage.readSinceLastWrite   = !declaration.isWrite;
+            usage.lastTouchedFrame     = m_frameCounter;
         }
 
         m_compiled.push_back(std::move(compiled));
@@ -394,6 +399,12 @@ void RenderGraph::Reset()
     m_passes.clear();
     m_compiled.clear();
     m_resources.clear();
+    ++m_frameCounter;
+
+    for (auto entry = m_uavUsage.begin(); entry != m_uavUsage.end();)
+        entry = (entry->second.lastTouchedFrame + kUavUsageLifetimeFrames < m_frameCounter)
+            ? m_uavUsage.erase(entry)
+            : std::next(entry);
 }
 
 std::string RenderGraph::DumpPasses() const
