@@ -175,9 +175,6 @@ static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp",
 static AutoCVarInt   g_skyLighting("pathtracing.skyLighting",
 	"Skybox radiance lights surfaces via indirect rays; 0 = sky is background-only (benchmark isolation: the VXPG guide only targets direct-lit surfaces)",
 	1, CVarFlags::EditCheckbox);
-static AutoCVarEnum  g_guidingDebugView("guiding.debugView", "Guided PT debug visualization", GuidingDebugView::None,
-                                        CVarFlags::None, FormatDebugViewDocs<GuidingDebugView>(kGuidingDebugViewDocs));
-
 void Renderer::Initialize()
 {
 	spdlog::info("Initializing renderer...");
@@ -1042,6 +1039,8 @@ void Renderer::InitializeEditorUI()
 		SetTechniqueByIndex(index);
 	});
 	m_editorUI->SetCurrentTechniqueIndex(m_activeTechniqueIndex);
+	m_editorUI->SetDebugViewGetter([this]() { return GetTechniqueDebugViews(); });
+	m_editorUI->SetOnDebugViewPicked([this](int index) { SetTechniqueDebugView(index); });
 }
 
 void Renderer::LoadScene(const std::wstring& path)

@@ -44,6 +44,13 @@ public:
     // The BSDF subtree of this integrator writes the VPLs (ADR 0009).
     bool ProducesGuidingVpls() const override { return true; }
 
+    // This technique reads GuidingDebugView, not the raytracing enum DxrTechnique
+    // offers, so the dropdown and headless enumeration see the guide's own views.
+    std::vector<DebugView> GetDebugViews() const override;
+    bool SetDebugView(int index) override;
+    bool HasActiveDebugView() const override;
+    int  GetDebugMode() const override { return 0; } // guided views ride guidingFlags, not debugMode
+
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;

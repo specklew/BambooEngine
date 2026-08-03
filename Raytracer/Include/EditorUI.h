@@ -5,6 +5,7 @@
 #include <string>
 
 #include "RenderGraph.h"
+#include "RenderTechnique.h"
 #include "StatesPanel.h"
 
 class Camera;
@@ -52,6 +53,12 @@ public:
 	// cannot assume the renderer started on entry 0.
 	void SetCurrentTechniqueIndex(int index) { m_currentTechniqueIndex = index; }
 
+	void SetDebugViewGetter(std::function<std::vector<RenderTechnique::DebugView>()> getter)
+	{
+		m_debugViews = std::move(getter);
+	}
+	void SetOnDebugViewPicked(std::function<void(int)> setter) { m_onDebugViewPicked = std::move(setter); }
+
 private:
 	void DrawDebugPanel();
 	void DrawRenderGraphSection();
@@ -59,6 +66,7 @@ private:
 	void DrawSkyboxSection();
 	void DrawSceneSection();
 	void DrawTechniqueSection();
+	void DrawDebugViewCombo();
 
 	std::shared_ptr<Scene> m_scene;
 	std::shared_ptr<Camera> m_camera;
@@ -70,6 +78,10 @@ private:
 	std::wstring m_currentSceneName = L"abeautifulgame.glb";
 	std::function<void(int)> m_onDifferentTechniquePicked;
 	int m_currentTechniqueIndex = 0;
+	// Row in the active technique's view list, not the view's own enum value.
+	int m_currentDebugViewRow = 0;
+	std::function<std::vector<RenderTechnique::DebugView>()> m_debugViews;
+	std::function<void(int)>                                 m_onDebugViewPicked;
 	std::function<void(float, std::string, std::string)> m_onScreenshotRequest;
 	std::function<bool()>      m_isScreenshotPending;
 	std::function<const std::vector<RenderGraph::PassTiming>&()> m_renderGraphTimings;

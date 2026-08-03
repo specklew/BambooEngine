@@ -434,5 +434,32 @@ void EditorUI::DrawTechniqueSection()
 	{
 		if (m_onDifferentTechniquePicked)
 			m_onDifferentTechniquePicked(m_currentTechniqueIndex);
+		m_currentDebugViewRow = 0; // the new technique enumerates its own views
 	}
+
+	DrawDebugViewCombo();
+}
+
+// One dropdown for every debug view, instead of one CVar combo per technique kind.
+// Only one technique is active at a time, so the list is exactly the views that
+// technique can render — a shorter and more honest menu than the union of all three.
+void EditorUI::DrawDebugViewCombo()
+{
+	if (!m_debugViews || !m_onDebugViewPicked)
+		return;
+
+	const std::vector<RenderTechnique::DebugView> views = m_debugViews();
+	if (views.empty())
+		return;
+
+	std::vector<const char*> labels;
+	labels.reserve(views.size());
+	for (const RenderTechnique::DebugView& view : views)
+		labels.push_back(view.name.c_str());
+
+	if (m_currentDebugViewRow >= static_cast<int>(views.size()))
+		m_currentDebugViewRow = 0;
+
+	if (ImGui::Combo("Debug View", &m_currentDebugViewRow, labels.data(), static_cast<int>(labels.size())))
+		m_onDebugViewPicked(views[m_currentDebugViewRow].index);
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DebugViewDoc.h"
+#include "Utils/CVars.h"
 
 // Debug visualization for the guided path tracing technique.
 // Encoded into PassConstants::guidingFlags bits 1-4 (see guidedPathTracing.hlsl).
@@ -108,3 +109,9 @@ inline constexpr DebugViewDoc kGuidingDebugViewDocs[] = {
 	 "first bounce = weight-1 BSDF sample only (SIByL strategy 0): no guide branch, no guide pdf query; direct light, "
 	 "VPL writes, and every build pass unchanged"},
 };
+
+// The CVar lives beside its enum so both the Renderer (which packs it into
+// guidingFlags) and the guided technique (which offers it as a debug view) read
+// the same object rather than one reaching for the other's file.
+inline AutoCVarEnum g_guidingDebugView("guiding.debugView", "Guided PT debug visualization", GuidingDebugView::None,
+                                       CVarFlags::None, FormatDebugViewDocs<GuidingDebugView>(kGuidingDebugViewDocs));

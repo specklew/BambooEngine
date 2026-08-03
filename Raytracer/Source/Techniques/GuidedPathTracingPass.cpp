@@ -6,6 +6,7 @@
 #include "Constants.h"
 #include "FrameBindingLayout.h"
 #include "GlobalDescriptorHeap.h"
+#include "GuidingDebugView.h"
 #include "PassRegisters.h"
 #include "Renderer.h"
 #include "ResourceManager/ResourceManager.h"
@@ -91,6 +92,28 @@ bool IsAmdDevice(ID3D12Device* device)
     return cached == 1;
 }
 } // namespace
+
+std::vector<RenderTechnique::DebugView> GuidedPathTracingPass::GetDebugViews() const
+{
+    std::vector<DebugView> views;
+    for (const GuidingDebugView view : magic_enum::enum_values<GuidingDebugView>())
+        views.push_back({static_cast<int>(view), std::string(magic_enum::enum_name(view))});
+    return views;
+}
+
+bool GuidedPathTracingPass::SetDebugView(int index)
+{
+    const auto view = magic_enum::enum_cast<GuidingDebugView>(index);
+    if (!view)
+        return false;
+    g_guidingDebugView.Set(*view);
+    return true;
+}
+
+bool GuidedPathTracingPass::HasActiveDebugView() const
+{
+    return g_guidingDebugView.Get() != GuidingDebugView::None;
+}
 
 bool GuidedPathTracingPass::UseInlineRayQuery()
 {
