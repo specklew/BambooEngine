@@ -1,13 +1,15 @@
 #pragma once
 #include "GlobalDescriptorHeap.h"
+#include "GraphAccess.h"
 
-// One shader binding, declared once and used three times: to build the root
-// signature, to bind at draw time, and to answer "is this register mine?"
-// (ADR 0019). Slots are `static constexpr` next to the pass that owns them.
+// One shader binding, declared once and used four times: to build the root
+// signature, to bind at draw time, to answer "is this register mine?" (ADR 0019),
+// and to tell the render graph what the pass does to whatever is bound there
+// (ADR 0017 step 3). Slots are `static constexpr` next to the pass that owns them.
 //
 // A slot says *where* — kind, register, space, and for table entries which heap
-// offset. It does not say *what*: the resource is supplied at bind time, until
-// the render graph can resolve it (ADR 0017 step B).
+// offset — and *how it is used*. It still does not say *what*: the resource is
+// supplied per frame, because the graph's imports last exactly one frame.
 enum class BindingKind : uint8_t
 {
     Cbv,
@@ -46,7 +48,29 @@ struct BindingSlot
     uint32_t       constantCount  = 0; // RootConstants only
     uint32_t       tableIndex     = 0; // Table only: which table parameter
     uint32_t       heapOffset     = 0; // Table only: descriptors from table start
+
+    // What the graph records for this binding. None means the graph never sees it.
+    GraphAccess    graphAccess    = GraphAccess::None;
+    bool           graphWrites    = false;
 };
+
+// A slot's graph access, declared next to its register rather than repeated at
+// the node. RenderGraphPassBuilder::Declare reads both fields, so the direction
+// lives here too: GraphAccess alone cannot say whether a RenderTarget is being
+// written or merely kept.
+constexpr BindingSlot GraphReads(BindingSlot slot, GraphAccess access)
+{
+    slot.graphAccess = access;
+    slot.graphWrites = false;
+    return slot;
+}
+
+constexpr BindingSlot GraphWrites(BindingSlot slot, GraphAccess access)
+{
+    slot.graphAccess = access;
+    slot.graphWrites = true;
+    return slot;
+}
 
 // C++17 has no designated initializers, so slots are built through these rather
 // than positionally — a nine-field aggregate literal is unreadable and easy to

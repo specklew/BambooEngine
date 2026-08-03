@@ -18,6 +18,19 @@ void RenderGraphPassBuilder::Write(GraphResourceHandle resource, GraphAccess acc
         m_declarations.push_back({resource, access, true});
 }
 
+void RenderGraphPassBuilder::Declare(const BindingSlot& slot, GraphResourceHandle resource)
+{
+    // A slot the graph never sees still gets bound — it just has no producer or
+    // consumer to order against, so declaring it would only add a false edge.
+    assert(slot.graphAccess != GraphAccess::None &&
+           "BindingSlot passed to Declare() has no graph access; add GraphReads/GraphWrites to its slot table");
+
+    if (slot.graphWrites)
+        Write(resource, slot.graphAccess);
+    else
+        Read(resource, slot.graphAccess);
+}
+
 D3D12_RESOURCE_STATES RenderGraph::ToResourceState(GraphAccess access)
 {
     switch (access)
@@ -32,6 +45,7 @@ D3D12_RESOURCE_STATES RenderGraph::ToResourceState(GraphAccess access)
     case GraphAccess::CopySource:       return D3D12_RESOURCE_STATE_COPY_SOURCE;
     case GraphAccess::CopyDestination:  return D3D12_RESOURCE_STATE_COPY_DEST;
     case GraphAccess::Present:          return D3D12_RESOURCE_STATE_PRESENT;
+    case GraphAccess::None:
     case GraphAccess::Count:            break;
     }
     return D3D12_RESOURCE_STATE_COMMON;
@@ -51,6 +65,7 @@ const char* RenderGraph::ToString(GraphAccess access)
     case GraphAccess::CopySource:          return "CopySource";
     case GraphAccess::CopyDestination:     return "CopyDestination";
     case GraphAccess::Present:             return "Present";
+    case GraphAccess::None:                return "None";
     case GraphAccess::Count:               break;
     }
     return "<unknown>";

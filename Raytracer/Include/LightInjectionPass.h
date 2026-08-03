@@ -1,6 +1,8 @@
 #pragma once
 
 #include "DxrPass.h"
+#include "RenderGraph.h"
+#include "VxpgGraphHandles.h"
 
 class VoxelizationPass;
 
@@ -14,6 +16,10 @@ public:
     void SetVoxelizationPass(const std::shared_ptr<VoxelizationPass>& voxelPass) { m_voxelPass = voxelPass; }
 
     void Render() override;
+
+    // Everything this pass's node touches, taken from the slot table so the two
+    // descriptions cannot drift (ADR 0017 step 3).
+    void DeclareGraphResources(RenderGraphPassBuilder& pass, const VxpgGraphHandles& vxpg) const;
 
     // Primary-hit G-buffer (worldPos + octahedral normal), consumed by superpixel clustering.
     Microsoft::WRL::ComPtr<ID3D12Resource> GetShadingPointsTexture() const { return m_shadingPointsTex; }

@@ -1367,25 +1367,19 @@ void Renderer::BuildVxpgGraph()
 	// Stage 2: shared VBuffer (one jittered primary per pixel, ADR 0004), then
 	// light injection reconstructing its first vertex from it (also emits the
 	// ShadingPoints G-buffer).
+	// These two declare themselves from their own slot tables (ADR 0017 step 3),
+	// so the node here only names the pass — what it touches is stated once, next
+	// to the registers it binds.
 	if (m_vbufferPass)
 	{
 		m_renderGraph.AddPass("VXPG VBuffer",
-			[&](RenderGraphPassBuilder& pass) { pass.Write(m_vxpg.vbuffer, kUavWrite); },
+			[&](RenderGraphPassBuilder& pass) { m_vbufferPass->DeclareGraphResources(pass, m_vxpg); },
 			[this]() { m_vbufferPass->Render(); });
 	}
 	if (m_lightInjectionPass)
 	{
 		m_renderGraph.AddPass("VXPG LightInjection",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.Read(m_vxpg.vbuffer, kUavRead);
-				pass.Read(m_vxpg.voxelOccupancy, kUavRead);
-				pass.Write(m_vxpg.shadingPoints, kUavWrite);
-				pass.Write(m_vxpg.voxelRepresentative, kUavWrite);
-				pass.Write(m_vxpg.vplPosition, kUavWrite);
-				pass.Write(m_vxpg.voxelIrradiance, kUavWrite);
-				pass.Write(m_vxpg.voxelVplCount, kUavWrite);
-			},
+			[&](RenderGraphPassBuilder& pass) { m_lightInjectionPass->DeclareGraphResources(pass, m_vxpg); },
 			[this]() { m_lightInjectionPass->Render(); });
 	}
 

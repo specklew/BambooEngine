@@ -1,6 +1,8 @@
 #pragma once
 
 #include "DxrPass.h"
+#include "RenderGraph.h"
+#include "VxpgGraphHandles.h"
 
 // Shared primary-visibility buffer pass (ADR 0004, SIByL raytraced-vbuffer):
 // per frame, traces one jittered camera ray per pixel and stores the hit's
@@ -12,6 +14,10 @@ class VBufferPass : public DxrPass
 {
 public:
     void Render() override;
+
+    // Everything this pass's node touches, taken from the slot table so the two
+    // descriptions cannot drift (ADR 0017 step 3).
+    void DeclareGraphResources(RenderGraphPassBuilder& pass, const VxpgGraphHandles& vxpg) const;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> GetVBufferTexture() const { return m_vbufferTex; }
 

@@ -34,8 +34,14 @@ TechniqueDesc VBufferPass::GetTechniqueDesc() const
 }
 
 // The frame layout plus one output: the packed primary-hit identity.
-static constexpr BindingSlot kVBufferOutput =
-    PassTableEntry("gVBuffer", BindingKind::Uav, VBUFFER_REG_VBUFFER, GlobalDescriptor::VBuffer);
+static constexpr BindingSlot kVBufferOutput = GraphWrites(
+    PassTableEntry("gVBuffer", BindingKind::Uav, VBUFFER_REG_VBUFFER, GlobalDescriptor::VBuffer),
+    GraphAccess::ComputeWrite);
+
+void VBufferPass::DeclareGraphResources(RenderGraphPassBuilder& pass, const VxpgGraphHandles& vxpg) const
+{
+    pass.Declare(kVBufferOutput, vxpg.vbuffer);
+}
 
 void VBufferPass::CreateGlobalRootSignature()
 {

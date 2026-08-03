@@ -43,20 +43,43 @@ TechniqueDesc LightInjectionPass::GetTechniqueDesc() const
 // the G-buffers it fills for the guiding passes, and the grid constants.
 namespace
 {
-constexpr BindingSlot kVoxelIrradiance =
-    PassTableEntry("gVoxelIrradiance", BindingKind::Uav, INJECT_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
-constexpr BindingSlot kVoxelVplCount =
-    PassTableEntry("gVoxelVplCount", BindingKind::Uav, INJECT_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
-constexpr BindingSlot kShadingPoints =
-    PassTableEntry("gShadingPoints", BindingKind::Uav, INJECT_REG_SHADING_POINTS, GlobalDescriptor::ShadingPoints);
-constexpr BindingSlot kVoxelRepresentative = PassTableEntry("gVoxelRepresentative", BindingKind::Uav,
-                                                        INJECT_REG_VOXEL_REPRESENTATIVE,
-                                                        GlobalDescriptor::VoxelRepresentative);
-constexpr BindingSlot kVplPosition =
-    PassTableEntry("gVplPosition", BindingKind::Uav, INJECT_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
-constexpr BindingSlot kVBuffer =
-    PassTableEntry("gVBuffer", BindingKind::Uav, INJECT_REG_VBUFFER, GlobalDescriptor::VBuffer);
+constexpr BindingSlot kVoxelIrradiance = GraphWrites(
+    PassTableEntry("gVoxelIrradiance", BindingKind::Uav, INJECT_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance),
+    GraphAccess::ComputeWrite);
+constexpr BindingSlot kVoxelVplCount = GraphWrites(
+    PassTableEntry("gVoxelVplCount", BindingKind::Uav, INJECT_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount),
+    GraphAccess::ComputeWrite);
+constexpr BindingSlot kShadingPoints = GraphWrites(
+    PassTableEntry("gShadingPoints", BindingKind::Uav, INJECT_REG_SHADING_POINTS, GlobalDescriptor::ShadingPoints),
+    GraphAccess::ComputeWrite);
+constexpr BindingSlot kVoxelRepresentative = GraphWrites(
+    PassTableEntry("gVoxelRepresentative", BindingKind::Uav, INJECT_REG_VOXEL_REPRESENTATIVE,
+                   GlobalDescriptor::VoxelRepresentative),
+    GraphAccess::ComputeWrite);
+constexpr BindingSlot kVplPosition = GraphWrites(
+    PassTableEntry("gVplPosition", BindingKind::Uav, INJECT_REG_VPL_POSITION, GlobalDescriptor::VplPosition),
+    GraphAccess::ComputeWrite);
+constexpr BindingSlot kVBuffer = GraphReads(
+    PassTableEntry("gVBuffer", BindingKind::Uav, INJECT_REG_VBUFFER, GlobalDescriptor::VBuffer),
+    GraphAccess::UnorderedAccessRead);
+// The grid dimensions, not a graph resource: no producer inside the frame.
 constexpr BindingSlot kVoxelGridConstants = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
+
+constexpr BindingSlot kInjectionSlots[] = {
+    kVoxelIrradiance, kVoxelVplCount, kShadingPoints, kVoxelRepresentative, kVplPosition, kVBuffer};
+}
+
+void LightInjectionPass::DeclareGraphResources(RenderGraphPassBuilder& pass, const VxpgGraphHandles& vxpg) const
+{
+    // Same order as kInjectionSlots; the slot supplies the access and direction,
+    // this only says which of the frame's resources sits behind each binding.
+    const GraphResourceHandle handles[] = {
+        vxpg.voxelIrradiance, vxpg.voxelVplCount, vxpg.shadingPoints,
+        vxpg.voxelRepresentative, vxpg.vplPosition, vxpg.vbuffer};
+    static_assert(std::size(handles) == std::size(kInjectionSlots), "one handle per graph-visible slot");
+
+    for (size_t i = 0; i < std::size(kInjectionSlots); ++i)
+        pass.Declare(kInjectionSlots[i], handles[i]);
 }
 
 void LightInjectionPass::CreateGlobalRootSignature()

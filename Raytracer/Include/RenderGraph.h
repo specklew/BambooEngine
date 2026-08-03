@@ -5,6 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "BindingSlot.h"
+#include "GraphAccess.h"
+
 class CommandContext;
 class Resource;
 
@@ -18,43 +21,17 @@ class Resource;
 // plan as data, Execute() submits it. Async compute (phase 6) inserts a
 // scheduler between the two rather than rewriting the compiler.
 
-using GraphResourceHandle = uint32_t;
-inline constexpr GraphResourceHandle InvalidGraphResource = ~0u;
-
-// What a pass does to a resource. The graph maps these to the legacy states the
-// barrier needs; a Write followed by a Read is the edge that orders two passes.
-enum class GraphAccess
-{
-    ComputeRead,          // NON_PIXEL_SHADER_RESOURCE
-    ComputeWrite,         // UNORDERED_ACCESS
-    UnorderedAccessRead,  // read through a UAV binding — same state, still needs
-                          // a UAV barrier after a writer (the VXPG textures)
-    PixelRead,        // PIXEL_SHADER_RESOURCE
-    RenderTarget,
-    DepthWrite,
-    IndirectArgument,
-    CopySource,
-    CopyDestination,
-    Present,
-    Count
-};
-
-// Declared now, one legal value until phase 6. Cross-queue synchronisation is
-// fences rather than barriers and constrains which states a node may ask for, so
-// the compiler carries the attribute from the start instead of baking in the
-// single-queue assumption (ADR 0017).
-enum class GraphQueue
-{
-    Direct,
-    AsyncCompute,
-    Copy
-};
-
 class RenderGraphPassBuilder
 {
 public:
     void Read(GraphResourceHandle resource, GraphAccess access);
     void Write(GraphResourceHandle resource, GraphAccess access);
+
+    // Declares a binding the pass already describes in its slot table: the slot
+    // says what the access is and which direction it goes, the node only supplies
+    // this frame's resource (ADR 0017 step 3). One declaration, two consumers —
+    // the root signature and the graph.
+    void Declare(const BindingSlot& slot, GraphResourceHandle resource);
 
     void SetQueue(GraphQueue queue) { m_queue = queue; }
 
