@@ -422,7 +422,7 @@ void EditorUI::DrawTechniqueSection()
 	if (registry.empty())
 		return;
 
-	ImGui::SeparatorText("Raytracing Technique");
+	ImGui::SeparatorText("Render Technique");
 
 	// Build label array for ImGui combo
 	std::vector<const char*> names;

@@ -137,7 +137,6 @@ int HeadlessRunner::Run()
 {
     m_renderer.SetHeadless(true);
     m_renderer.ApplyRenderConfig(m_config);
-    m_renderer.SetRaytracing(true);
 
     m_renderer.LoadScene(ResolveScenePath(m_args.scene));
     ApplyConfiguredLights();

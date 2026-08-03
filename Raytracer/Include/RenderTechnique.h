@@ -56,6 +56,16 @@ public:
     // declares, not from a stage order maintained here.
     virtual bool UsesVoxelGuiding() const { return false; }
 
+    // PassConstants::debugMode carries a different enumeration depending on which
+    // technique is active — raster views and raytracing views are separate lists
+    // over the same field, so the technique that interprets it supplies it.
+    // ADR 0017 step 4 merges the enums and this goes away.
+    virtual int GetDebugMode() const { return 0; }
+
+    // True when a debug view of this technique's own kind is selected, so the
+    // shader variant carrying the view branches has to be compiled (ADR 0014).
+    virtual bool HasActiveDebugView() const { return false; }
+
     virtual void OnResize() {}
     virtual void OnShaderReload() {}
     virtual void OnSceneChange(std::shared_ptr<Scene> scene) {}

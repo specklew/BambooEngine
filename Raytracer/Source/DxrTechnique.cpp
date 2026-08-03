@@ -2,7 +2,22 @@
 #include "DxrTechnique.h"
 
 #include "GlobalDescriptorHeap.h"
+#include "RaytraceDebugMode.h"
+#include "Utils/CVars.h"
 #include "Window.h"
+
+static AutoCVarEnum g_raytraceDebugMode("renderer.raytraceDebugMode", "Raytracing shader debug visualization mode", RaytraceDebugMode::None,
+                                        CVarFlags::None, FormatDebugViewDocs<RaytraceDebugMode>(kRaytraceDebugModeDocs));
+
+int DxrTechnique::GetDebugMode() const
+{
+    return static_cast<int>(g_raytraceDebugMode.Get());
+}
+
+bool DxrTechnique::HasActiveDebugView() const
+{
+    return g_raytraceDebugMode.Get() != RaytraceDebugMode::None;
+}
 
 void DxrTechnique::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,

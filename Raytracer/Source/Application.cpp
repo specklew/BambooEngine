@@ -132,14 +132,7 @@ void Application::OnMouseWheel(int delta)
 
 void Application::OnKeyDown(WPARAM btnState)
 {
-	if (btnState == VK_SPACE)
-	{
-		m_renderer->ToggleRasterization();
-	}
-	else
-	{
-		m_renderer->OnKeyDown(btnState);
-	}
+	m_renderer->OnKeyDown(btnState);
 }
 
 void Application::ReportLiveObjects()

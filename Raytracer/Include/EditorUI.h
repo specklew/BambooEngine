@@ -48,6 +48,9 @@ public:
 		m_setRenderGraphPassEnabled = std::move(setter);
 	}
 	int  GetCurrentTechniqueIndex() const { return m_currentTechniqueIndex; }
+	// Registration order is unspecified across translation units, so the combo
+	// cannot assume the renderer started on entry 0.
+	void SetCurrentTechniqueIndex(int index) { m_currentTechniqueIndex = index; }
 
 private:
 	void DrawDebugPanel();

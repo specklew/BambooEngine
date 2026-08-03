@@ -26,6 +26,7 @@
 #include "Resources/ResourceStateTracker.h"
 #include "SceneResources/ModelLoading.h"
 #include "SceneResources/Primitive.h"
+#include "RasterizationTechnique.h"
 #include "RenderTechnique.h"
 #include "Techniques/PathTracingPass.h"
 #include "ScreenshotManager.h"
@@ -85,10 +86,6 @@ static AutoCVarFloat g_cameraSpeed("renderer.camera.speed", "Specifies the base 
 static AutoCVarFloat g_cameraScrollFactor("renderer.camera.scrollFactor", "Multiplier per scroll tick for camera speed", 1.2f, CVarFlags::EditDrag, 1.01f, 3.0f);
 static AutoCVarFloat g_uvCoordX("renderer.uv.x", "Texture uv x offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
-static AutoCVarEnum g_rasterizationDebugMode("renderer.rasterDebugMode", "Rasterization shader debug visualization mode", RasterDebugMode::None,
-                                             CVarFlags::None, FormatDebugViewDocs<RasterDebugMode>(kRasterDebugModeDocs));
-static AutoCVarEnum g_raytraceDebugMode("renderer.raytraceDebugMode", "Raytracing shader debug visualization mode", RaytraceDebugMode::None,
-                                        CVarFlags::None, FormatDebugViewDocs<RaytraceDebugMode>(kRaytraceDebugModeDocs));
 static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world position", {0.0f, 0.0f, -10.0f});
 static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
 // Opt-in stripped raygen (debug-view code compiled out). Measured SLOWER on
@@ -103,42 +100,6 @@ static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enab
 // barriers they synthesized), then it clears itself.
 static AutoCVarInt   g_dumpRenderGraph("rdg.dump", "Log the next frame's render graph and its synthesized barriers", 0, CVarFlags::EditCheckbox);
 
-namespace
-{
-// Rasterization keeps its own layout until raster becomes a graph node (ADR 0017
-// phase 5). The raytracing output UAV, TLAS and merged vertex/index SRVs are
-// deliberately absent: reflection shows no rasterization shader touches them.
-constexpr BindingSlot kRasterCamera =
-	TableEntry("CameraParams", BindingKind::Cbv, RASTER_REG_CAMERA_CB, GlobalDescriptor::CameraMatrices);
-constexpr BindingSlot kRasterTextures = TableEntry("gTextures", BindingKind::Srv, RASTER_REG_TEXTURES,
-                                                   GlobalDescriptor::MaterialTextures, FRAME_MAX_TEXTURES);
-// One entry per register rather than contiguous runs: each carries its own name
-// for reflection validation, and each names its own heap slot instead of relying
-// on the enum happening to be adjacent.
-constexpr BindingSlot kRasterVoxelOccupancy =
-	TableEntry("gVoxelOccupancy", BindingKind::Uav, RASTER_REG_VOXEL_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
-constexpr BindingSlot kRasterVoxelIrradiance =
-	TableEntry("gVoxelIrradiance", BindingKind::Uav, RASTER_REG_VOXEL_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
-constexpr BindingSlot kRasterVoxelVplCount =
-	TableEntry("gVoxelVplCount", BindingKind::Uav, RASTER_REG_VOXEL_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
-constexpr BindingSlot kRasterShadingPoints = TableEntry("gShadingPoints", BindingKind::Uav, RASTER_REG_SHADING_POINTS,
-                                                        GlobalDescriptor::ShadingPoints); // debug overlay
-// superpixel index + representative center (debug views 15/16)
-constexpr BindingSlot kRasterSuperpixelIndex =
-	TableEntry("gSuperpixelIndex", BindingKind::Uav, RASTER_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
-constexpr BindingSlot kRasterSuperpixelCenter =
-	TableEntry("gSuperpixelCenter", BindingKind::Uav, RASTER_REG_SUPERPIXEL_CENTER, GlobalDescriptor::SuperpixelCenter);
-
-constexpr BindingSlot kRasterModelConstants    = RootCbv("ModelTransforms", RASTER_REG_MODEL_CB);
-constexpr BindingSlot kRasterMaterialConstants = RootCbv("Material", RASTER_REG_MATERIAL_CB);
-constexpr BindingSlot kRasterPassConstants     = RootCbv("PassConstants", FRAME_REG_PASS_CONSTANTS);
-constexpr BindingSlot kRasterVoxelGridConstants = RootCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
-
-constexpr BindingSlot kRasterSlots[] = {
-	kRasterCamera,           kRasterTextures,          kRasterVoxelOccupancy,  kRasterVoxelIrradiance,
-	kRasterVoxelVplCount,    kRasterShadingPoints,     kRasterSuperpixelIndex, kRasterSuperpixelCenter,
-	kRasterModelConstants,   kRasterMaterialConstants, kRasterPassConstants,   kRasterVoxelGridConstants};
-} // namespace
 // Off by default: two timestamps per node plus a resolve is real per-frame cost,
 // and benchmark runs must measure the renderer, not the instrumentation.
 static AutoCVarInt   g_renderGraphTimings("rdg.timings", "Measure each render-graph node on the GPU (ImGui: Render Graph)", 0, CVarFlags::EditCheckbox);
@@ -285,10 +246,6 @@ void Renderer::Initialize()
 	m_material->m_data.baseColorFactor = DirectX::XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f);
 
 	m_passConstants = std::make_shared<PassConstants>();
-	
-	CreateRasterizationRootSignature();
-
-	CreatePipelineState();
 
 	ExecuteCommandsAndReset();
 
@@ -301,6 +258,7 @@ void Renderer::Initialize()
 		defaultEntry = registry.begin();
 	m_activeTechniqueIndex = static_cast<int>(defaultEntry - registry.begin());
 	m_technique = defaultEntry->create();
+	WireTechniqueResources(m_technique);
 	m_technique->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
 
 	m_accumulationPass = std::make_shared<FrameAccumulationPass>();
@@ -355,7 +313,9 @@ void Renderer::Initialize()
 		m_voxelizationPass, m_voxelGuidingBuildPass, m_clusterPass, m_clusterVisibilityPass);
 	m_lightTreePass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight());
 
-	WireGuidingResources();
+	// Second pass: the technique was created before the VXPG passes existed, so
+	// the wiring above handed it nulls. Everything it can consume exists now.
+	WireTechniqueResources(m_technique);
 
 	spdlog::info("Renderer initialized successfully.");
 
@@ -446,11 +406,12 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	// A/Bs; an active debug-view CVar always forces the view code in. A
 	// transition swaps the sidecar (GetTechniqueDesc) and goes through the full
 	// OnShaderReload path (flush + pipeline/SBT rebuild), same as F2 — rare.
-	if (!m_rasterize)
+	// A technique that compiles no variants reports "nothing changed", so this
+	// needs no branch on which kind is active.
 	{
 		const bool viewActive = m_technique->UsesVoxelGuiding()
 			? g_guidingDebugView.Get() != GuidingDebugView::None
-			: g_raytraceDebugMode.Get() != RaytraceDebugMode::None;
+			: m_technique->HasActiveDebugView();
 		const bool wantsDebugViews = viewActive || g_raygenCleanVariant.Get() == 0;
 		bool needsReload = m_technique->SetDebugViewsCompiled(wantsDebugViews);
 		needsReload |= m_technique->SetOneSampleMisCompiled(g_guidingOneSampleMis.Get() != 0);
@@ -505,9 +466,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 
 	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
 	m_passConstants->data.uvCoordY = g_uvCoordY.Get();
-	m_passConstants->data.debugMode = m_rasterize
-		? static_cast<int>(g_rasterizationDebugMode.Get())
-		: static_cast<int>(g_raytraceDebugMode.Get());
+	m_passConstants->data.debugMode = m_technique->GetDebugMode();
 	m_passConstants->data.numBounces = g_numBounces.Get();
 	m_passConstants->data.numSamplesPerPixel = g_numSamplesPerPixel.Get();
 	m_passConstants->data.frameIndex++;
@@ -549,8 +508,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	}
 
 	// Tick screenshot before advancing accumulatedTime so the check reads the pre-update value
-	if (!m_rasterize)
-		m_screenshotManager->Tick(*m_accumulationPass, elapsedTime);
+	m_screenshotManager->Tick(*m_accumulationPass, elapsedTime);
 
 	m_accumulationPass->Update(elapsedTime);
 
@@ -588,22 +546,33 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	// The presented image is the graph's sink: culling walks backwards from here.
 	m_renderGraph.MarkExternallyRead(backBufferHandle);
 
-	if (m_rasterize)
-	{
-		BuildRasterGraph(backBufferHandle, depthStencilHandle, frameIndex);
-	}
-	else
-	{
-		FrameGraphContext frame;
-		frame.backBuffer      = backBufferHandle;
-		frame.depthStencil    = depthStencilHandle;
-		frame.backBufferRtv   = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-			m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, m_rtvDescriptorSize);
-		frame.depthStencilDsv = m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-		frame.voxelGuiding    = &m_vxpg;
+	FrameGraphContext frame;
+	frame.backBuffer      = backBufferHandle;
+	frame.depthStencil    = depthStencilHandle;
+	frame.backBufferRtv   = CD3DX12_CPU_DESCRIPTOR_HANDLE(
+		m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, m_rtvDescriptorSize);
+	frame.depthStencilDsv = m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+	frame.voxelGuiding    = &m_vxpg;
 
-		const GraphResourceHandle techniqueOutput = m_technique->BuildGraph(m_renderGraph, frame);
+	// A technique that renders offscreen hands its image back here; one that drew
+	// straight into the back buffer returns nothing and needs no display chain.
+	const GraphResourceHandle techniqueOutput = m_technique->BuildGraph(m_renderGraph, frame);
+	if (techniqueOutput != InvalidGraphResource)
 		BuildDisplayChain(techniqueOutput, *m_technique->GetOutputTexture(), backBufferHandle, backBuffer);
+	else if (m_screenshotManager->IsCaptureDue())
+	{
+		// The technique wrote the back buffer, so that is what the capture reads.
+		// Ordered before ImGui so the overlay never lands in a benchmark image.
+		m_renderGraph.AddPass("Screenshot Readback",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.NeverCull();
+				pass.Read(backBufferHandle, GraphAccess::CopySource);
+			},
+			[this, &backBuffer]()
+			{
+				m_screenshotManager->RecordCopy(backBuffer.GetUnderlyingResource());
+			});
 	}
 
 	if (!m_headless)
@@ -819,7 +788,10 @@ void Renderer::ResetCommandList() const
 {
 	auto& allocator = m_graphicsDevice->GetCommandAllocator(m_graphicsDevice->GetFrameIndex());
 	ThrowIfFailed(allocator->Reset());
-	ThrowIfFailed(m_d3d12CommandList->Reset(allocator.Get(), m_pipelineStateObject.Get()));
+	// No initial pipeline state: every node sets its own before it records, and
+	// the raster PSO this used to name now belongs to a technique that may not
+	// even be active.
+	ThrowIfFailed(m_d3d12CommandList->Reset(allocator.Get(), nullptr));
 }
 
 void Renderer::CreateRTVDescriptorHeap()
@@ -934,57 +906,6 @@ void Renderer::CreateWorldProjCBV()
 
 	g_device->CreateConstantBufferView(&cbvDesc,
 		GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::CameraMatrices));
-}
-
-void Renderer::CreateRasterizationRootSignature()
-{
-	m_rootSignature = RootSignatureBuilder(L"Rasterization RootSig", /*tableCount*/ 1)
-	                      .ForGraphics()
-	                      .WithFlags(D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT)
-	                      .Add(kRasterSlots)
-	                      .WithStaticSamplers()
-	                      .Build(g_device.Get());
-}
-
-void Renderer::CreatePipelineState()
-{
-	auto& rm = ResourceManager::Get();
-	
-	auto psh = rm.GetOrLoadShader(AssetId("resources/shaders/colorShader.ps.shader"));
-	m_pixelShader = rm.shaders.GetResource(psh).bytecode;
-	auto vsh = rm.GetOrLoadShader(AssetId("resources/shaders/colorShader.vs.shader"));
-	m_vertexShader = rm.shaders.GetResource(vsh).bytecode;
-
-	ShaderReflection::ValidateShaderAsset("resources/shaders/colorShader.vs.shader", m_rootSignature.Get());
-	ShaderReflection::ValidateShaderAsset("resources/shaders/colorShader.ps.shader", m_rootSignature.Get());
-
-
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
-	desc.VS = {static_cast<BYTE*>(m_vertexShader->GetBufferPointer()), m_vertexShader->GetBufferSize()};
-	desc.PS = {static_cast<BYTE*>(m_pixelShader->GetBufferPointer()), m_pixelShader->GetBufferSize()};
-	desc.InputLayout = {inputLayout, _countof(inputLayout)};
-	desc.pRootSignature = m_rootSignature.Get();
-
-	CD3DX12_RASTERIZER_DESC rasterDesc(D3D12_DEFAULT);
-	rasterDesc.FrontCounterClockwise = TRUE; // Loaders store canonical CCW winding; CCW is front-facing.
-	desc.RasterizerState = rasterDesc;
-	desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-	desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-	
-	desc.SampleMask = UINT_MAX;
-
-	desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-	
-	desc.NumRenderTargets = 1;
-	desc.RTVFormats[0] = m_backBufferFormat;
-	desc.SampleDesc.Count = 1;
-	desc.SampleDesc.Quality = 0;
-	desc.DSVFormat = m_depthStencilFormat;
-
-	ComPtr<ID3D12PipelineState> pso;
-	ThrowIfFailed(g_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pso)));
-	pso->SetName(L"Default Pipeline State");
-	m_pipelineStateObject = pso;
 }
 
 void Renderer::SetViewport()
@@ -1120,6 +1041,7 @@ void Renderer::InitializeEditorUI()
 	m_editorUI->SetOnDifferentTechniquePicked([this](int index) {
 		SetTechniqueByIndex(index);
 	});
+	m_editorUI->SetCurrentTechniqueIndex(m_activeTechniqueIndex);
 }
 
 void Renderer::LoadScene(const std::wstring& path)
@@ -1156,12 +1078,12 @@ void Renderer::SetTechniqueByIndex(int index)
 	const auto& registry = RenderTechnique::GetRegistry();
 	if (index < 0 || index >= static_cast<int>(registry.size()))
 		return;
-	spdlog::info("Switching raytracing technique to: {}", registry[index].name);
-	auto newPass = registry[index].create();
-	newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
-	m_technique = std::move(newPass);
+	spdlog::info("Switching render technique to: {}", registry[index].name);
+	auto newTechnique = registry[index].create();
+	WireTechniqueResources(newTechnique);
+	newTechnique->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
+	m_technique = std::move(newTechnique);
 	m_activeTechniqueIndex = index;
-	WireGuidingResources();
 }
 
 bool Renderer::SetTechnique(const std::string& name)
@@ -1244,11 +1166,17 @@ void Renderer::SetLights(const std::vector<LightData>& lights)
 	m_scene->MarkLightDataDirty();
 }
 
-void Renderer::WireGuidingResources()
+void Renderer::WireTechniqueResources(const std::shared_ptr<RenderTechnique>& technique)
 {
-	if (auto guided = std::dynamic_pointer_cast<GuidedPathTracingPass>(m_technique))
+	if (auto guided = std::dynamic_pointer_cast<GuidedPathTracingPass>(technique))
 		guided->SetGuidingResources(m_voxelizationPass, m_voxelGuidingBuildPass,
 			m_fingerprintPass, m_clusterPass, m_lightTreePass);
+
+	if (auto raster = std::dynamic_pointer_cast<RasterizationTechnique>(technique))
+	{
+		raster->SetFrameTargetFormats(m_backBufferFormat, m_depthStencilFormat);
+		raster->SetVoxelizationPass(m_voxelizationPass);
+	}
 }
 
 bool Renderer::FrameUsesVoxelGuiding() const
@@ -1256,9 +1184,7 @@ bool Renderer::FrameUsesVoxelGuiding() const
 	// One bit, not a stage ladder: it only gates whether the VXPG subgraph is
 	// declared at all, so a frame that cannot use it skips the resize/import work
 	// too. Which of the declared nodes run is the graph's call.
-	return m_rasterize
-		? RasterDebugViewUsesVoxelGuiding(g_rasterizationDebugMode.Get())
-		: (m_technique && m_technique->UsesVoxelGuiding());
+	return m_technique && m_technique->UsesVoxelGuiding();
 }
 
 void Renderer::BuildVxpgGraph()
@@ -1753,71 +1679,6 @@ void Renderer::BuildVxpgGraph()
 	}
 }
 
-void Renderer::DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass)
-{
-	// What the active debug view samples is what keeps the VXPG stages behind it
-	// alive: the draw declares its reads, and culling derives the rest.
-	constexpr GraphAccess kUavRead = GraphAccess::UnorderedAccessRead;
-
-	switch (g_rasterizationDebugMode.Get())
-	{
-	case RasterDebugMode::VoxelOccupancy:
-	case RasterDebugMode::Supervoxels:
-		pass.Read(m_vxpg.voxelOccupancy, kUavRead);
-		break;
-	case RasterDebugMode::VoxelIrradiance:
-		pass.Read(m_vxpg.voxelIrradiance, kUavRead);
-		pass.Read(m_vxpg.voxelVplCount, kUavRead);
-		break;
-	case RasterDebugMode::ShadingPointsNormal:
-	case RasterDebugMode::ShadingPointsPos:
-		pass.Read(m_vxpg.shadingPoints, kUavRead);
-		break;
-	case RasterDebugMode::SuperpixelId:
-		pass.Read(m_vxpg.superpixelIndex, kUavRead);
-		break;
-	case RasterDebugMode::SuperpixelRepresentative:
-		pass.Read(m_vxpg.superpixelIndex, kUavRead);
-		pass.Read(m_vxpg.superpixelCenter, kUavRead);
-		break;
-	default:
-		break;
-	}
-}
-
-void Renderer::BuildRasterGraph(GraphResourceHandle backBuffer, GraphResourceHandle depthStencil, uint32_t frameIndex)
-{
-	// Raytracing overwrites the whole back buffer with the present copy and draws
-	// no geometry, so both clears only exist on this path (measured 2026-08-01,
-	// ABeautifulGame 3 s Debug: PT 3151 -> 3276 frames without them).
-	m_renderGraph.AddPass("Raster Clear",
-		[&](RenderGraphPassBuilder& pass)
-		{
-			pass.Write(backBuffer, GraphAccess::RenderTarget);
-			pass.Write(depthStencil, GraphAccess::DepthWrite);
-		},
-		[this, frameIndex]()
-		{
-			constexpr FLOAT clearColor[4] = { 0.3f, 0.6f, 0.9f, 1.0f };
-			ID3D12GraphicsCommandList4* commandList = CommandContext::Get().GetCommandList();
-
-			const CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-			                                              frameIndex, m_rtvDescriptorSize);
-			commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
-			commandList->ClearDepthStencilView(m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-			                                   D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-		});
-
-	m_renderGraph.AddPass("Raster Draw",
-		[&](RenderGraphPassBuilder& pass)
-		{
-			pass.Write(backBuffer, GraphAccess::RenderTarget);
-			pass.Write(depthStencil, GraphAccess::DepthWrite);
-			DeclareRasterDebugViewReads(pass);
-		},
-		[this, frameIndex]() { DrawScene(frameIndex); });
-}
-
 // ADR 0017 step A: the technique -> accumulate -> tonemap -> copy chain declares
 // what it touches and the graph places the barriers. The passes themselves no
 // longer carry any. Everything from accumulation on is technique-independent,
@@ -1890,49 +1751,6 @@ void Renderer::BindBackBufferTarget(uint32_t frameIndex) const
 	                                              frameIndex, m_rtvDescriptorSize);
 	const D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	CommandContext::Get().GetCommandList()->OMSetRenderTargets(1, &rtvHandle, true, &dsvHandle);
-}
-
-void Renderer::DrawScene(uint32_t frameIndex)
-{
-	ID3D12GraphicsCommandList4* commandList = CommandContext::Get().GetCommandList();
-	ID3D12DescriptorHeap* descriptorHeaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
-
-	BindBackBufferTarget(frameIndex);
-	commandList->SetPipelineState(m_pipelineStateObject.Get());
-	commandList->SetDescriptorHeaps(_countof(descriptorHeaps), descriptorHeaps);
-	commandList->SetGraphicsRootSignature(m_rootSignature.Get());
-
-	m_rootSignature.Set(commandList, kRasterPassConstants, m_passConstants->GetGpuVirtualAddress());
-
-	if (m_voxelizationPass)
-		m_rootSignature.Set(commandList, kRasterVoxelGridConstants,
-		                    m_voxelizationPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
-
-	for (const auto& go : m_scene->GetGameObjects())
-	{
-		auto gpuAddress = go->m_worldMatrixBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
-		m_rootSignature.Set(commandList, kRasterModelConstants, gpuAddress);
-
-		for (const auto& primitive : go->GetModel()->GetMeshes())
-		{
-			gpuAddress = primitive->m_material->m_materialBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
-			m_rootSignature.Set(commandList, kRasterMaterialConstants, gpuAddress);
-
-			auto vertex_view = primitive->GetVertexView();
-			auto index_view = primitive->GetIndexView();
-
-			auto vertexBuffer = std::dynamic_pointer_cast<VertexBuffer>(vertex_view.buffer);
-			auto indexBuffer = std::dynamic_pointer_cast<IndexBuffer>(index_view.buffer);
-
-			commandList->IASetVertexBuffers(0, 1, &vertexBuffer->GetVertexBufferView());
-			commandList->IASetIndexBuffer(&indexBuffer->GetIndexBufferView());
-			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-			m_rootSignature.SetTable(commandList, 0, GlobalDescriptorHeap::Get().GpuStart());
-
-			CommandContext::Get().DrawIndexedInstanced(index_view.count, 1, index_view.offset, vertex_view.offset, 0);
-		}
-	}
 }
 
 // A multi-line dump logged as one spdlog call arrives as a single wall of text:
@@ -2124,7 +1942,6 @@ void Renderer::OnShaderReload()
 	FlushCommandQueue();
 
 	spdlog::info("Creating pipeline state for new shaders...");
-	CreatePipelineState();
 	// Every cached compute PSO at once — the VXPG passes hold pointer-stable
 	// programs, so none of them needs its own reload path.
 	ShaderProgramCache::Get().RebuildAll();
@@ -2187,11 +2004,6 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, Constants::Graphics::STATIC_SAMPLE
 	;
 
 	return { pointWrap, pointClamp, linearWrap, linearClamp, anisotropicWrap, anisotropicClamp };
-}
-
-void Renderer::ToggleRasterization()
-{
-	m_rasterize = !m_rasterize;
 }
 
 std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> Renderer::CreateSceneResources(

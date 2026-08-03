@@ -124,6 +124,7 @@
     <ClInclude Include="Include\RasterDebugMode.h" />
     <ClInclude Include="Include\DxrPass.h" />
     <ClInclude Include="Include\DxrTechnique.h" />
+    <ClInclude Include="Include\RasterizationTechnique.h" />
     <ClInclude Include="Include\RenderTechnique.h" />
     <ClInclude Include="Include\VxpgGraphHandles.h" />
     <ClInclude Include="Include\Techniques\TechniqueDescriptor.h" />
@@ -400,6 +401,7 @@
     <ClCompile Include="Source\InputElements.cpp" />
     <ClCompile Include="Source\DxrPass.cpp" />
     <ClCompile Include="Source\DxrTechnique.cpp" />
+    <ClCompile Include="Source\RasterizationTechnique.cpp" />
     <ClCompile Include="Source\RenderTechnique.cpp" />
     <ClCompile Include="Source\Techniques\PathTracingPass.cpp" />
     <ClCompile Include="Source\Techniques\AmbientOcclusionPass.cpp" />

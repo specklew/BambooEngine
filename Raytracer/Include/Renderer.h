@@ -67,14 +67,12 @@ public:
 	void OnMouseWheel(int delta);
 	void OnKeyDown(unsigned long long btnState) const;
 	
-	void ToggleRasterization();
 	void ExecuteCommandsAndReset();
 
 	// Setup verbs shared by the interactive UI callbacks and the headless runner.
 	void LoadScene(const std::wstring& path);
 	bool SetTechnique(const std::string& name);
 	void SetTechniqueByIndex(int index);
-	void SetRaytracing(bool enabled) { m_rasterize = !enabled; }
 	void SetHeadless(bool headless) { m_headless = headless; }
 	void ApplyRenderConfig(const HeadlessConfig& config);
 	void SetLights(const std::vector<LightData>& lights);
@@ -126,10 +124,6 @@ private:
 
 	void CreateWorldProjCBV();
 
-	void CreateRasterizationRootSignature();
-
-	void CreatePipelineState();
-
 	void SetViewport();
 	void SetScissorRect();
 
@@ -143,22 +137,22 @@ private:
 
 	void OnShaderReload();
 	void LoadSkybox(const std::wstring& path);
-	void DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass);
 
-	// The two halves of a frame, each adding its own nodes to the graph the VXPG
-	// stages were already declared into. Everything that touches the back buffer is
-	// a node, so one Compile()/Execute() covers the whole frame in either mode.
-	void BuildRasterGraph(GraphResourceHandle backBuffer, GraphResourceHandle depthStencil, uint32_t frameIndex);
+	// Appended after the active technique's own nodes, when it rendered offscreen.
+	// Everything that touches the back buffer is a node, so one Compile()/Execute()
+	// covers the whole frame whichever technique produced it.
 	void BuildDisplayChain(GraphResourceHandle techniqueOutput, Texture& techniqueOutputTexture,
 	                       GraphResourceHandle backBufferHandle, Texture& backBuffer);
 	void BindBackBufferTarget(uint32_t frameIndex) const;
-	void DrawScene(uint32_t frameIndex);
 
 	void DumpRenderGraphIfRequested();
 	void WriteVoxelUavsToGlobalHeap();
 	void WriteSuperpixelUavsToGlobalHeap();
 	void WriteClusterVisibilityUavsToGlobalHeap();
-	void WireGuidingResources();
+	// Hands a freshly created technique the renderer-owned objects its factory
+	// could not take. Runs before Initialize: the raster pipeline state bakes in
+	// the frame target formats.
+	void WireTechniqueResources(const std::shared_ptr<RenderTechnique>& technique);
 	// Adds every VXPG stage to the frame's graph. Which of them survive is the
 	// graph's decision: a stage nothing reads is culled.
 	void BuildVxpgGraph();
@@ -177,7 +171,6 @@ private:
 	DirectX::SimpleMath::Vector3 m_prevCameraPos = {};
 	DirectX::XMFLOAT4            m_prevCameraRot = { 0, 0, 0, 1 };
 
-	bool m_rasterize = true;
 	bool m_headless = false;
 	int  m_activeTechniqueIndex = 0;
 
@@ -199,13 +192,6 @@ private:
 	std::shared_ptr<ConstantBuffer> m_projectionMatrixConstantBuffer;
 	std::shared_ptr<ConstantBuffer> m_modelIndexConstantBuffer;
 	BYTE* m_mappedData = nullptr;
-
-	RootSignature m_rootSignature;
-
-	Microsoft::WRL::ComPtr<IDxcBlob> m_pixelShader;
-	Microsoft::WRL::ComPtr<IDxcBlob> m_vertexShader;
-
-	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipelineStateObject;
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS;
 	std::unordered_map<std::shared_ptr<Model>, std::shared_ptr<AccelerationStructureBuffers>> m_modelsBLASes;

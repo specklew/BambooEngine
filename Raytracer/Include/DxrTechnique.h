@@ -24,6 +24,9 @@ public:
     bool SetDebugViewsCompiled(bool enabled) override;
     bool SetOneSampleMisCompiled(bool enabled) override;
 
+    int  GetDebugMode() const override;
+    bool HasActiveDebugView() const override;
+
     Texture* GetOutputTexture() const override { return m_outputResource.get(); }
 
 protected:
