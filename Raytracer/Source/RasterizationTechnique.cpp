@@ -17,6 +17,7 @@
 #include "SceneResources/Scene.h"
 #include "Shader.h"
 #include "ShaderReflection.h"
+#include "Utils/CameraConstants.h"
 #include "Utils/CVars.h"
 #include "Utils/PassConstants.h"
 #include "VoxelizationPass.h"
@@ -32,16 +33,15 @@ namespace
 // carrying them would only cost root DWORDs. So every slot here is pass-scoped
 // (space1) — except PassConstants, which really is a frame binding and stays at
 // its space0 register, shared with passConstants.hlsl.
-constexpr BindingSlot kCamera =
-    PassTableEntry("CameraParams", BindingKind::Cbv, RASTER_REG_CAMERA_CB, GlobalDescriptor::CameraMatrices);
 constexpr BindingSlot kTextures = PassTableEntry("gTextures", BindingKind::Srv, RASTER_REG_TEXTURES,
                                                  GlobalDescriptor::MaterialTextures, FRAME_MAX_TEXTURES);
+constexpr BindingSlot kCamera             = PassCbv("CameraParams", RASTER_REG_CAMERA_CB);
 constexpr BindingSlot kModelConstants     = PassCbv("ModelTransforms", RASTER_REG_MODEL_CB);
 constexpr BindingSlot kMaterialConstants  = PassCbv("Material", RASTER_REG_MATERIAL_CB);
 constexpr BindingSlot kPassConstants     = RootCbv("PassConstants", FRAME_REG_PASS_CONSTANTS);
 
 constexpr BindingSlot kRasterSlots[] = {
-    kCamera, kTextures, kModelConstants, kMaterialConstants, kPassConstants};
+    kTextures, kCamera, kModelConstants, kMaterialConstants, kPassConstants};
 } // namespace
 
 void RasterizationTechnique::SetFrameTargetFormats(DXGI_FORMAT backBufferFormat, DXGI_FORMAT depthStencilFormat)
@@ -185,6 +185,7 @@ void RasterizationTechnique::DrawScene(const FrameGraphContext& frame) const
     commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 
     m_rootSignature.Set(commandList, kPassConstants, m_passConstants->GetGpuVirtualAddress());
+    m_rootSignature.Set(commandList, kCamera, CameraConstants::Get().GetGpuVirtualAddress());
 
     for (const auto& go : m_scene->GetGameObjects())
     {

@@ -198,9 +198,7 @@ private:
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_depthStencilBuffer;
 	std::unique_ptr<Texture> m_depthStencilTexture;
 	
-	std::shared_ptr<ConstantBuffer> m_projectionMatrixConstantBuffer;
 	std::shared_ptr<ConstantBuffer> m_modelIndexConstantBuffer;
-	BYTE* m_mappedData = nullptr;
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> m_bottomLevelAS;
 	std::unordered_map<std::shared_ptr<Model>, std::shared_ptr<AccelerationStructureBuffers>> m_modelsBLASes;

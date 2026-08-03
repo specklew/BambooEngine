@@ -1,17 +1,20 @@
 ﻿#pragma once
-
-class ConstantBuffer;
+#include "Utils/FrameConstantRing.h"
 
 class PassConstants
 {
 public:
 
     //TODO: Maybe I could somehow make this more flexible for new params?
-    
+
     PassConstants();
-    void Map();
+
+    // Publishes `data` into the frame's own copy of the buffer, and is what
+    // GetGpuVirtualAddress() answers for until the next frame calls it. Called
+    // once per frame from Renderer::Update, before any pass binds.
+    void Map(uint32_t frameIndex);
     D3D12_GPU_VIRTUAL_ADDRESS GetGpuVirtualAddress() const;
-    
+
     struct MappedData
     {
         float uvCoordX = 0.0f;
@@ -38,6 +41,6 @@ public:
     } data;
 
 private:
-    std::unique_ptr<ConstantBuffer> m_buffer;
-    MappedData m_mappedData;
+    FrameConstantRing m_ring;
+    uint32_t          m_frameIndex = 0;
 };

@@ -55,6 +55,7 @@
 #include "SceneResources/Material.h"
 #include "SceneResources/Model.h"
 #include "tinygltf/tiny_gltf.h"
+#include "Utils/CameraConstants.h"
 #include "Utils/PassConstants.h"
 
 #include <filesystem>
@@ -437,23 +438,14 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	
 	XMVECTOR det;
 
-	struct ObjectConstants
-	{
-		XMFLOAT4X4 ViewProj = MathUtils::XMFloat4x4Identity();
-		XMFLOAT4X4 View = MathUtils::XMFloat4x4Identity();
-		XMFLOAT4X4 Projection = MathUtils::XMFloat4x4Identity();
-		XMFLOAT4X4 ViewInverse = MathUtils::XMFloat4x4Identity();
-		XMFLOAT4X4 ProjectionInverse = MathUtils::XMFloat4x4Identity();
-	};
-	
-	ObjectConstants constants;
-	XMStoreFloat4x4(&constants.ViewProj, XMMatrixTranspose(viewProjection));
-	XMStoreFloat4x4(&constants.View, XMMatrixTranspose(view));
-	XMStoreFloat4x4(&constants.Projection, XMMatrixTranspose(projection));
-	XMStoreFloat4x4(&constants.ViewInverse, XMMatrixInverse(&det, view));
-	XMStoreFloat4x4(&constants.ProjectionInverse, XMMatrixInverse(&det, projection));
-	
-	memcpy(&m_mappedData[0], &constants, sizeof(constants));
+	CameraConstants::MappedData cameraMatrices;
+	XMStoreFloat4x4(&cameraMatrices.worldViewProj, XMMatrixTranspose(viewProjection));
+	XMStoreFloat4x4(&cameraMatrices.view, XMMatrixTranspose(view));
+	XMStoreFloat4x4(&cameraMatrices.projection, XMMatrixTranspose(projection));
+	XMStoreFloat4x4(&cameraMatrices.viewInverse, XMMatrixInverse(&det, view));
+	XMStoreFloat4x4(&cameraMatrices.projectionInverse, XMMatrixInverse(&det, projection));
+
+	CameraConstants::Get().Update(m_graphicsDevice->GetFrameIndex(), cameraMatrices);
 
 	// Must run before the PassConstants fill below: it reads the pool's fresh
 	// count/total-power off m_scene, and the analytic tail rebuild changes them
@@ -489,7 +481,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.skyLightingEnabled = (g_skyLighting.Get() != 0) ? 1u : 0u;
 	m_passConstants->data.lightPoolCount = m_scene->GetLightPoolCount();
 	m_passConstants->data.lightPoolTotalPower = m_scene->GetLightPoolTotalPower();
-	m_passConstants->Map();
+	m_passConstants->Map(m_graphicsDevice->GetFrameIndex());
 
 	// Camera change detection for accumulation reset. Skipped in headless: the
 	// camera only changes between captures (GoToState), and ArmScreenshot owns the
@@ -645,8 +637,6 @@ void Renderer::CleanUp()
 	FlushCommandQueue();
 
 	m_editorUI->Shutdown();
-	
-	m_projectionMatrixConstantBuffer->GetUnderlyingResource()->Unmap(0, nullptr);
 }
 
 void Renderer::OnResize()
@@ -894,27 +884,7 @@ void Renderer::CreateDSVDescriptorHeap()
 
 void Renderer::CreateWorldProjCBV()
 {
-	ComPtr<ID3D12Resource> cbvUav;
-	
-	g_device->CreateCommittedResource(
-		&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-		D3D12_HEAP_FLAG_NONE,
-		&CD3DX12_RESOURCE_DESC::Buffer(256 * 5),
-		D3D12_RESOURCE_STATE_GENERIC_READ,
-		nullptr,
-		IID_PPV_ARGS(&cbvUav));
-
-	m_projectionMatrixConstantBuffer = std::make_shared<ConstantBuffer>(g_device, cbvUav);
-	m_projectionMatrixConstantBuffer->SetResourceName(L"Camera and World Proj CBV Resource");
-	
-	ThrowIfFailed(m_projectionMatrixConstantBuffer->GetUnderlyingResource()->Map(0, nullptr, reinterpret_cast<void**>(&m_mappedData)));
-	
-	D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc;
-	cbvDesc.BufferLocation = m_projectionMatrixConstantBuffer->GetUnderlyingResource()->GetGPUVirtualAddress();
-	cbvDesc.SizeInBytes = Align(256ULL * 5, D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-
-	g_device->CreateConstantBufferView(&cbvDesc,
-		GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::CameraMatrices));
+	CameraConstants::Get().Initialize(g_device.Get());
 }
 
 void Renderer::SetViewport()

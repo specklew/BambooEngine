@@ -19,7 +19,6 @@ class Scene;
 namespace FrameBindingLayout
 {
     // Table entries, in table order.
-    inline constexpr BindingSlot kCameraMatrices = TableEntry("CameraParams", BindingKind::Cbv, FRAME_REG_CAMERA_MATRICES, GlobalDescriptor::CameraMatrices);
     inline constexpr BindingSlot kRaytraceOutput = TableEntry("gOutput", BindingKind::Uav, FRAME_REG_RAYTRACE_OUTPUT, GlobalDescriptor::RaytraceOutput);
     inline constexpr BindingSlot kTlas           = TableEntry("SceneBVH", BindingKind::Srv, FRAME_REG_TLAS, GlobalDescriptor::Tlas);
     inline constexpr BindingSlot kVertices       = TableEntry("g_vertices", BindingKind::Srv, FRAME_REG_VERTICES, GlobalDescriptor::Vertices);
@@ -28,7 +27,11 @@ namespace FrameBindingLayout
     inline constexpr BindingSlot kMaterialTextures =
         TableEntry("g_textures", BindingKind::Srv, FRAME_REG_MATERIAL_TEXTURES, GlobalDescriptor::MaterialTextures, FRAME_MAX_TEXTURES);
 
-    // Root descriptors, in root parameter order.
+    // Root descriptors, in root parameter order. The camera matrices are here
+    // rather than in the table because they are written every frame: a root CBV
+    // is bound by address, so each frame binds its own copy of the ring, which a
+    // single heap descriptor could not express (see CameraConstants).
+    inline constexpr BindingSlot kCameraMatrices    = RootCbv("CameraParams", FRAME_REG_CAMERA_MATRICES);
     inline constexpr BindingSlot kGeometryInfo      = RootSrv("g_geometryInfo", FRAME_REG_GEOMETRY_INFO);
     inline constexpr BindingSlot kInstanceInfo      = RootSrv("g_instanceInfo", FRAME_REG_INSTANCE_INFO);
     inline constexpr BindingSlot kLightData         = RootSrv("g_lightData", FRAME_REG_LIGHT_DATA);

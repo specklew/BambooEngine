@@ -27,7 +27,6 @@ namespace
     // one descriptor table, so it must always hold a legal descriptor.
     constexpr NullView NullViews[] = {
         { NullViewKind::SrvTexture2D, DXGI_FORMAT_R8G8B8A8_UNORM },          // ImGuiFont
-        { NullViewKind::Cbv,          DXGI_FORMAT_UNKNOWN },                 // CameraMatrices
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R16G16B16A16_FLOAT },      // RaytraceOutput
         { NullViewKind::SrvAccelerationStructure, DXGI_FORMAT_UNKNOWN },     // Tlas
         { NullViewKind::SrvRawBuffer, DXGI_FORMAT_R32_TYPELESS },            // Vertices

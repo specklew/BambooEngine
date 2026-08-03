@@ -8,7 +8,6 @@
 enum class GlobalDescriptor : uint32_t
 {
     ImGuiFont,
-    CameraMatrices,
     RaytraceOutput,
     Tlas,
     Vertices,
@@ -35,7 +34,6 @@ enum class GlobalDescriptor : uint32_t
 
 inline constexpr uint32_t GlobalDescriptorSlotCounts[] = {
     1,                                 // ImGuiFont
-    1,                                 // CameraMatrices
     1,                                 // RaytraceOutput
     1,                                 // Tlas
     1,                                 // Vertices

@@ -179,6 +179,8 @@
     <ClInclude Include="Include\ShaderCompilation.h" />
     <ClInclude Include="Include\Utils\CVars.h" />
     <ClInclude Include="Include\Utils\GpuMarker.h" />
+    <ClInclude Include="Include\Utils\CameraConstants.h" />
+    <ClInclude Include="Include\Utils\FrameConstantRing.h" />
     <ClInclude Include="Include\Utils\PassConstants.h" />
     <ClInclude Include="Include\Utils\Random.h" />
     <ClInclude Include="Include\Utils\Utils.h" />
@@ -449,6 +451,8 @@
     <ClCompile Include="Source\Shader.cpp" />
     <ClCompile Include="Source\ShaderCompilation.cpp" />
     <ClCompile Include="Source\Utils\CVars.cpp"/>
+    <ClCompile Include="Source\Utils\CameraConstants.cpp"/>
+    <ClCompile Include="Source\Utils\FrameConstantRing.cpp"/>
     <ClCompile Include="Source\Utils\PassConstants.cpp"/>
     <ClCompile Include="Source\Utils\Random.cpp"/>
     <ClCompile Include="Source\Utils\Utils.cpp"/>

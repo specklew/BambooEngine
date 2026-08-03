@@ -1,39 +1,20 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "Utils/PassConstants.h"
 
 #include "Renderer.h"
-#include "Resources/ConstantBuffer.h"
 
 PassConstants::PassConstants()
 {
-    using namespace Microsoft::WRL;
-
-    ComPtr<ID3D12Resource> resource;
-
-    const HRESULT hr = Renderer::g_device->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD),
-        D3D12_HEAP_FLAG_NONE,
-        &CD3DX12_RESOURCE_DESC::Buffer(Align(sizeof(MappedData), 16)),
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&resource));
-
-    ThrowIfFailed(hr);
-
-    m_buffer = std::make_unique<ConstantBuffer>(Renderer::g_device, resource);
+    m_ring.Initialize(Renderer::g_device.Get(), sizeof(MappedData), L"Pass Constants");
 }
 
-void PassConstants::Map()
+void PassConstants::Map(uint32_t frameIndex)
 {
-    auto pData = &m_mappedData;
-    m_buffer->MapDataToWholeBuffer(reinterpret_cast<void**>(&pData));
-
-    memcpy(pData, &data, sizeof(MappedData));
-    
-    m_buffer->Unmap();
+    m_frameIndex = frameIndex;
+    m_ring.Write(frameIndex, &data, sizeof(MappedData));
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS PassConstants::GetGpuVirtualAddress() const
 {
-    return m_buffer->GetUnderlyingResource()->GetGPUVirtualAddress();
+    return m_ring.GetGpuVirtualAddress(m_frameIndex);
 }

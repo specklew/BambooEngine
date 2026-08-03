@@ -4,15 +4,16 @@
 #include "GlobalDescriptorHeap.h"
 #include "RootSignatureLibrary.h"
 #include "SceneResources/Scene.h"
+#include "Utils/CameraConstants.h"
 #include "Utils/PassConstants.h"
 
 const std::vector<BindingSlot>& FrameBindingLayout::Slots()
 {
     static const std::vector<BindingSlot> slots = {
         // Table first: parameter 0 of every signature that uses this layout.
-        kCameraMatrices, kRaytraceOutput, kTlas, kVertices, kIndices, kSkybox, kMaterialTextures,
+        kRaytraceOutput, kTlas, kVertices, kIndices, kSkybox, kMaterialTextures,
         // Then the root descriptors, at a fixed prefix of the root parameters.
-        kGeometryInfo, kInstanceInfo, kLightData, kEmissiveTriangles, kLightPool, kPassConstants};
+        kCameraMatrices, kGeometryInfo, kInstanceInfo, kLightData, kEmissiveTriangles, kLightPool, kPassConstants};
     return slots;
 }
 
@@ -42,6 +43,7 @@ void FrameBindingLayout::Bind(ID3D12GraphicsCommandList* commandList, const Root
     commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     rootSignature.SetTable(commandList, 0, GlobalDescriptorHeap::Get().GpuStart());
 
+    rootSignature.Set(commandList, kCameraMatrices, CameraConstants::Get().GetGpuVirtualAddress());
     rootSignature.Set(commandList, kGeometryInfo, scene.GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     rootSignature.Set(commandList, kInstanceInfo, scene.GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     rootSignature.Set(commandList, kLightData, scene.GetLightDataBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());

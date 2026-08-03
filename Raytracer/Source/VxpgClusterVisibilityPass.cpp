@@ -14,6 +14,7 @@
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
+#include "Utils/CameraConstants.h"
 #include "Utils/CVars.h"
 #include "Utils/Utils.h"
 
@@ -26,8 +27,6 @@ namespace
 // per-instance material factors, so this compute pass never samples the scene
 // textures (which sit in the raster path's PIXEL_SHADER_RESOURCE layout,
 // illegal for a compute Dispatch).
-constexpr BindingSlot kCvisCamera =
-    TableEntry("CameraParams", BindingKind::Cbv, FRAME_REG_CAMERA_MATRICES, GlobalDescriptor::CameraMatrices);
 constexpr BindingSlot kCvisTlas     = TableEntry("SceneBVH", BindingKind::Srv, FRAME_REG_TLAS, GlobalDescriptor::Tlas);
 constexpr BindingSlot kCvisVertices = TableEntry("g_vertices", BindingKind::Srv, FRAME_REG_VERTICES, GlobalDescriptor::Vertices);
 constexpr BindingSlot kCvisIndices  = TableEntry("g_indices", BindingKind::Srv, FRAME_REG_INDICES, GlobalDescriptor::Indices);
@@ -43,6 +42,7 @@ constexpr BindingSlot kCvisSpixelCounter =
 constexpr BindingSlot kCvisVisibilityMask = PassTableEntry("gClusterVisibilityMask", BindingKind::Uav,
                                                        CVIS_REG_VISIBILITY_MASK, GlobalDescriptor::ClusterVisibilityMask);
 
+constexpr BindingSlot kCvisCamera       = RootCbv("CameraParams", FRAME_REG_CAMERA_MATRICES);
 constexpr BindingSlot kCvisGeometryInfo = RootSrv("g_geometryInfo", FRAME_REG_GEOMETRY_INFO);
 constexpr BindingSlot kCvisInstanceInfo = RootSrv("g_instanceInfo", FRAME_REG_INSTANCE_INFO);
 constexpr BindingSlot kCvisGridConstants   = PassCbv("CvisGridCB", CVIS_REG_GRID_CB);
@@ -54,10 +54,10 @@ constexpr BindingSlot kCvisPointCounts     = PassUav("gClusterLightPointCounts",
 constexpr BindingSlot kCvisAvgVisibility   = PassUav("gSpixelClusterAvgVisibility", CVIS_REG_AVG_VISIBILITY);
 
 constexpr BindingSlot kCvisSlots[] = {
-    kCvisCamera,          kCvisTlas,           kCvisVertices,       kCvisIndices,       kCvisSuperpixelIndex,
+    kCvisTlas,            kCvisVertices,       kCvisIndices,        kCvisSuperpixelIndex,
     kCvisVplPosition,     kCvisVBuffer,        kCvisSpixelGathered, kCvisSpixelCounter, kCvisVisibilityMask,
-    kCvisGeometryInfo,    kCvisInstanceInfo,   kCvisGridConstants,  kCvisConstants,     kCvisInverseIndex,
-    kCvisAssignments,     kCvisGatheredPoints, kCvisPointCounts,    kCvisAvgVisibility};
+    kCvisCamera,          kCvisGeometryInfo,   kCvisInstanceInfo,   kCvisGridConstants, kCvisConstants,
+    kCvisInverseIndex,    kCvisAssignments,    kCvisGatheredPoints, kCvisPointCounts,   kCvisAvgVisibility};
 } // namespace
 
 // SIByL cvis defaults: use_bsdf = true, use_distance = false (BRDF-weighted soft
@@ -170,6 +170,7 @@ bool VxpgClusterVisibilityPass::BindCommon(uint32_t frameIndex)
 
     cmd->SetComputeRootSignature(m_rootSig.Get());
     m_rootSig.SetTable(cmd, 0, GlobalDescriptorHeap::Get().GpuStart());
+    m_rootSig.Set(cmd, kCvisCamera, CameraConstants::Get().GetGpuVirtualAddress());
     m_rootSig.Set(cmd, kCvisGeometryInfo, m_scene->GetGeometryInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kCvisInstanceInfo, m_scene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kCvisGridConstants, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
