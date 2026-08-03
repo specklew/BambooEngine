@@ -43,23 +43,23 @@ TechniqueDesc LightInjectionPass::GetTechniqueDesc() const
 // the G-buffers it fills for the guiding passes, and the grid constants.
 namespace
 {
-constexpr BindingSlot kVoxelIrradiance = GraphWrites(
+constexpr BindingSlot kVoxelIrradiance = Accesses(
     PassTableEntry("gVoxelIrradiance", BindingKind::Uav, INJECT_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance),
     GraphAccess::ComputeWrite);
-constexpr BindingSlot kVoxelVplCount = GraphWrites(
+constexpr BindingSlot kVoxelVplCount = Accesses(
     PassTableEntry("gVoxelVplCount", BindingKind::Uav, INJECT_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount),
     GraphAccess::ComputeWrite);
-constexpr BindingSlot kShadingPoints = GraphWrites(
+constexpr BindingSlot kShadingPoints = Accesses(
     PassTableEntry("gShadingPoints", BindingKind::Uav, INJECT_REG_SHADING_POINTS, GlobalDescriptor::ShadingPoints),
     GraphAccess::ComputeWrite);
-constexpr BindingSlot kVoxelRepresentative = GraphWrites(
+constexpr BindingSlot kVoxelRepresentative = Accesses(
     PassTableEntry("gVoxelRepresentative", BindingKind::Uav, INJECT_REG_VOXEL_REPRESENTATIVE,
                    GlobalDescriptor::VoxelRepresentative),
     GraphAccess::ComputeWrite);
-constexpr BindingSlot kVplPosition = GraphWrites(
+constexpr BindingSlot kVplPosition = Accesses(
     PassTableEntry("gVplPosition", BindingKind::Uav, INJECT_REG_VPL_POSITION, GlobalDescriptor::VplPosition),
     GraphAccess::ComputeWrite);
-constexpr BindingSlot kVBuffer = GraphReads(
+constexpr BindingSlot kVBuffer = Accesses(
     PassTableEntry("gVBuffer", BindingKind::Uav, INJECT_REG_VBUFFER, GlobalDescriptor::VBuffer),
     GraphAccess::UnorderedAccessRead);
 // The grid dimensions, not a graph resource: no producer inside the frame.
@@ -71,8 +71,8 @@ constexpr BindingSlot kInjectionSlots[] = {
 
 void LightInjectionPass::DeclareGraphResources(RenderGraphPassBuilder& pass, const VxpgGraphHandles& vxpg) const
 {
-    // Same order as kInjectionSlots; the slot supplies the access and direction,
-    // this only says which of the frame's resources sits behind each binding.
+    // Same order as kInjectionSlots; the slot supplies the access, this only says
+    // which of the frame's resources sits behind each binding.
     const GraphResourceHandle handles[] = {
         vxpg.voxelIrradiance, vxpg.voxelVplCount, vxpg.shadingPoints,
         vxpg.voxelRepresentative, vxpg.vplPosition, vxpg.vbuffer};

@@ -28,9 +28,9 @@ public:
     void Write(GraphResourceHandle resource, GraphAccess access);
 
     // Declares a binding the pass already describes in its slot table: the slot
-    // says what the access is and which direction it goes, the node only supplies
-    // this frame's resource (ADR 0017 step 3). One declaration, two consumers —
-    // the root signature and the graph.
+    // says what the access is, the node only supplies this frame's resource
+    // (ADR 0017 step 3). One declaration, two consumers — the root signature and
+    // the graph.
     void Declare(const BindingSlot& slot, GraphResourceHandle resource);
 
     void SetQueue(GraphQueue queue) { m_queue = queue; }

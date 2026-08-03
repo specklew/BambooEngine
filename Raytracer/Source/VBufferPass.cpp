@@ -34,7 +34,7 @@ TechniqueDesc VBufferPass::GetTechniqueDesc() const
 }
 
 // The frame layout plus one output: the packed primary-hit identity.
-static constexpr BindingSlot kVBufferOutput = GraphWrites(
+static constexpr BindingSlot kVBufferOutput = Accesses(
     PassTableEntry("gVBuffer", BindingKind::Uav, VBUFFER_REG_VBUFFER, GlobalDescriptor::VBuffer),
     GraphAccess::ComputeWrite);
 

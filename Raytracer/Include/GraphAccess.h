@@ -28,6 +28,35 @@ enum class GraphAccess
     Count
 };
 
+// Whether an access produces the resource or only consumes it. This is a property
+// of the access, never a separate flag: CBVs and SRVs are read-only by
+// definition, and the one genuinely ambiguous case — a UAV — is already split
+// into ComputeWrite and UnorderedAccessRead, which share a D3D12 state and differ
+// only in whether the graph should treat the pass as a producer. A second field
+// could only ever contradict this one.
+constexpr bool IsWriteAccess(GraphAccess access)
+{
+    switch (access)
+    {
+    case GraphAccess::ComputeWrite:
+    case GraphAccess::RenderTarget:
+    case GraphAccess::DepthWrite:
+    case GraphAccess::CopyDestination:
+        return true;
+
+    case GraphAccess::ComputeRead:
+    case GraphAccess::UnorderedAccessRead:
+    case GraphAccess::PixelRead:
+    case GraphAccess::IndirectArgument:
+    case GraphAccess::CopySource:
+    case GraphAccess::Present:
+    case GraphAccess::None:
+    case GraphAccess::Count:
+        break;
+    }
+    return false;
+}
+
 // Declared now, one legal value until phase 6. Cross-queue synchronisation is
 // fences rather than barriers and constrains which states a node may ask for, so
 // the compiler carries the attribute from the start instead of baking in the

@@ -23,9 +23,9 @@ void RenderGraphPassBuilder::Declare(const BindingSlot& slot, GraphResourceHandl
     // A slot the graph never sees still gets bound — it just has no producer or
     // consumer to order against, so declaring it would only add a false edge.
     assert(slot.graphAccess != GraphAccess::None &&
-           "BindingSlot passed to Declare() has no graph access; add GraphReads/GraphWrites to its slot table");
+           "BindingSlot passed to Declare() has no graph access; wrap its slot in Accesses(...)");
 
-    if (slot.graphWrites)
+    if (IsWriteAccess(slot.graphAccess))
         Write(resource, slot.graphAccess);
     else
         Read(resource, slot.graphAccess);

@@ -10,6 +10,9 @@
 // A slot says *where* — kind, register, space, and for table entries which heap
 // offset — and *how it is used*. It still does not say *what*: the resource is
 // supplied per frame, because the graph's imports last exactly one frame.
+//
+// Everything derivable is derived rather than stored, so no two fields can
+// disagree: read-vs-write comes from the access (see IsWriteAccess).
 enum class BindingKind : uint8_t
 {
     Cbv,
@@ -50,25 +53,16 @@ struct BindingSlot
     uint32_t       heapOffset     = 0; // Table only: descriptors from table start
 
     // What the graph records for this binding. None means the graph never sees it.
+    // Read or write is derived from the access (IsWriteAccess), never stored
+    // alongside it — two fields could disagree.
     GraphAccess    graphAccess    = GraphAccess::None;
-    bool           graphWrites    = false;
 };
 
 // A slot's graph access, declared next to its register rather than repeated at
-// the node. RenderGraphPassBuilder::Declare reads both fields, so the direction
-// lives here too: GraphAccess alone cannot say whether a RenderTarget is being
-// written or merely kept.
-constexpr BindingSlot GraphReads(BindingSlot slot, GraphAccess access)
+// every node that binds it.
+constexpr BindingSlot Accesses(BindingSlot slot, GraphAccess access)
 {
     slot.graphAccess = access;
-    slot.graphWrites = false;
-    return slot;
-}
-
-constexpr BindingSlot GraphWrites(BindingSlot slot, GraphAccess access)
-{
-    slot.graphAccess = access;
-    slot.graphWrites = true;
     return slot;
 }
 
