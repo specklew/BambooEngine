@@ -2,11 +2,13 @@
 
 #include "Headless.h"
 #include "HighResolutionClock.h"
+#include "RenderTechnique.h"
 
 class Renderer;
 
 // Drives a non-interactive run: validates the requested places and techniques,
-// then renders the place x technique product into a single run folder and exits.
+// then renders the place x technique x debug-view product into a single run
+// folder and exits.
 class HeadlessRunner
 {
 public:
@@ -19,6 +21,7 @@ private:
     void PumpFrame();
     void ApplyConfiguredLights();
     bool Validate() const;
+    std::vector<RenderTechnique::DebugView> ResolveDebugViews() const;
 
     Renderer&      m_renderer;
     HeadlessArgs   m_args;

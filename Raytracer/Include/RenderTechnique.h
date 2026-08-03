@@ -56,6 +56,13 @@ public:
     // declares, not from a stage order maintained here.
     virtual bool UsesVoxelGuiding() const { return false; }
 
+    // True when this technique's own paths write the VPL data light injection
+    // would otherwise trace for itself (ADR 0009 reuse). A technique that traces
+    // no GI paths must answer false, or injection skips its dedicated trace and
+    // waits forever for VPLs nothing produces — which is exactly what left the
+    // rasterized VoxelIrradiance view black.
+    virtual bool ProducesGuidingVpls() const { return false; }
+
     // PassConstants::debugMode carries a different enumeration depending on which
     // technique is active — raster views and raytracing views are separate lists
     // over the same field, so the technique that interprets it supplies it.
@@ -65,6 +72,16 @@ public:
     // True when a debug view of this technique's own kind is selected, so the
     // shader variant carrying the view branches has to be compiled (ADR 0014).
     virtual bool HasActiveDebugView() const { return false; }
+
+    // Every debug view this technique understands, as (index, name) pairs with
+    // "off" first. Headless walks this to capture each view unattended, which is
+    // the only way a view gets checked without a human at the window.
+    struct DebugView { int index; std::string name; };
+    virtual std::vector<DebugView> GetDebugViews() const { return { {0, "None"} }; }
+
+    // Selects one of the views above. Indices belong to this technique's own
+    // enumeration, so a value from another technique's list is rejected.
+    virtual bool SetDebugView(int index) { return index == 0; }
 
     virtual void OnResize() {}
     virtual void OnShaderReload() {}

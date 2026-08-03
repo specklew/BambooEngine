@@ -1108,6 +1108,16 @@ std::vector<std::string> Renderer::GetTechniqueNames() const
 	return names;
 }
 
+std::vector<RenderTechnique::DebugView> Renderer::GetTechniqueDebugViews() const
+{
+	return m_technique ? m_technique->GetDebugViews() : std::vector<RenderTechnique::DebugView>{};
+}
+
+bool Renderer::SetTechniqueDebugView(int index)
+{
+	return m_technique && m_technique->SetDebugView(index);
+}
+
 std::vector<std::string> Renderer::GetStateNames() const
 {
 	std::vector<std::string> names;
@@ -1199,7 +1209,11 @@ void Renderer::BuildVxpgGraph()
 	// dedicated injection trace whenever one is active. The symmetric baseline
 	// (view 15) is exempt: its BSDF sample always traces and writes VPLs, so
 	// reuse stays on and its frame cost matches the full integrator's.
+	// Same reasoning one level up: only a technique that traces GI paths has
+	// anything to reuse. Rasterization reaches here for its VXPG debug views and
+	// traces nothing, so reuse would leave the irradiance grid permanently zero.
 	const bool reuseGiVpl = g_injectionReuseGi.Get() != 0 &&
+		m_technique->ProducesGuidingVpls() &&
 		(g_guidingDebugView.Get() == GuidingDebugView::None ||
 		 g_guidingDebugView.Get() == GuidingDebugView::SymmetricBsdfBaseline);
 	m_voxelizationPass->SetRuntimeParams(

@@ -27,6 +27,9 @@ public:
     bool UsesVoxelGuiding() const override;
     int  GetDebugMode() const override;
 
+    std::vector<DebugView> GetDebugViews() const override;
+    bool SetDebugView(int index) override;
+
     void OnShaderReload() override { CreatePipelineState(); }
     void OnSceneChange(std::shared_ptr<Scene> scene) override { m_scene = std::move(scene); }
 

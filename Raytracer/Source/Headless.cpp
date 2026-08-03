@@ -51,6 +51,7 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
         else if (flag == "--techniques") args.techniques = SplitCsv(valueOf(i));
         else if (flag == "--seconds")    args.seconds = std::stof(valueOf(i));
         else if (flag == "--out")        args.outDir = valueOf(i);
+        else if (flag == "--debug-views") args.debugViews = SplitCsv(valueOf(i));
         else if (flag == "--debug-layer") args.debugLayer = true;
         else if (flag == "--rdg-dump")    args.rdgDump = true;
         else if (flag == "--rdg-timings") args.rdgTimings = true;

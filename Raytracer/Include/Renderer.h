@@ -83,6 +83,11 @@ public:
 
 	std::vector<std::string> GetTechniqueNames() const;
 	std::vector<std::string> GetStateNames() const;
+
+	// The active technique's own debug views, and the selector headless drives to
+	// walk them. Indices belong to that technique's enumeration.
+	std::vector<RenderTechnique::DebugView> GetTechniqueDebugViews() const;
+	bool SetTechniqueDebugView(int index);
 	bool GoToState(const std::string& name);
 
 	// Arm a capture writing to dir/stem (empty => default screenshots dir / auto name).

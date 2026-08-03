@@ -19,6 +19,23 @@ bool DxrTechnique::HasActiveDebugView() const
     return g_raytraceDebugMode.Get() != RaytraceDebugMode::None;
 }
 
+std::vector<RenderTechnique::DebugView> DxrTechnique::GetDebugViews() const
+{
+    std::vector<DebugView> views;
+    for (const RaytraceDebugMode mode : magic_enum::enum_values<RaytraceDebugMode>())
+        views.push_back({static_cast<int>(mode), std::string(magic_enum::enum_name(mode))});
+    return views;
+}
+
+bool DxrTechnique::SetDebugView(int index)
+{
+    const auto mode = magic_enum::enum_cast<RaytraceDebugMode>(index);
+    if (!mode)
+        return false;
+    g_raytraceDebugMode.Set(*mode);
+    return true;
+}
+
 void DxrTechnique::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                               Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
                               std::shared_ptr<Scene> initialScene,

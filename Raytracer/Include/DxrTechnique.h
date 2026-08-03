@@ -27,6 +27,9 @@ public:
     int  GetDebugMode() const override;
     bool HasActiveDebugView() const override;
 
+    std::vector<DebugView> GetDebugViews() const override;
+    bool SetDebugView(int index) override;
+
     Texture* GetOutputTexture() const override { return m_outputResource.get(); }
 
 protected:

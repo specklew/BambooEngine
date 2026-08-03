@@ -100,6 +100,44 @@ void HeadlessRunner::ApplyConfiguredLights()
     m_renderer.SetLights(lights);
 }
 
+// Resolves --debug-views against whatever the ACTIVE technique declares, so it
+// runs after SetTechnique: a view index means different things to the raster and
+// raytracing enumerations. Empty return = the run should abort.
+std::vector<RenderTechnique::DebugView> HeadlessRunner::ResolveDebugViews() const
+{
+    const std::vector<RenderTechnique::DebugView> available = m_renderer.GetTechniqueDebugViews();
+
+    if (m_args.debugViews.empty())
+        return { {0, "None"} };
+
+    if (m_args.debugViews.size() == 1 && m_args.debugViews.front() == "all")
+        return available;
+
+    std::vector<RenderTechnique::DebugView> selected;
+    for (const std::string& requested : m_args.debugViews)
+    {
+        const auto match = std::find_if(available.begin(), available.end(),
+            [&](const RenderTechnique::DebugView& view)
+            {
+                return view.name == requested || std::to_string(view.index) == requested;
+            });
+        if (match == available.end())
+        {
+            spdlog::error("Unknown debug view '{}' for the active technique", requested);
+            std::string joined;
+            for (const RenderTechnique::DebugView& view : available)
+            {
+                if (!joined.empty()) joined += ", ";
+                joined += fmt::format("{}({})", view.name, view.index);
+            }
+            spdlog::error("Available debug views: {}", joined);
+            return {};
+        }
+        selected.push_back(*match);
+    }
+    return selected;
+}
+
 bool HeadlessRunner::Validate() const
 {
     if (m_args.states.empty() || m_args.techniques.empty())
@@ -156,25 +194,43 @@ int HeadlessRunner::Run()
     {
         m_renderer.SetTechnique(technique);
         m_renderer.ResetGraphTimingHistory();
+
+        // One entry per capture. Without --debug-views that is the plain render;
+        // with it, each named view of this technique becomes its own capture.
+        const std::vector<RenderTechnique::DebugView> views = ResolveDebugViews();
+        if (views.empty())
+            return 2;
+
         for (const std::string& place : m_args.states)
         {
             m_renderer.GoToState(place);
 
-            // Warm up several frames before arming. One frame is NOT enough: a
-            // slow first frame (technique switch rebuilding the VXPG passes, PSO
-            // creation, first dispatch) costs seconds, and that cost lands in the
-            // NEXT frame's clock delta — so the first armed frame would read a
-            // huge delta and trigger an immediate single-frame capture (observed
-            // as frameIndex 0 for VXPG at --seconds 1). Pumping until frames are
-            // cheap keeps the one-time stall out of the timed capture window.
-            for (int warmup = 0; warmup < 16; ++warmup)
-                PumpFrame();
+            for (const RenderTechnique::DebugView& view : views)
+            {
+                m_renderer.SetTechniqueDebugView(view.index);
 
-            m_renderer.ArmScreenshot(seconds, model, place, runDir, place + "-" + technique);
-            while (!m_renderer.ScreenshotIdle())
-                PumpFrame();
+                // Warm up several frames before arming. One frame is NOT enough: a
+                // slow first frame (technique switch rebuilding the VXPG passes, PSO
+                // creation, first dispatch) costs seconds, and that cost lands in the
+                // NEXT frame's clock delta — so the first armed frame would read a
+                // huge delta and trigger an immediate single-frame capture (observed
+                // as frameIndex 0 for VXPG at --seconds 1). Pumping until frames are
+                // cheap keeps the one-time stall out of the timed capture window.
+                // A view switch can also swap the raygen variant, which rebuilds the
+                // pipeline — same reason, same warmup.
+                for (int warmup = 0; warmup < 16; ++warmup)
+                    PumpFrame();
 
-            spdlog::info("Captured {}-{}", place, technique);
+                const std::string stem = m_args.debugViews.empty()
+                    ? place + "-" + technique
+                    : place + "-" + technique + "-" + view.name;
+
+                m_renderer.ArmScreenshot(seconds, model, place, runDir, stem);
+                while (!m_renderer.ScreenshotIdle())
+                    PumpFrame();
+
+                spdlog::info("Captured {}", stem);
+            }
         }
 
         // One dump per technique, after its captures: the graph is warm, every

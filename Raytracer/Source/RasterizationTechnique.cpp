@@ -142,6 +142,23 @@ int RasterizationTechnique::GetDebugMode() const
     return static_cast<int>(g_rasterizationDebugMode.Get());
 }
 
+std::vector<RenderTechnique::DebugView> RasterizationTechnique::GetDebugViews() const
+{
+    std::vector<DebugView> views;
+    for (const RasterDebugMode mode : magic_enum::enum_values<RasterDebugMode>())
+        views.push_back({static_cast<int>(mode), std::string(magic_enum::enum_name(mode))});
+    return views;
+}
+
+bool RasterizationTechnique::SetDebugView(int index)
+{
+    const auto mode = magic_enum::enum_cast<RasterDebugMode>(index);
+    if (!mode)
+        return false;
+    g_rasterizationDebugMode.Set(*mode);
+    return true;
+}
+
 GraphResourceHandle RasterizationTechnique::BuildGraph(RenderGraph& graph, const FrameGraphContext& frame)
 {
     const VxpgGraphHandles& vxpg = *frame.voxelGuiding;

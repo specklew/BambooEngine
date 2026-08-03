@@ -87,6 +87,12 @@ struct HeadlessArgs
     float       seconds = -1.0f;          // < 0 => use config default
     std::string outDir;                   // empty => use config output dir
 
+    // --debug-views: capture each listed view of the active technique instead of
+    // the plain render. Indices belong to that technique's own enumeration ("all"
+    // takes every view it declares). Empty => one normal capture per technique.
+    // This is what makes a debug view checkable without a human at the window.
+    std::vector<std::string> debugViews;
+
     // Headless normally runs without the debug layer, because its uneven
     // per-submit validation cost makes frame counts meaningless. --debug-layer
     // turns it back on for a correctness run; --rdg-dump asks for the

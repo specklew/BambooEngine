@@ -41,6 +41,9 @@ public:
     // cost belongs in equal-time benchmarks.
     bool UsesVoxelGuiding() const override { return true; }
 
+    // The BSDF subtree of this integrator writes the VPLs (ADR 0009).
+    bool ProducesGuidingVpls() const override { return true; }
+
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;
