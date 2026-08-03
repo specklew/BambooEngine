@@ -208,8 +208,11 @@ void GuidedPathTracingPass::DeclareVoxelGuidingReads(RenderGraphPassBuilder& pas
     constexpr GraphAccess kUavRead = GraphAccess::UnorderedAccessRead;
     const VxpgGraphHandles& vxpg = *m_frameGuiding;
 
-    // Read through the global descriptor table.
-    pass.Read(vxpg.voxelOccupancy, kUavRead);
+    // Read through the global descriptor table. Voxel occupancy is deliberately
+    // absent: no guided shader binds it (the signature has no slot for it, so
+    // reflection would reject one that tried). It is a bake product read only by
+    // the raster debug views; the bake stays alive through bakedBoundMin/Max,
+    // which the guiding build really does read.
     pass.Read(vxpg.voxelIrradiance, kUavRead);
     pass.Read(vxpg.voxelVplCount, kUavRead);
     pass.Read(vxpg.voxelRepresentative, kUavRead);
