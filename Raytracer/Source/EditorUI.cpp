@@ -434,7 +434,13 @@ void EditorUI::DrawTechniqueSection()
 	{
 		if (m_onDifferentTechniquePicked)
 			m_onDifferentTechniquePicked(m_currentTechniqueIndex);
-		m_currentDebugViewRow = 0; // the new technique enumerates its own views
+
+		// The new technique enumerates its own views, so the row resets — and the
+		// selection has to reset with it, or the combo reads "None" while the
+		// previous view's CVar is still driving the frame.
+		m_currentDebugViewRow = 0;
+		if (m_onDebugViewPicked)
+			m_onDebugViewPicked(0);
 	}
 
 	DrawDebugViewCombo();

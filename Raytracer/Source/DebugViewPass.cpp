@@ -155,6 +155,6 @@ void DebugViewPass::Dispatch()
 
 void DebugViewPass::CopyToBackBuffer(Texture& backBuffer)
 {
-    CommandContext::Get().GetCommandList()->CopyResource(
+    CommandContext::Get().CopyResource(
         backBuffer.GetUnderlyingResource().Get(), m_outputBuffer->GetUnderlyingResource().Get());
 }

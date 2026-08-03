@@ -40,30 +40,51 @@ namespace
 //
 // Texture UAVs cannot be root descriptors, so they ride the shared heap table at
 // their global slots; everything else is a root descriptor.
-constexpr BindingSlot kVoxelIrradiance = PassTableEntry("gVoxIrradiance", BindingKind::Uav, GUIDED_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
-constexpr BindingSlot kVoxelVplCount = PassTableEntry("gVoxVplCount", BindingKind::Uav, GUIDED_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
-constexpr BindingSlot kSuperpixelIndex = PassTableEntry("gSpixelIndexImage", BindingKind::Uav, GUIDED_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
-constexpr BindingSlot kVoxelRepresentative = PassTableEntry("gVoxelRepresentative", BindingKind::Uav, GUIDED_REG_VOXEL_REPRESENTATIVE, GlobalDescriptor::VoxelRepresentative); // debug views 6/7
-constexpr BindingSlot kVplPosition = PassTableEntry("gVplPosition", BindingKind::Uav, GUIDED_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
-constexpr BindingSlot kVBuffer = PassTableEntry("gVBuffer", BindingKind::Uav, GUIDED_REG_VBUFFER, GlobalDescriptor::VBuffer);
-constexpr BindingSlot kVisibilityMask = PassTableEntry("gClusterVisibilityMask", BindingKind::Uav, GUIDED_REG_VISIBILITY_MASK, GlobalDescriptor::ClusterVisibilityMask); // debug view 10
-constexpr BindingSlot kFuzzyWeights = PassTableEntry("gFuzzyWeights", BindingKind::Uav, GUIDED_REG_FUZZY_WEIGHT, GlobalDescriptor::FuzzyWeight);
-constexpr BindingSlot kFuzzyIndices = PassTableEntry("gFuzzyIndices", BindingKind::Uav, GUIDED_REG_FUZZY_INDEX, GlobalDescriptor::FuzzyIndex);
-constexpr BindingSlot kVoxelGridConstants  = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
-constexpr BindingSlot kGuidingCounters     = PassUav("gVoxCounters", GUIDED_REG_COUNTERS);
-constexpr BindingSlot kGuidingCompactIds   = PassUav("gVoxCompactIds", GUIDED_REG_COMPACT_IDS);
-constexpr BindingSlot kGuidingInverseIndex = PassUav("gVoxInverseIndex", GUIDED_REG_INVERSE_INDEX);
-constexpr BindingSlot kVoxelFingerprints   = PassUav("gVoxelFingerprints", GUIDED_REG_FINGERPRINTS);
-constexpr BindingSlot kClusterAssignments  = PassUav("gVoxelClusterAssignments", GUIDED_REG_CLUSTER_ASSIGNMENTS);
-constexpr BindingSlot kClusterSeeds        = PassUav("gClusterSeedCompactIds", GUIDED_REG_CLUSTER_SEEDS);
-constexpr BindingSlot kLightTreeNodes      = PassUav("gLightTreeNodes", GUIDED_REG_LIGHT_TREE_NODES);
-constexpr BindingSlot kCompactToLeaf       = PassUav("gCompactToLeaf", GUIDED_REG_COMPACT_TO_LEAF);
-constexpr BindingSlot kClusterRoots        = PassUav("gClusterRootNodes", GUIDED_REG_CLUSTER_ROOTS);
-constexpr BindingSlot kImportanceHeap = PassUav("gSpixelClusterImportanceHeap", GUIDED_REG_IMPORTANCE_HEAP);
-constexpr BindingSlot kLiveBoundMin   = PassUav("gVoxelLiveBoundMin", GUIDED_REG_LIVE_BOUND_MIN);
-constexpr BindingSlot kLiveBoundMax   = PassUav("gVoxelLiveBoundMax", GUIDED_REG_LIVE_BOUND_MAX);
-constexpr BindingSlot kTileGuideQ     = PassUav("gTileGuideQ", GUIDED_REG_TILE_GUIDE_Q);         // ADR 0015
-constexpr BindingSlot kTileStrategyStats = PassUav("gTileStrategyStats", GUIDED_REG_TILE_STRATEGY_STATS);
+//
+// Each slot also carries what the integrator does to it, which is what the frame
+// graph declares (ADR 0017 step 3). Four of them are WRITES: under injection
+// reuse (ADR 0009) this raygen's BSDF subtree owns the VPL data, so the
+// integrator is their producer and light injection returns before writing any.
+constexpr GraphAccess kRead  = GraphAccess::UnorderedAccessRead;
+constexpr GraphAccess kWrite = GraphAccess::ComputeWrite;
+
+constexpr BindingSlot kVoxelIrradiance = Accesses(PassTableEntry("gVoxIrradiance", BindingKind::Uav,
+    GUIDED_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance), kWrite);
+constexpr BindingSlot kVoxelVplCount = Accesses(PassTableEntry("gVoxVplCount", BindingKind::Uav,
+    GUIDED_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount), kWrite);
+constexpr BindingSlot kVoxelRepresentative = Accesses(PassTableEntry("gVoxelRepresentative", BindingKind::Uav,
+    GUIDED_REG_VOXEL_REPRESENTATIVE, GlobalDescriptor::VoxelRepresentative), kWrite);
+constexpr BindingSlot kVplPosition = Accesses(PassTableEntry("gVplPosition", BindingKind::Uav,
+    GUIDED_REG_VPL_POSITION, GlobalDescriptor::VplPosition), kWrite);
+
+constexpr BindingSlot kSuperpixelIndex = Accesses(PassTableEntry("gSpixelIndexImage", BindingKind::Uav,
+    GUIDED_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex), kRead);
+constexpr BindingSlot kVBuffer = Accesses(PassTableEntry("gVBuffer", BindingKind::Uav,
+    GUIDED_REG_VBUFFER, GlobalDescriptor::VBuffer), kRead);
+constexpr BindingSlot kVisibilityMask = Accesses(PassTableEntry("gClusterVisibilityMask", BindingKind::Uav,
+    GUIDED_REG_VISIBILITY_MASK, GlobalDescriptor::ClusterVisibilityMask), kRead);
+constexpr BindingSlot kFuzzyWeights = Accesses(PassTableEntry("gFuzzyWeights", BindingKind::Uav,
+    GUIDED_REG_FUZZY_WEIGHT, GlobalDescriptor::FuzzyWeight), kRead);
+constexpr BindingSlot kFuzzyIndices = Accesses(PassTableEntry("gFuzzyIndices", BindingKind::Uav,
+    GUIDED_REG_FUZZY_INDEX, GlobalDescriptor::FuzzyIndex), kRead);
+constexpr BindingSlot kGuidingCounters     = Accesses(PassUav("gVoxCounters", GUIDED_REG_COUNTERS), kRead);
+constexpr BindingSlot kGuidingCompactIds   = Accesses(PassUav("gVoxCompactIds", GUIDED_REG_COMPACT_IDS), kRead);
+constexpr BindingSlot kGuidingInverseIndex = Accesses(PassUav("gVoxInverseIndex", GUIDED_REG_INVERSE_INDEX), kRead);
+constexpr BindingSlot kVoxelFingerprints   = Accesses(PassUav("gVoxelFingerprints", GUIDED_REG_FINGERPRINTS), kRead);
+constexpr BindingSlot kClusterAssignments  = Accesses(PassUav("gVoxelClusterAssignments", GUIDED_REG_CLUSTER_ASSIGNMENTS), kRead);
+constexpr BindingSlot kClusterSeeds        = Accesses(PassUav("gClusterSeedCompactIds", GUIDED_REG_CLUSTER_SEEDS), kRead);
+constexpr BindingSlot kLightTreeNodes      = Accesses(PassUav("gLightTreeNodes", GUIDED_REG_LIGHT_TREE_NODES), kRead);
+constexpr BindingSlot kCompactToLeaf       = Accesses(PassUav("gCompactToLeaf", GUIDED_REG_COMPACT_TO_LEAF), kRead);
+constexpr BindingSlot kClusterRoots        = Accesses(PassUav("gClusterRootNodes", GUIDED_REG_CLUSTER_ROOTS), kRead);
+constexpr BindingSlot kImportanceHeap      = Accesses(PassUav("gSpixelClusterImportanceHeap", GUIDED_REG_IMPORTANCE_HEAP), kRead);
+constexpr BindingSlot kLiveBoundMin        = Accesses(PassUav("gVoxelLiveBoundMin", GUIDED_REG_LIVE_BOUND_MIN), kRead);
+constexpr BindingSlot kLiveBoundMax        = Accesses(PassUav("gVoxelLiveBoundMax", GUIDED_REG_LIVE_BOUND_MAX), kRead);
+
+// No graph access: constants have no producer, and the adaptive-q pair is read by
+// the dispatch but written by the update node, which one slot cannot say.
+constexpr BindingSlot kVoxelGridConstants = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
+constexpr BindingSlot kTileGuideQ         = PassUav("gTileGuideQ", GUIDED_REG_TILE_GUIDE_Q);         // ADR 0015
+constexpr BindingSlot kTileStrategyStats  = PassUav("gTileStrategyStats", GUIDED_REG_TILE_STRATEGY_STATS);
 constexpr BindingSlot kAdaptiveQConstants = PassRootConstants("AdaptiveQCB", GUIDED_REG_ADAPTIVE_Q_CB, 1);
 
 constexpr BindingSlot kGuidedSlots[] = {
@@ -72,6 +93,16 @@ constexpr BindingSlot kGuidedSlots[] = {
     kGuidingCounters,     kGuidingCompactIds, kGuidingInverseIndex, kVoxelFingerprints, kClusterAssignments,
     kClusterSeeds,        kLightTreeNodes,  kCompactToLeaf,    kClusterRoots,        kImportanceHeap,
     kLiveBoundMin,        kLiveBoundMax,    kTileGuideQ,       kTileStrategyStats,   kAdaptiveQConstants};
+
+// The graph-visible subset, paired with the frame's handles below. Everything the
+// signature binds appears here exactly once — that is the property that made the
+// two hand-written lists drift apart.
+constexpr BindingSlot kGuidedGraphSlots[] = {
+    kVoxelIrradiance,   kVoxelVplCount,     kVoxelRepresentative, kVplPosition,     kSuperpixelIndex,
+    kVBuffer,           kVisibilityMask,    kFuzzyWeights,        kFuzzyIndices,    kGuidingCounters,
+    kGuidingCompactIds, kGuidingInverseIndex, kVoxelFingerprints, kClusterAssignments, kClusterSeeds,
+    kLightTreeNodes,    kCompactToLeaf,     kClusterRoots,        kImportanceHeap,  kLiveBoundMin,
+    kLiveBoundMax};
 
 bool IsAmdDevice(ID3D12Device* device)
 {
@@ -220,43 +251,25 @@ void GuidedPathTracingPass::DeclareDispatchResources(RenderGraph& graph, RenderG
     dispatchPass.Write(m_tileStrategyStatsHandle, GraphAccess::ComputeWrite);
 }
 
-// Every VXPG product the integrator samples. This declaration is the only thing
-// keeping the twenty-six nodes that produce them alive through culling, so a
-// resource dropped from here silently loses its producer rather than erroring.
+// Every VXPG resource the integrator's signature binds, paired with this frame's
+// handle. Driven by the slot table so the two cannot disagree: the hand-written
+// version this replaces had drifted into declaring three reads that never happen
+// (voxel occupancy, shading points, superpixel centers — none of them bound) and
+// omitting the four VPL outputs the raygen actually writes.
 void GuidedPathTracingPass::DeclareVoxelGuidingReads(RenderGraphPassBuilder& pass) const
 {
-    constexpr GraphAccess kUavRead = GraphAccess::UnorderedAccessRead;
     const VxpgGraphHandles& vxpg = *m_frameGuiding;
 
-    // Read through the global descriptor table. Voxel occupancy is deliberately
-    // absent: no guided shader binds it (the signature has no slot for it, so
-    // reflection would reject one that tried). It is a bake product read only by
-    // the raster debug views; the bake stays alive through bakedBoundMin/Max,
-    // which the guiding build really does read.
-    pass.Read(vxpg.voxelIrradiance, kUavRead);
-    pass.Read(vxpg.voxelVplCount, kUavRead);
-    pass.Read(vxpg.voxelRepresentative, kUavRead);
-    pass.Read(vxpg.shadingPoints, kUavRead);
-    pass.Read(vxpg.vbuffer, kUavRead);
-    pass.Read(vxpg.superpixelIndex, kUavRead);
-    pass.Read(vxpg.superpixelCenter, kUavRead);
-    pass.Read(vxpg.superpixelFuzzyWeight, kUavRead);
-    pass.Read(vxpg.superpixelFuzzyIndex, kUavRead);
-    pass.Read(vxpg.clusterVisibilityMask, kUavRead);
+    const GraphResourceHandle handles[] = {
+        vxpg.voxelIrradiance, vxpg.voxelVplCount, vxpg.voxelRepresentative, vxpg.vplPosition, vxpg.superpixelIndex,
+        vxpg.vbuffer,         vxpg.clusterVisibilityMask, vxpg.superpixelFuzzyWeight, vxpg.superpixelFuzzyIndex,
+        vxpg.counters,        vxpg.compactIds,    vxpg.inverseIndex,       vxpg.voxelFingerprints,
+        vxpg.clusterAssignments, vxpg.clusterSeedCompactIds, vxpg.lightTreeNodes, vxpg.lightTreeCompactToLeaf,
+        vxpg.lightTreeClusterRoots, vxpg.superpixelClusterHeap, vxpg.liveBoundMin, vxpg.liveBoundMax};
+    static_assert(std::size(handles) == std::size(kGuidedGraphSlots), "one handle per graph-visible slot");
 
-    // Read as root UAVs (root parameters 8-19 of this technique's global signature).
-    pass.Read(vxpg.counters, kUavRead);
-    pass.Read(vxpg.compactIds, kUavRead);
-    pass.Read(vxpg.inverseIndex, kUavRead);
-    pass.Read(vxpg.voxelFingerprints, kUavRead);
-    pass.Read(vxpg.clusterAssignments, kUavRead);
-    pass.Read(vxpg.clusterSeedCompactIds, kUavRead);
-    pass.Read(vxpg.lightTreeNodes, kUavRead);
-    pass.Read(vxpg.lightTreeCompactToLeaf, kUavRead);
-    pass.Read(vxpg.lightTreeClusterRoots, kUavRead);
-    pass.Read(vxpg.superpixelClusterHeap, kUavRead);
-    pass.Read(vxpg.liveBoundMin, kUavRead);
-    pass.Read(vxpg.liveBoundMax, kUavRead);
+    for (size_t i = 0; i < std::size(kGuidedGraphSlots); ++i)
+        pass.Declare(kGuidedGraphSlots[i], handles[i]);
 }
 
 void GuidedPathTracingPass::AppendPostDispatchNodes(RenderGraph& graph)

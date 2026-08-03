@@ -411,10 +411,9 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	// A technique that compiles no variants reports "nothing changed", so this
 	// needs no branch on which kind is active.
 	{
-		const bool viewActive = m_technique->UsesVoxelGuiding()
-			? g_guidingDebugView.Get() != GuidingDebugView::None
-			: m_technique->HasActiveDebugView();
-		const bool wantsDebugViews = viewActive || g_raygenCleanVariant.Get() == 0;
+		// Each technique answers for its own view enum, so there is nothing to
+		// branch on here — the guided override reads guiding.debugView itself.
+		const bool wantsDebugViews = m_technique->HasActiveDebugView() || g_raygenCleanVariant.Get() == 0;
 		bool needsReload = m_technique->SetDebugViewsCompiled(wantsDebugViews);
 		needsReload |= m_technique->SetOneSampleMisCompiled(g_guidingOneSampleMis.Get() != 0);
 		if (needsReload)
