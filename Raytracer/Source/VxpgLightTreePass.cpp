@@ -23,23 +23,23 @@ namespace
 // u0-u10, the top-level kernel adds its own constants, the two visibility
 // buffers, and the mask texture (a table entry, since texture UAVs cannot be
 // root descriptors).
-constexpr BindingSlot kTreeGridConstants = RootCbv("LightTreeGridCB", LIGHT_TREE_REG_GRID_CB);
-constexpr BindingSlot kTreeSortKeys      = RootUav("gSortKeys", LIGHT_TREE_REG_SORT_KEYS);
-constexpr BindingSlot kTreeNodes         = RootUav("gNodes", LIGHT_TREE_REG_NODES);
-constexpr BindingSlot kTreeLeafRanges    = RootUav("gLeafRanges", LIGHT_TREE_REG_LEAF_RANGES);
-constexpr BindingSlot kTreeCompactToLeaf = RootUav("gCompactToLeaf", LIGHT_TREE_REG_COMPACT_TO_LEAF);
-constexpr BindingSlot kTreeClusterRoots  = RootUav("gClusterRoots", LIGHT_TREE_REG_CLUSTER_ROOTS);
-constexpr BindingSlot kTreeDispatchArgs  = RootUav("gDispatchArgs", LIGHT_TREE_REG_DISPATCH_ARGS);
-constexpr BindingSlot kTreeCompactIds    = RootUav("gCompactIds", LIGHT_TREE_REG_COMPACT_IDS);
-constexpr BindingSlot kTreeAssignments   = RootUav("gClusterAssignments", LIGHT_TREE_REG_CLUSTER_ASSIGNMENTS);
-constexpr BindingSlot kTreePremulIrradiance = RootUav("gPremulIrradiance", LIGHT_TREE_REG_PREMUL_IRRADIANCE);
-constexpr BindingSlot kTreeCounters         = RootUav("gVoxCounters", LIGHT_TREE_REG_COUNTERS);
-constexpr BindingSlot kTreeNodeVisited      = RootUav("gNodeVisited", LIGHT_TREE_REG_NODE_VISITED);
+constexpr BindingSlot kTreeGridConstants = PassCbv("LightTreeGridCB", LIGHT_TREE_REG_GRID_CB);
+constexpr BindingSlot kTreeSortKeys      = PassUav("gSortKeys", LIGHT_TREE_REG_SORT_KEYS);
+constexpr BindingSlot kTreeNodes         = PassUav("gNodes", LIGHT_TREE_REG_NODES);
+constexpr BindingSlot kTreeLeafRanges    = PassUav("gLeafRanges", LIGHT_TREE_REG_LEAF_RANGES);
+constexpr BindingSlot kTreeCompactToLeaf = PassUav("gCompactToLeaf", LIGHT_TREE_REG_COMPACT_TO_LEAF);
+constexpr BindingSlot kTreeClusterRoots  = PassUav("gClusterRoots", LIGHT_TREE_REG_CLUSTER_ROOTS);
+constexpr BindingSlot kTreeDispatchArgs  = PassUav("gDispatchArgs", LIGHT_TREE_REG_DISPATCH_ARGS);
+constexpr BindingSlot kTreeCompactIds    = PassUav("gCompactIds", LIGHT_TREE_REG_COMPACT_IDS);
+constexpr BindingSlot kTreeAssignments   = PassUav("gClusterAssignments", LIGHT_TREE_REG_CLUSTER_ASSIGNMENTS);
+constexpr BindingSlot kTreePremulIrradiance = PassUav("gPremulIrradiance", LIGHT_TREE_REG_PREMUL_IRRADIANCE);
+constexpr BindingSlot kTreeCounters         = PassUav("gVoxCounters", LIGHT_TREE_REG_COUNTERS);
+constexpr BindingSlot kTreeNodeVisited      = PassUav("gNodeVisited", LIGHT_TREE_REG_NODE_VISITED);
 constexpr BindingSlot kTreeTopLevelConstants =
-    RootConstants("TopLevelTreeCB", LIGHT_TREE_REG_TOP_LEVEL_CB, 4); // mapX, mapY, useAvgVisibility, pad
-constexpr BindingSlot kTreeAvgVisibility  = RootUav("gAvgVisibility", LIGHT_TREE_REG_AVG_VISIBILITY);
-constexpr BindingSlot kTreeImportanceHeap = RootUav("gSpixelClusterImportanceHeap", LIGHT_TREE_REG_IMPORTANCE_HEAP);
-constexpr BindingSlot kTreeVisibilityMask = TableEntry("gClusterVisibilityMask", BindingKind::Uav,
+    PassRootConstants("TopLevelTreeCB", LIGHT_TREE_REG_TOP_LEVEL_CB, 4); // mapX, mapY, useAvgVisibility, pad
+constexpr BindingSlot kTreeAvgVisibility  = PassUav("gAvgVisibility", LIGHT_TREE_REG_AVG_VISIBILITY);
+constexpr BindingSlot kTreeImportanceHeap = PassUav("gSpixelClusterImportanceHeap", LIGHT_TREE_REG_IMPORTANCE_HEAP);
+constexpr BindingSlot kTreeVisibilityMask = PassTableEntry("gClusterVisibilityMask", BindingKind::Uav,
                                                        LIGHT_TREE_REG_VISIBILITY_MASK,
                                                        GlobalDescriptor::ClusterVisibilityMask);
 

@@ -19,14 +19,14 @@ namespace
 {
 // Both cluster kernels share this layout: seeding writes the centers the
 // assignment step then reads, so neither owns a subset.
-constexpr BindingSlot kClusterConstants        = RootConstants("ClusterCB", CLUSTER_REG_CB, 4);
-constexpr BindingSlot kClusterSeedIds          = RootUav("gClusterSeedCompactIds", CLUSTER_REG_SEED_COMPACT_IDS);
-constexpr BindingSlot kClusterCenters          = RootUav("gClusterCenters", CLUSTER_REG_CENTERS);
-constexpr BindingSlot kClusterDispatchArgs     = RootUav("gGuidingDispatchArgs", CLUSTER_REG_DISPATCH_ARGS);
-constexpr BindingSlot kClusterFingerprints     = RootUav("gVoxelFingerprints", CLUSTER_REG_FINGERPRINTS);
-constexpr BindingSlot kClusterCompactIds       = RootUav("gCompactIds", CLUSTER_REG_COMPACT_IDS);
-constexpr BindingSlot kClusterPremulIrradiance = RootUav("gPremulIrradiance", CLUSTER_REG_PREMUL_IRRADIANCE);
-constexpr BindingSlot kClusterAssignments      = RootUav("gVoxelClusterAssignments", CLUSTER_REG_ASSIGNMENTS);
+constexpr BindingSlot kClusterConstants        = PassRootConstants("ClusterCB", CLUSTER_REG_CB, 4);
+constexpr BindingSlot kClusterSeedIds          = PassUav("gClusterSeedCompactIds", CLUSTER_REG_SEED_COMPACT_IDS);
+constexpr BindingSlot kClusterCenters          = PassUav("gClusterCenters", CLUSTER_REG_CENTERS);
+constexpr BindingSlot kClusterDispatchArgs     = PassUav("gGuidingDispatchArgs", CLUSTER_REG_DISPATCH_ARGS);
+constexpr BindingSlot kClusterFingerprints     = PassUav("gVoxelFingerprints", CLUSTER_REG_FINGERPRINTS);
+constexpr BindingSlot kClusterCompactIds       = PassUav("gCompactIds", CLUSTER_REG_COMPACT_IDS);
+constexpr BindingSlot kClusterPremulIrradiance = PassUav("gPremulIrradiance", CLUSTER_REG_PREMUL_IRRADIANCE);
+constexpr BindingSlot kClusterAssignments      = PassUav("gVoxelClusterAssignments", CLUSTER_REG_ASSIGNMENTS);
 
 constexpr BindingSlot kClusterSlots[] = {kClusterConstants,    kClusterSeedIds,      kClusterCenters,
                                          kClusterDispatchArgs, kClusterFingerprints, kClusterCompactIds,

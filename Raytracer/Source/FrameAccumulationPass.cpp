@@ -35,11 +35,11 @@ void FrameAccumulationPass::Initialize(
 
 // Private heap: current frame in, running average and display copy out.
 static constexpr BindingSlot kAccumSlots[] = {
-    TableEntryAt("gCurrent", BindingKind::Srv, ACCUM_REG_CURRENT, 0),
-    TableEntryAt("gAccum", BindingKind::Uav, ACCUM_REG_ACCUM, 1),
-    TableEntryAt("gDisplay", BindingKind::Uav, ACCUM_REG_DISPLAY, 2),
+    PassTableEntryAt("gCurrent", BindingKind::Srv, ACCUM_REG_CURRENT, 0),
+    PassTableEntryAt("gAccum", BindingKind::Uav, ACCUM_REG_ACCUM, 1),
+    PassTableEntryAt("gDisplay", BindingKind::Uav, ACCUM_REG_DISPLAY, 2),
 };
-static constexpr BindingSlot kAccumConstants = RootConstants("AccumCB", ACCUM_REG_CB, 1);
+static constexpr BindingSlot kAccumConstants = PassRootConstants("AccumCB", ACCUM_REG_CB, 1);
 
 void FrameAccumulationPass::CreateRootSignature()
 {

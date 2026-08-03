@@ -10,7 +10,7 @@
 #include "PassRegisters.h"
 #include "Octahedral.hlsl"
 
-cbuffer SuperpixelCB : BAMBOO_CBV(SUPERPIXEL_REG_CB)
+cbuffer SuperpixelCB : BAMBOO_PASS_CBV(SUPERPIXEL_REG_CB)
 {
     int2  map_size;        // ceil(img_size / spixel_size)
     int2  img_size;        // screen resolution
@@ -25,17 +25,17 @@ cbuffer SuperpixelCB : BAMBOO_CBV(SUPERPIXEL_REG_CB)
 }
 
 // ShadingPoints read as UAV to avoid a per-frame UAV<->SRV transition.
-RWTexture2D<float4> u_input         : BAMBOO_UAV(SUPERPIXEL_REG_INPUT); // primary worldPos.xyz + octaN.w
-RWTexture2D<float4> u_center        : BAMBOO_UAV(SUPERPIXEL_REG_CENTER); // representative pos + octaN (map_size)
-RWTexture2D<int>    u_index         : BAMBOO_UAV(SUPERPIXEL_REG_INDEX); // per-pixel superpixel id
-RWTexture2D<uint>   u_spixel_counter : BAMBOO_UAV(SUPERPIXEL_REG_SPIXEL_COUNTER); // pixels per superpixel (map_size)
-RWTexture2D<int2>   u_spixel_gathered: BAMBOO_UAV(SUPERPIXEL_REG_SPIXEL_GATHERED); // gathered pixel coords (map*spixel_size)
+RWTexture2D<float4> u_input         : BAMBOO_PASS_UAV(SUPERPIXEL_REG_INPUT); // primary worldPos.xyz + octaN.w
+RWTexture2D<float4> u_center        : BAMBOO_PASS_UAV(SUPERPIXEL_REG_CENTER); // representative pos + octaN (map_size)
+RWTexture2D<int>    u_index         : BAMBOO_PASS_UAV(SUPERPIXEL_REG_INDEX); // per-pixel superpixel id
+RWTexture2D<uint>   u_spixel_counter : BAMBOO_PASS_UAV(SUPERPIXEL_REG_SPIXEL_COUNTER); // pixels per superpixel (map_size)
+RWTexture2D<int2>   u_spixel_gathered: BAMBOO_PASS_UAV(SUPERPIXEL_REG_SPIXEL_GATHERED); // gathered pixel coords (map*spixel_size)
 // Fuzzy 4-nearest blend (restored 2026-07-10, reversing the ADR 0003 cut): the
 // 4 nearest superpixel centers and their normalized 1/dist^2 weights, consumed
 // by the guided integrator's mixture top-level pdf. SIByL u_fuzzyWeight /
 // u_fuzzyIdx (find-center.slang FuzzyVec + Pack).
-RWTexture2D<float4> u_fuzzy_weight  : BAMBOO_UAV(SUPERPIXEL_REG_FUZZY_WEIGHT); // normalized weights (0 = unused slot)
-RWTexture2D<int4>   u_fuzzy_index   : BAMBOO_UAV(SUPERPIXEL_REG_FUZZY_INDEX); // superpixel flat ids (-1 = unused)
+RWTexture2D<float4> u_fuzzy_weight  : BAMBOO_PASS_UAV(SUPERPIXEL_REG_FUZZY_WEIGHT); // normalized weights (0 = unused slot)
+RWTexture2D<int4>   u_fuzzy_index   : BAMBOO_PASS_UAV(SUPERPIXEL_REG_FUZZY_INDEX); // superpixel flat ids (-1 = unused)
 
 static const float SP_INVALID_POS = 1e29; // ShadingPoints sentinel is 1e30
 

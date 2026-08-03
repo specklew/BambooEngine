@@ -26,29 +26,29 @@ namespace
 {
 // Three signatures: the per-frame accumulator clear, the bake-time clear, and
 // the bake draw itself. All three address this pass's private heap.
-constexpr BindingSlot kFrameClearConstants = RootConstants("ClearCB", VOXEL_FRAME_CLEAR_REG_CB, 4);
+constexpr BindingSlot kFrameClearConstants = PassRootConstants("ClearCB", VOXEL_FRAME_CLEAR_REG_CB, 4);
 // Offsets are relative to the pointer DispatchFrameClear hands SetTable, which
 // is already advanced past the occupancy slot — not to the heap start.
 constexpr BindingSlot kFrameClearIrradiance =
-    TableEntryAt("gIrradiance", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_IRRADIANCE, 0);
+    PassTableEntryAt("gIrradiance", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_IRRADIANCE, 0);
 constexpr BindingSlot kFrameClearVplCount =
-    TableEntryAt("gVplCount", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_VPL_COUNT, 1);
+    PassTableEntryAt("gVplCount", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_VPL_COUNT, 1);
 constexpr BindingSlot kFrameClearSlots[] = {kFrameClearConstants, kFrameClearIrradiance, kFrameClearVplCount};
 
-constexpr BindingSlot kBakeClearConstants = RootConstants("ClearCB", VOXEL_BAKE_CLEAR_REG_CB, 4);
+constexpr BindingSlot kBakeClearConstants = PassRootConstants("ClearCB", VOXEL_BAKE_CLEAR_REG_CB, 4);
 constexpr BindingSlot kBakeClearOccupancy =
-    TableEntryAt("gOccupancy", BindingKind::Uav, VOXEL_BAKE_CLEAR_REG_OCCUPANCY, 0);
-constexpr BindingSlot kBakeClearBoundMin = RootUav("gBakedBoundMin", VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MIN);
-constexpr BindingSlot kBakeClearBoundMax = RootUav("gBakedBoundMax", VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MAX);
+    PassTableEntryAt("gOccupancy", BindingKind::Uav, VOXEL_BAKE_CLEAR_REG_OCCUPANCY, 0);
+constexpr BindingSlot kBakeClearBoundMin = PassUav("gBakedBoundMin", VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MIN);
+constexpr BindingSlot kBakeClearBoundMax = PassUav("gBakedBoundMax", VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MAX);
 constexpr BindingSlot kBakeClearSlots[] = {kBakeClearConstants, kBakeClearOccupancy, kBakeClearBoundMin,
                                            kBakeClearBoundMax};
 
-constexpr BindingSlot kBakeGridConstants  = RootCbv("VoxelGridCB", VOXEL_BAKE_REG_GRID_CB);
-constexpr BindingSlot kBakeModelConstants = RootCbv("ModelTransforms", VOXEL_BAKE_REG_MODEL_CB);
-constexpr BindingSlot kBakeAxisConstants  = RootConstants("BakeCB", VOXEL_BAKE_REG_AXIS_CB, 4); // axis + bound flags
-constexpr BindingSlot kBakeOccupancy = TableEntryAt("gOccupancy", BindingKind::Uav, VOXEL_BAKE_REG_OCCUPANCY, 0);
-constexpr BindingSlot kBakeBoundMin  = RootUav("gBakedBoundMin", VOXEL_BAKE_REG_BAKED_BOUND_MIN);
-constexpr BindingSlot kBakeBoundMax  = RootUav("gBakedBoundMax", VOXEL_BAKE_REG_BAKED_BOUND_MAX);
+constexpr BindingSlot kBakeGridConstants  = PassCbv("VoxelGridCB", VOXEL_BAKE_REG_GRID_CB);
+constexpr BindingSlot kBakeModelConstants = PassCbv("ModelTransforms", VOXEL_BAKE_REG_MODEL_CB);
+constexpr BindingSlot kBakeAxisConstants  = PassRootConstants("BakeCB", VOXEL_BAKE_REG_AXIS_CB, 4); // axis + bound flags
+constexpr BindingSlot kBakeOccupancy = PassTableEntryAt("gOccupancy", BindingKind::Uav, VOXEL_BAKE_REG_OCCUPANCY, 0);
+constexpr BindingSlot kBakeBoundMin  = PassUav("gBakedBoundMin", VOXEL_BAKE_REG_BAKED_BOUND_MIN);
+constexpr BindingSlot kBakeBoundMax  = PassUav("gBakedBoundMax", VOXEL_BAKE_REG_BAKED_BOUND_MAX);
 constexpr BindingSlot kBakeSlots[] = {kBakeGridConstants, kBakeModelConstants, kBakeAxisConstants, kBakeOccupancy,
                                       kBakeBoundMin,      kBakeBoundMax};
 

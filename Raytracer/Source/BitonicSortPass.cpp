@@ -24,9 +24,9 @@ void BitonicSortPass::Initialize(
     m_initialized = true;
 }
 
-static constexpr BindingSlot kSortConstants = RootConstants("BitonicCB", BITONIC_REG_CB, 3); // k, j, counterOffset
-static constexpr BindingSlot kSortBuffer    = RootUav("gSortBuffer", BITONIC_REG_SORT_BUFFER);
-static constexpr BindingSlot kSortCounter   = RootUav("gCounter", BITONIC_REG_COUNTER);
+static constexpr BindingSlot kSortConstants = PassRootConstants("BitonicCB", BITONIC_REG_CB, 3); // k, j, counterOffset
+static constexpr BindingSlot kSortBuffer    = PassUav("gSortBuffer", BITONIC_REG_SORT_BUFFER);
+static constexpr BindingSlot kSortCounter   = PassUav("gCounter", BITONIC_REG_COUNTER);
 
 void BitonicSortPass::CreateRootSignature()
 {

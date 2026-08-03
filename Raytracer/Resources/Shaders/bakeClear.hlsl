@@ -4,11 +4,11 @@
 
 #include "PassRegisters.h"
 
-RWTexture3D<uint>        gOccupancy     : BAMBOO_UAV(VOXEL_BAKE_CLEAR_REG_OCCUPANCY);
-RWStructuredBuffer<uint> gBakedBoundMin : BAMBOO_UAV(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MIN); // 4 uints per cell
-RWStructuredBuffer<uint> gBakedBoundMax : BAMBOO_UAV(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MAX); // 4 uints per cell
+RWTexture3D<uint>        gOccupancy     : BAMBOO_PASS_UAV(VOXEL_BAKE_CLEAR_REG_OCCUPANCY);
+RWStructuredBuffer<uint> gBakedBoundMin : BAMBOO_PASS_UAV(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MIN); // 4 uints per cell
+RWStructuredBuffer<uint> gBakedBoundMax : BAMBOO_PASS_UAV(VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MAX); // 4 uints per cell
 
-cbuffer ClearCB : BAMBOO_CBV(VOXEL_BAKE_CLEAR_REG_CB)
+cbuffer ClearCB : BAMBOO_PASS_CBV(VOXEL_BAKE_CLEAR_REG_CB)
 {
     uint gGridDim;
     uint _pad0;

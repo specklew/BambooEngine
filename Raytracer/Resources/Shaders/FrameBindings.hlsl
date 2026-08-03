@@ -1,12 +1,15 @@
 #ifndef FRAME_BINDINGS_HLSL
 #define FRAME_BINDINGS_HLSL
 
-// space0 is the frame layout: the resources every raytracing pass sees, at fixed
-// registers, mirrored by FrameBindingLayout.h on the C++ side. Shared includes
-// (RaytracingUtils, LightPool, BRDF) reference these by global register, which is
-// why the layout is reserved and hand-curated rather than derived from usage.
+// space0 is the frame layout and nothing else: the resources every raytracing pass
+// sees, at fixed registers, mirrored by FrameBindingLayout.h on the C++ side.
+// Shared includes (RaytracingUtils, LightPool, BRDF) reference these by global
+// register, which is why the layout is reserved and hand-curated rather than
+// derived from usage.
 //
-// space1 is deliberately left empty: it is where per-pass bindings go.
+// space1 holds every per-pass binding (PassRegisters.h, BAMBOO_PASS_*). Keeping
+// the two apart is what lets a pass number its registers freely and stops a new
+// one from ever landing on frame ground.
 //
 // Everything declared here is bound for every pass whether it reads it or not, so
 // keep the list short. Pass-scoped resources do not belong in this file.

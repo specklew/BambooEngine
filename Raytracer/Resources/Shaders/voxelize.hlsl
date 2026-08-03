@@ -10,18 +10,18 @@
 #include "voxelGrid.hlsli"
 #include "TriangleClip.hlsl"
 
-cbuffer VoxelGridCB : BAMBOO_CBV(VOXEL_BAKE_REG_GRID_CB)
+cbuffer VoxelGridCB : BAMBOO_PASS_CBV(VOXEL_BAKE_REG_GRID_CB)
 {
     VoxelGridParams gGrid;
 }
 
-cbuffer ModelTransforms : BAMBOO_CBV(VOXEL_BAKE_REG_MODEL_CB)
+cbuffer ModelTransforms : BAMBOO_PASS_CBV(VOXEL_BAKE_REG_MODEL_CB)
 {
     float4x4 world;
     float4x4 worldInvTranspose;
 }
 
-cbuffer BakeCB : BAMBOO_CBV(VOXEL_BAKE_REG_AXIS_CB)
+cbuffer BakeCB : BAMBOO_PASS_CBV(VOXEL_BAKE_REG_AXIS_CB)
 {
     uint axisIndex;
     uint useCompact; // 1 = tight AABB of the triangle sliver inside the voxel
@@ -29,9 +29,9 @@ cbuffer BakeCB : BAMBOO_CBV(VOXEL_BAKE_REG_AXIS_CB)
     uint _pad0;
 }
 
-RWTexture3D<uint>        gOccupancy     : BAMBOO_UAV(VOXEL_BAKE_REG_OCCUPANCY);
-RWStructuredBuffer<uint> gBakedBoundMin : BAMBOO_UAV(VOXEL_BAKE_REG_BAKED_BOUND_MIN); // 4 uints per cell, quantized to the voxel cube
-RWStructuredBuffer<uint> gBakedBoundMax : BAMBOO_UAV(VOXEL_BAKE_REG_BAKED_BOUND_MAX);
+RWTexture3D<uint>        gOccupancy     : BAMBOO_PASS_UAV(VOXEL_BAKE_REG_OCCUPANCY);
+RWStructuredBuffer<uint> gBakedBoundMin : BAMBOO_PASS_UAV(VOXEL_BAKE_REG_BAKED_BOUND_MIN); // 4 uints per cell, quantized to the voxel cube
+RWStructuredBuffer<uint> gBakedBoundMax : BAMBOO_PASS_UAV(VOXEL_BAKE_REG_BAKED_BOUND_MAX);
 
 struct VsIn
 {

@@ -1,9 +1,9 @@
 #include "PassRegisters.h"
 
-Texture2D<float4>   gInput  : BAMBOO_SRV(POST_REG_INPUT);
-RWTexture2D<float4> gOutput : BAMBOO_UAV(POST_REG_OUTPUT);
+Texture2D<float4>   gInput  : BAMBOO_PASS_SRV(POST_REG_INPUT);
+RWTexture2D<float4> gOutput : BAMBOO_PASS_UAV(POST_REG_OUTPUT);
 
-cbuffer PostProcessCB : BAMBOO_CBV(POST_REG_CB)
+cbuffer PostProcessCB : BAMBOO_PASS_CBV(POST_REG_CB)
 {
     float exposure;
     float contrast;    // pre-ACES power curve  (default 1.0)

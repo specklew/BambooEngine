@@ -32,26 +32,26 @@ constexpr BindingSlot kCvisTlas     = TableEntry("SceneBVH", BindingKind::Srv, F
 constexpr BindingSlot kCvisVertices = TableEntry("g_vertices", BindingKind::Srv, FRAME_REG_VERTICES, GlobalDescriptor::Vertices);
 constexpr BindingSlot kCvisIndices  = TableEntry("g_indices", BindingKind::Srv, FRAME_REG_INDICES, GlobalDescriptor::Indices);
 constexpr BindingSlot kCvisSuperpixelIndex =
-    TableEntry("gSuperpixelIndex", BindingKind::Uav, CVIS_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
+    PassTableEntry("gSuperpixelIndex", BindingKind::Uav, CVIS_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
 constexpr BindingSlot kCvisVplPosition =
-    TableEntry("gVplPosition", BindingKind::Uav, CVIS_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
-constexpr BindingSlot kCvisVBuffer = TableEntry("gVBuffer", BindingKind::Uav, CVIS_REG_VBUFFER, GlobalDescriptor::VBuffer);
+    PassTableEntry("gVplPosition", BindingKind::Uav, CVIS_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
+constexpr BindingSlot kCvisVBuffer = PassTableEntry("gVBuffer", BindingKind::Uav, CVIS_REG_VBUFFER, GlobalDescriptor::VBuffer);
 constexpr BindingSlot kCvisSpixelGathered =
-    TableEntry("gSpixelGathered", BindingKind::Uav, CVIS_REG_SPIXEL_GATHERED, GlobalDescriptor::SpixelGathered);
+    PassTableEntry("gSpixelGathered", BindingKind::Uav, CVIS_REG_SPIXEL_GATHERED, GlobalDescriptor::SpixelGathered);
 constexpr BindingSlot kCvisSpixelCounter =
-    TableEntry("gSpixelCounter", BindingKind::Uav, CVIS_REG_SPIXEL_COUNTER, GlobalDescriptor::SpixelCounter);
-constexpr BindingSlot kCvisVisibilityMask = TableEntry("gClusterVisibilityMask", BindingKind::Uav,
+    PassTableEntry("gSpixelCounter", BindingKind::Uav, CVIS_REG_SPIXEL_COUNTER, GlobalDescriptor::SpixelCounter);
+constexpr BindingSlot kCvisVisibilityMask = PassTableEntry("gClusterVisibilityMask", BindingKind::Uav,
                                                        CVIS_REG_VISIBILITY_MASK, GlobalDescriptor::ClusterVisibilityMask);
 
 constexpr BindingSlot kCvisGeometryInfo = RootSrv("g_geometryInfo", FRAME_REG_GEOMETRY_INFO);
 constexpr BindingSlot kCvisInstanceInfo = RootSrv("g_instanceInfo", FRAME_REG_INSTANCE_INFO);
-constexpr BindingSlot kCvisGridConstants   = RootCbv("CvisGridCB", CVIS_REG_GRID_CB);
-constexpr BindingSlot kCvisConstants       = RootConstants("CvisCB", CVIS_REG_CB, 8);
-constexpr BindingSlot kCvisInverseIndex    = RootUav("gVoxInverseIndex", CVIS_REG_INVERSE_INDEX);
-constexpr BindingSlot kCvisAssignments     = RootUav("gVoxelClusterAssignments", CVIS_REG_CLUSTER_ASSIGNMENTS);
-constexpr BindingSlot kCvisGatheredPoints  = RootUav("gClusterGatheredLightPoints", CVIS_REG_GATHERED_LIGHT_POINTS);
-constexpr BindingSlot kCvisPointCounts     = RootUav("gClusterLightPointCounts", CVIS_REG_LIGHT_POINT_COUNTS);
-constexpr BindingSlot kCvisAvgVisibility   = RootUav("gSpixelClusterAvgVisibility", CVIS_REG_AVG_VISIBILITY);
+constexpr BindingSlot kCvisGridConstants   = PassCbv("CvisGridCB", CVIS_REG_GRID_CB);
+constexpr BindingSlot kCvisConstants       = PassRootConstants("CvisCB", CVIS_REG_CB, 8);
+constexpr BindingSlot kCvisInverseIndex    = PassUav("gVoxInverseIndex", CVIS_REG_INVERSE_INDEX);
+constexpr BindingSlot kCvisAssignments     = PassUav("gVoxelClusterAssignments", CVIS_REG_CLUSTER_ASSIGNMENTS);
+constexpr BindingSlot kCvisGatheredPoints  = PassUav("gClusterGatheredLightPoints", CVIS_REG_GATHERED_LIGHT_POINTS);
+constexpr BindingSlot kCvisPointCounts     = PassUav("gClusterLightPointCounts", CVIS_REG_LIGHT_POINT_COUNTS);
+constexpr BindingSlot kCvisAvgVisibility   = PassUav("gSpixelClusterAvgVisibility", CVIS_REG_AVG_VISIBILITY);
 
 constexpr BindingSlot kCvisSlots[] = {
     kCvisCamera,          kCvisTlas,           kCvisVertices,       kCvisIndices,       kCvisSuperpixelIndex,

@@ -22,18 +22,18 @@
 
 // Primary-hit G-buffer from light injection: .xyz world position, .w octahedral
 // normal (bit-cast). Invalid (sky) pixels carry the 1e30 sentinel.
-RWTexture2D<float4> gShadingPoints : BAMBOO_UAV(FINGERPRINT_PRESAMPLE_REG_SHADING_POINTS);
+RWTexture2D<float4> gShadingPoints : BAMBOO_PASS_UAV(FINGERPRINT_PRESAMPLE_REG_SHADING_POINTS);
 
 // ---- SampleScreenRepresentatives outputs ----------------------------------
 // SIByL u_RepresentPixel: the 128 chosen surface points (pos + octa normal).
-RWStructuredBuffer<float4> gScreenRepresentativePoints : BAMBOO_UAV(FINGERPRINT_PRESAMPLE_REG_REPRESENTATIVES);
+RWStructuredBuffer<float4> gScreenRepresentativePoints : BAMBOO_PASS_UAV(FINGERPRINT_PRESAMPLE_REG_REPRESENTATIVES);
 // SIByL u_IndirectArgs: GPU-computed dispatch dimensions for the guiding passes
 // downstream; .w of each entry carries the raw lit-voxel count.
-RWStructuredBuffer<uint4> gGuidingDispatchArgs : BAMBOO_UAV(FINGERPRINT_PRESAMPLE_REG_DISPATCH_ARGS);
+RWStructuredBuffer<uint4> gGuidingDispatchArgs : BAMBOO_PASS_UAV(FINGERPRINT_PRESAMPLE_REG_DISPATCH_ARGS);
 // SIByL u_vplCounter: [0] = compacted lit-voxel count (VoxelGuidingBuildPass).
-RWStructuredBuffer<uint> gGuidingCounters : BAMBOO_UAV(FINGERPRINT_PRESAMPLE_REG_COUNTERS);
+RWStructuredBuffer<uint> gGuidingCounters : BAMBOO_PASS_UAV(FINGERPRINT_PRESAMPLE_REG_COUNTERS);
 
-cbuffer PresampleCB : BAMBOO_CBV(FINGERPRINT_PRESAMPLE_REG_CB)
+cbuffer PresampleCB : BAMBOO_PASS_CBV(FINGERPRINT_PRESAMPLE_REG_CB)
 {
     uint2 gResolution;
     uint  gRandSeed;
@@ -71,17 +71,17 @@ void SampleScreenRepresentatives(uint3 tid : SV_DispatchThreadID)
 
 // ---- BuildVoxelFingerprints -----------------------------------------------
 
-RaytracingAccelerationStructure gSceneBVH : BAMBOO_SRV(FINGERPRINT_VISIBILITY_REG_TLAS);
+RaytracingAccelerationStructure gSceneBVH : BAMBOO_PASS_SRV(FINGERPRINT_VISIBILITY_REG_TLAS);
 
 // SIByL u_RepresentPixel / u_RepresentVPL / u_IndirectArgs. UAV-typed reads:
 // Bamboo keeps these buffers in UNORDERED_ACCESS state so no SRV transition is
 // needed between the presample and visibility kernels.
-RWStructuredBuffer<float4> gReadRepresentativePoints : BAMBOO_UAV(FINGERPRINT_VISIBILITY_REG_REPRESENTATIVES);
-RWStructuredBuffer<float4> gCompactVoxelLightPoints  : BAMBOO_UAV(FINGERPRINT_VISIBILITY_REG_LIGHT_POINTS);
-RWStructuredBuffer<uint4>  gReadDispatchArgs         : BAMBOO_UAV(FINGERPRINT_VISIBILITY_REG_DISPATCH_ARGS);
+RWStructuredBuffer<float4> gReadRepresentativePoints : BAMBOO_PASS_UAV(FINGERPRINT_VISIBILITY_REG_REPRESENTATIVES);
+RWStructuredBuffer<float4> gCompactVoxelLightPoints  : BAMBOO_PASS_UAV(FINGERPRINT_VISIBILITY_REG_LIGHT_POINTS);
+RWStructuredBuffer<uint4>  gReadDispatchArgs         : BAMBOO_PASS_UAV(FINGERPRINT_VISIBILITY_REG_DISPATCH_ARGS);
 
 // SIByL u_RowVisibility: 4 uints per compact voxel = the 128-bit fingerprint.
-RWStructuredBuffer<uint> gVoxelFingerprints : BAMBOO_UAV(FINGERPRINT_VISIBILITY_REG_FINGERPRINTS);
+RWStructuredBuffer<uint> gVoxelFingerprints : BAMBOO_PASS_UAV(FINGERPRINT_VISIBILITY_REG_FINGERPRINTS);
 
 static const float FINGERPRINT_RAY_EPSILON = 0.01;
 

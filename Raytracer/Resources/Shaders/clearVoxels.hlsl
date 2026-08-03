@@ -3,10 +3,10 @@
 
 #include "PassRegisters.h"
 
-RWTexture3D<uint> gIrradiance : BAMBOO_UAV(VOXEL_FRAME_CLEAR_REG_IRRADIANCE);
-RWTexture3D<uint> gVplCount   : BAMBOO_UAV(VOXEL_FRAME_CLEAR_REG_VPL_COUNT);
+RWTexture3D<uint> gIrradiance : BAMBOO_PASS_UAV(VOXEL_FRAME_CLEAR_REG_IRRADIANCE);
+RWTexture3D<uint> gVplCount   : BAMBOO_PASS_UAV(VOXEL_FRAME_CLEAR_REG_VPL_COUNT);
 
-cbuffer ClearCB : BAMBOO_CBV(VOXEL_FRAME_CLEAR_REG_CB)
+cbuffer ClearCB : BAMBOO_PASS_CBV(VOXEL_FRAME_CLEAR_REG_CB)
 {
     uint gGridDim;
     uint _pad0;

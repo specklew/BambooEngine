@@ -22,24 +22,24 @@ namespace
     // Two kernels, two signatures. The visibility kernel deliberately rebinds
     // u1-u3 to different buffers than the presample kernel writes them from, so
     // the two slot tables share register numbers but nothing else.
-    constexpr BindingSlot kPresampleConstants = RootConstants("PresampleCB", FINGERPRINT_PRESAMPLE_REG_CB, 4);
+    constexpr BindingSlot kPresampleConstants = PassRootConstants("PresampleCB", FINGERPRINT_PRESAMPLE_REG_CB, 4);
     constexpr BindingSlot kPresampleShadingPoints =
-        TableEntryAt("gShadingPoints", BindingKind::Uav, FINGERPRINT_PRESAMPLE_REG_SHADING_POINTS, 0);
+        PassTableEntryAt("gShadingPoints", BindingKind::Uav, FINGERPRINT_PRESAMPLE_REG_SHADING_POINTS, 0);
     constexpr BindingSlot kPresampleRepresentatives =
-        RootUav("gScreenRepresentativePoints", FINGERPRINT_PRESAMPLE_REG_REPRESENTATIVES);
-    constexpr BindingSlot kPresampleDispatchArgs = RootUav("gGuidingDispatchArgs", FINGERPRINT_PRESAMPLE_REG_DISPATCH_ARGS);
-    constexpr BindingSlot kPresampleCounters     = RootUav("gGuidingCounters", FINGERPRINT_PRESAMPLE_REG_COUNTERS);
+        PassUav("gScreenRepresentativePoints", FINGERPRINT_PRESAMPLE_REG_REPRESENTATIVES);
+    constexpr BindingSlot kPresampleDispatchArgs = PassUav("gGuidingDispatchArgs", FINGERPRINT_PRESAMPLE_REG_DISPATCH_ARGS);
+    constexpr BindingSlot kPresampleCounters     = PassUav("gGuidingCounters", FINGERPRINT_PRESAMPLE_REG_COUNTERS);
 
     constexpr BindingSlot kPresampleSlots[] = {kPresampleConstants, kPresampleShadingPoints, kPresampleRepresentatives,
                                                kPresampleDispatchArgs, kPresampleCounters};
 
-    constexpr BindingSlot kVisibilityTlas = RootSrv("gSceneBVH", FINGERPRINT_VISIBILITY_REG_TLAS);
+    constexpr BindingSlot kVisibilityTlas = PassSrv("gSceneBVH", FINGERPRINT_VISIBILITY_REG_TLAS);
     constexpr BindingSlot kVisibilityRepresentatives =
-        RootUav("gReadRepresentativePoints", FINGERPRINT_VISIBILITY_REG_REPRESENTATIVES);
+        PassUav("gReadRepresentativePoints", FINGERPRINT_VISIBILITY_REG_REPRESENTATIVES);
     constexpr BindingSlot kVisibilityLightPoints =
-        RootUav("gCompactVoxelLightPoints", FINGERPRINT_VISIBILITY_REG_LIGHT_POINTS);
-    constexpr BindingSlot kVisibilityDispatchArgs = RootUav("gReadDispatchArgs", FINGERPRINT_VISIBILITY_REG_DISPATCH_ARGS);
-    constexpr BindingSlot kVisibilityFingerprints = RootUav("gVoxelFingerprints", FINGERPRINT_VISIBILITY_REG_FINGERPRINTS);
+        PassUav("gCompactVoxelLightPoints", FINGERPRINT_VISIBILITY_REG_LIGHT_POINTS);
+    constexpr BindingSlot kVisibilityDispatchArgs = PassUav("gReadDispatchArgs", FINGERPRINT_VISIBILITY_REG_DISPATCH_ARGS);
+    constexpr BindingSlot kVisibilityFingerprints = PassUav("gVoxelFingerprints", FINGERPRINT_VISIBILITY_REG_FINGERPRINTS);
 
     constexpr BindingSlot kVisibilitySlots[] = {kVisibilityTlas, kVisibilityRepresentatives, kVisibilityLightPoints,
                                                 kVisibilityDispatchArgs, kVisibilityFingerprints};

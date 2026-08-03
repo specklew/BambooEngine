@@ -1,10 +1,10 @@
 #include "PassRegisters.h"
 
-Texture2D<float4>   gCurrent : BAMBOO_SRV(ACCUM_REG_CURRENT);  // current frame (from m_outputResource)
-RWTexture2D<float4> gAccum   : BAMBOO_UAV(ACCUM_REG_ACCUM);    // float running average
-RWTexture2D<float4> gDisplay : BAMBOO_UAV(ACCUM_REG_DISPLAY);  // UNORM display output
+Texture2D<float4>   gCurrent : BAMBOO_PASS_SRV(ACCUM_REG_CURRENT);  // current frame (from m_outputResource)
+RWTexture2D<float4> gAccum   : BAMBOO_PASS_UAV(ACCUM_REG_ACCUM);    // float running average
+RWTexture2D<float4> gDisplay : BAMBOO_PASS_UAV(ACCUM_REG_DISPLAY);  // UNORM display output
 
-cbuffer AccumCB : BAMBOO_CBV(ACCUM_REG_CB)
+cbuffer AccumCB : BAMBOO_PASS_CBV(ACCUM_REG_CB)
 {
     uint frameCount;  // 1 on first frame after reset → weight = 1.0 (full replace)
 };

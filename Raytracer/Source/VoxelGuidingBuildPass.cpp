@@ -16,23 +16,23 @@ namespace
 {
 // The three voxel textures live in this pass's private heap; everything else is
 // a root descriptor. All three kernels share the layout.
-constexpr BindingSlot kGuidingBuildConstants = RootConstants("BuildCB", GUIDING_BUILD_REG_CB, 4);
+constexpr BindingSlot kGuidingBuildConstants = PassRootConstants("BuildCB", GUIDING_BUILD_REG_CB, 4);
 constexpr BindingSlot kGuidingBuildIrradiance =
-    TableEntryAt("gVoxIrradiance", BindingKind::Uav, GUIDING_BUILD_REG_IRRADIANCE, 0);
+    PassTableEntryAt("gVoxIrradiance", BindingKind::Uav, GUIDING_BUILD_REG_IRRADIANCE, 0);
 constexpr BindingSlot kGuidingBuildVplCount =
-    TableEntryAt("gVoxVplCount", BindingKind::Uav, GUIDING_BUILD_REG_VPL_COUNT, 1);
+    PassTableEntryAt("gVoxVplCount", BindingKind::Uav, GUIDING_BUILD_REG_VPL_COUNT, 1);
 constexpr BindingSlot kGuidingBuildRepresentative =
-    TableEntryAt("gVoxelRepresentative", BindingKind::Uav, GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE, 2);
-constexpr BindingSlot kGuidingBuildCounters      = RootUav("gCounters", GUIDING_BUILD_REG_COUNTERS);
-constexpr BindingSlot kGuidingBuildCompactIds    = RootUav("gCompactIds", GUIDING_BUILD_REG_COMPACT_IDS);
-constexpr BindingSlot kGuidingBuildInverseIndex  = RootUav("gInverseIndex", GUIDING_BUILD_REG_INVERSE_INDEX);
-constexpr BindingSlot kGuidingBuildLiveBoundMin  = RootUav("gLiveBoundMin", GUIDING_BUILD_REG_LIVE_BOUND_MIN);
-constexpr BindingSlot kGuidingBuildLiveBoundMax  = RootUav("gLiveBoundMax", GUIDING_BUILD_REG_LIVE_BOUND_MAX);
+    PassTableEntryAt("gVoxelRepresentative", BindingKind::Uav, GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE, 2);
+constexpr BindingSlot kGuidingBuildCounters      = PassUav("gCounters", GUIDING_BUILD_REG_COUNTERS);
+constexpr BindingSlot kGuidingBuildCompactIds    = PassUav("gCompactIds", GUIDING_BUILD_REG_COMPACT_IDS);
+constexpr BindingSlot kGuidingBuildInverseIndex  = PassUav("gInverseIndex", GUIDING_BUILD_REG_INVERSE_INDEX);
+constexpr BindingSlot kGuidingBuildLiveBoundMin  = PassUav("gLiveBoundMin", GUIDING_BUILD_REG_LIVE_BOUND_MIN);
+constexpr BindingSlot kGuidingBuildLiveBoundMax  = PassUav("gLiveBoundMax", GUIDING_BUILD_REG_LIVE_BOUND_MAX);
 constexpr BindingSlot kGuidingBuildLightPoints =
-    RootUav("gCompactVoxelLightPoints", GUIDING_BUILD_REG_COMPACT_LIGHT_POINTS);
-constexpr BindingSlot kGuidingBuildPremulIrradiance = RootUav("gPremulIrradiance", GUIDING_BUILD_REG_PREMUL_IRRADIANCE);
-constexpr BindingSlot kGuidingBuildBakedBoundMin    = RootUav("gBakedBoundMin", GUIDING_BUILD_REG_BAKED_BOUND_MIN);
-constexpr BindingSlot kGuidingBuildBakedBoundMax    = RootUav("gBakedBoundMax", GUIDING_BUILD_REG_BAKED_BOUND_MAX);
+    PassUav("gCompactVoxelLightPoints", GUIDING_BUILD_REG_COMPACT_LIGHT_POINTS);
+constexpr BindingSlot kGuidingBuildPremulIrradiance = PassUav("gPremulIrradiance", GUIDING_BUILD_REG_PREMUL_IRRADIANCE);
+constexpr BindingSlot kGuidingBuildBakedBoundMin    = PassUav("gBakedBoundMin", GUIDING_BUILD_REG_BAKED_BOUND_MIN);
+constexpr BindingSlot kGuidingBuildBakedBoundMax    = PassUav("gBakedBoundMax", GUIDING_BUILD_REG_BAKED_BOUND_MAX);
 
 constexpr BindingSlot kGuidingBuildSlots[] = {
     kGuidingBuildConstants,     kGuidingBuildIrradiance,   kGuidingBuildVplCount,      kGuidingBuildRepresentative,

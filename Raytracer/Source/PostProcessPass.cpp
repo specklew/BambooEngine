@@ -35,10 +35,10 @@ void PostProcessPass::Initialize(
 
 // Private heap: accumulated image in, tone-mapped image out.
 static constexpr BindingSlot kPostSlots[] = {
-    TableEntryAt("gInput", BindingKind::Srv, POST_REG_INPUT, 0),
-    TableEntryAt("gOutput", BindingKind::Uav, POST_REG_OUTPUT, 1),
+    PassTableEntryAt("gInput", BindingKind::Srv, POST_REG_INPUT, 0),
+    PassTableEntryAt("gOutput", BindingKind::Uav, POST_REG_OUTPUT, 1),
 };
-static constexpr BindingSlot kPostConstants = RootConstants("PostProcessCB", POST_REG_CB, 4);
+static constexpr BindingSlot kPostConstants = PassRootConstants("PostProcessCB", POST_REG_CB, 4);
 
 void PostProcessPass::CreateRootSignature()
 {

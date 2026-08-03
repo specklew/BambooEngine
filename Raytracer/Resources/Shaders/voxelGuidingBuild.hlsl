@@ -9,34 +9,34 @@
 
 #define VOXEL_GUIDING_CAPACITY 131072
 
-RWTexture3D<uint>   gVoxIrradiance        : BAMBOO_UAV(GUIDING_BUILD_REG_IRRADIANCE);
-RWTexture3D<uint>   gVoxVplCount          : BAMBOO_UAV(GUIDING_BUILD_REG_VPL_COUNT);
+RWTexture3D<uint>   gVoxIrradiance        : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_IRRADIANCE);
+RWTexture3D<uint>   gVoxVplCount          : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_VPL_COUNT);
 // Representative VPL surface position + octahedral normal per voxel, written
 // during light injection (last-writer-wins).
-RWTexture3D<float4> gVoxelRepresentative  : BAMBOO_UAV(GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE);
+RWTexture3D<float4> gVoxelRepresentative  : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE);
 
 // [0] = compacted voxel count ([1] retired with the flat CDF)
-RWStructuredBuffer<uint>   gCounters     : BAMBOO_UAV(GUIDING_BUILD_REG_COUNTERS);
-RWStructuredBuffer<uint>   gCompactIds   : BAMBOO_UAV(GUIDING_BUILD_REG_COMPACT_IDS);
+RWStructuredBuffer<uint>   gCounters     : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_COUNTERS);
+RWStructuredBuffer<uint>   gCompactIds   : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_COMPACT_IDS);
 // voxelID (flat) -> compactID, sentinel -1. Sized gridDim^3. Each cell written
 // only by its own CompactVoxels thread, so it doubles as its own clear.
-RWStructuredBuffer<int>    gInverseIndex : BAMBOO_UAV(GUIDING_BUILD_REG_INVERSE_INDEX);
+RWStructuredBuffer<int>    gInverseIndex : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_INVERSE_INDEX);
 // Live per-voxel bounds, quantized to the voxel cube. BakeReload copies the
 // baked values in for lit voxels; unlit cells are stale and never read.
-RWStructuredBuffer<uint4>  gLiveBoundMin : BAMBOO_UAV(GUIDING_BUILD_REG_LIVE_BOUND_MIN);
-RWStructuredBuffer<uint4>  gLiveBoundMax : BAMBOO_UAV(GUIDING_BUILD_REG_LIVE_BOUND_MAX);
+RWStructuredBuffer<uint4>  gLiveBoundMin : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_LIVE_BOUND_MIN);
+RWStructuredBuffer<uint4>  gLiveBoundMax : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_LIVE_BOUND_MAX);
 // Compact-indexed outputs for the guiding passes downstream (fingerprint, tree).
 // SIByL u_RepresentVPL. One representative light-carrying surface point per
 // compact voxel (pos + octa normal), consumed by the fingerprint shadow rays.
-RWStructuredBuffer<float4> gCompactVoxelLightPoints : BAMBOO_UAV(GUIDING_BUILD_REG_COMPACT_LIGHT_POINTS);
-RWStructuredBuffer<float>  gPremulIrradiance  : BAMBOO_UAV(GUIDING_BUILD_REG_PREMUL_IRRADIANCE);
+RWStructuredBuffer<float4> gCompactVoxelLightPoints : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_COMPACT_LIGHT_POINTS);
+RWStructuredBuffer<float>  gPremulIrradiance  : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_PREMUL_IRRADIANCE);
 
 // Bake outputs (read-only here; UAV-typed to stay in UNORDERED_ACCESS and skip
 // per-bake state transitions).
-RWStructuredBuffer<uint4> gBakedBoundMin : BAMBOO_UAV(GUIDING_BUILD_REG_BAKED_BOUND_MIN);
-RWStructuredBuffer<uint4> gBakedBoundMax : BAMBOO_UAV(GUIDING_BUILD_REG_BAKED_BOUND_MAX);
+RWStructuredBuffer<uint4> gBakedBoundMin : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_BAKED_BOUND_MIN);
+RWStructuredBuffer<uint4> gBakedBoundMax : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_BAKED_BOUND_MAX);
 
-cbuffer BuildCB : BAMBOO_CBV(GUIDING_BUILD_REG_CB)
+cbuffer BuildCB : BAMBOO_PASS_CBV(GUIDING_BUILD_REG_CB)
 {
     uint gGridDim;
     uint _pad0;

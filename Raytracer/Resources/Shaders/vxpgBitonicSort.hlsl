@@ -10,13 +10,13 @@
 #include "PassRegisters.h"
 #include "BitonicCommon.hlsl"
 
-RWStructuredBuffer<uint64_t> gSortBuffer : BAMBOO_UAV(BITONIC_REG_SORT_BUFFER); // SIByL g_SortBuffer
+RWStructuredBuffer<uint64_t> gSortBuffer : BAMBOO_PASS_UAV(BITONIC_REG_SORT_BUFFER); // SIByL g_SortBuffer
 
 // The light-tree dispatch-args buffer, addressed raw; the clamped valid leaf
 // count lives at byte offset gCounterOffset (SIByL u_CounterBuffer).
-RWByteAddressBuffer gCounter : BAMBOO_UAV(BITONIC_REG_COUNTER);
+RWByteAddressBuffer gCounter : BAMBOO_PASS_UAV(BITONIC_REG_COUNTER);
 
-cbuffer BitonicCB : BAMBOO_CBV(BITONIC_REG_CB)
+cbuffer BitonicCB : BAMBOO_PASS_CBV(BITONIC_REG_CB)
 {
     uint gK; // outer/inner stage size (>= 4096); unused by presort
     uint gJ; // outer sub-stage (>= 2048 && < k); unused by presort/inner
