@@ -25,6 +25,14 @@
 #define BAMBOO_SRV_SPACE(n, s) register(BAMBOO_REG_CAT(t, n), BAMBOO_REG_CAT(space, s))
 #define BAMBOO_UAV_SPACE(n, s) register(BAMBOO_REG_CAT(u, n), BAMBOO_REG_CAT(space, s))
 
+// Pass-scoped registers live in space1 (ADR 0017 phase 4). The plain BAMBOO_CBV
+// / _SRV / _UAV above are space0 and belong to the frame layout alone, so a pass
+// declaration that used them would be claiming frame ground. C++ mirrors these
+// as PassCbv / PassSrv / PassUav in BindingSlot.h.
+#define BAMBOO_PASS_CBV(n) BAMBOO_CBV_SPACE(n, 1)
+#define BAMBOO_PASS_SRV(n) BAMBOO_SRV_SPACE(n, 1)
+#define BAMBOO_PASS_UAV(n) BAMBOO_UAV_SPACE(n, 1)
+
 // ---------------------------------------------------------------------------
 // space0 — frame layout, present in every raytracing pass whether it reads it or
 // not. Keep it short; everything here is bound for every pass.

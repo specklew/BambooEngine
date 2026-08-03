@@ -26,6 +26,15 @@ enum class BindingStorage : uint8_t
 
 inline constexpr uint32_t kUnboundedRegisterCount = ~0u;
 
+// space0 is the frame layout; everything a pass declares lives in space1
+// (ADR 0017 phase 4). The split is what makes frame-vs-pass structural rather
+// than conventional: a pass register can never collide with a frame one, and no
+// longer has to be chosen around the frame numbers. The Pass* constructors below
+// mirror the BAMBOO_PASS_* macros the shaders use, so a declaration reads the
+// same on both sides.
+inline constexpr uint32_t kFrameRegisterSpace = 0;
+inline constexpr uint32_t kPassRegisterSpace  = 1;
+
 struct BindingSlot
 {
     const char*    name           = "";
@@ -84,12 +93,14 @@ constexpr BindingSlot Sampler(const char* name, uint32_t shaderRegister)
     return slot;
 }
 
-constexpr BindingSlot RootConstants(const char* name, uint32_t shaderRegister, uint32_t constantCount)
+constexpr BindingSlot RootConstants(const char* name, uint32_t shaderRegister, uint32_t constantCount,
+                                    uint32_t registerSpace = 0)
 {
     BindingSlot slot;
     slot.name           = name;
     slot.kind           = BindingKind::Cbv;
     slot.shaderRegister = shaderRegister;
+    slot.registerSpace  = registerSpace;
     slot.storage        = BindingStorage::RootConstants;
     slot.constantCount  = constantCount;
     return slot;
@@ -124,4 +135,47 @@ constexpr BindingSlot TableEntryAt(const char* name, BindingKind kind, uint32_t 
     slot.tableIndex     = tableIndex;
     slot.heapOffset     = heapOffset;
     return slot;
+}
+
+// ---------------------------------------------------------------------------
+// Pass-scoped slots — the space1 counterparts of everything above. A pass
+// declares only these; the frame layout is the sole occupant of space0.
+// ---------------------------------------------------------------------------
+
+constexpr BindingSlot InPassSpace(BindingSlot slot)
+{
+    slot.registerSpace = kPassRegisterSpace;
+    return slot;
+}
+
+constexpr BindingSlot PassCbv(const char* name, uint32_t shaderRegister)
+{
+    return RootCbv(name, shaderRegister, kPassRegisterSpace);
+}
+
+constexpr BindingSlot PassSrv(const char* name, uint32_t shaderRegister)
+{
+    return RootSrv(name, shaderRegister, kPassRegisterSpace);
+}
+
+constexpr BindingSlot PassUav(const char* name, uint32_t shaderRegister)
+{
+    return RootUav(name, shaderRegister, kPassRegisterSpace);
+}
+
+constexpr BindingSlot PassRootConstants(const char* name, uint32_t shaderRegister, uint32_t constantCount)
+{
+    return RootConstants(name, shaderRegister, constantCount, kPassRegisterSpace);
+}
+
+constexpr BindingSlot PassTableEntry(const char* name, BindingKind kind, uint32_t shaderRegister,
+                                     GlobalDescriptor heapSlot, uint32_t registerCount = 1, uint32_t tableIndex = 0)
+{
+    return InPassSpace(TableEntry(name, kind, shaderRegister, heapSlot, registerCount, tableIndex));
+}
+
+constexpr BindingSlot PassTableEntryAt(const char* name, BindingKind kind, uint32_t shaderRegister, uint32_t heapOffset,
+                                       uint32_t registerCount = 1, uint32_t tableIndex = 0)
+{
+    return InPassSpace(TableEntryAt(name, kind, shaderRegister, heapOffset, registerCount, tableIndex));
 }

@@ -27,21 +27,12 @@ const std::vector<BindingSlot>& FrameBindingLayout::StaticSamplerSlots()
     return samplers;
 }
 
-bool FrameBindingLayout::IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister, uint32_t registerSpace)
+bool FrameBindingLayout::IsFrameRegister(uint32_t registerSpace)
 {
-    for (const BindingSlot& slot : Slots())
-    {
-        const bool sameType = (type == D3D12_DESCRIPTOR_RANGE_TYPE_CBV && slot.kind == BindingKind::Cbv) ||
-                              (type == D3D12_DESCRIPTOR_RANGE_TYPE_SRV && slot.kind == BindingKind::Srv) ||
-                              (type == D3D12_DESCRIPTOR_RANGE_TYPE_UAV && slot.kind == BindingKind::Uav);
-        if (!sameType || slot.registerSpace != registerSpace)
-            continue;
-
-        if (baseRegister >= slot.shaderRegister && baseRegister < slot.shaderRegister + slot.registerCount)
-            return true;
-    }
-
-    return false;
+    // The whole point of the space split (ADR 0017 phase 4): space0 holds the
+    // frame layout and nothing else, so this is a property of the register rather
+    // than a search through the layout's numbers.
+    return registerSpace == kFrameRegisterSpace;
 }
 
 void FrameBindingLayout::Bind(ID3D12GraphicsCommandList* commandList, const RootSignature& rootSignature, Scene& scene,

@@ -26,35 +26,37 @@ static AutoCVarEnum g_rasterizationDebugMode("renderer.rasterDebugMode", "Raster
 
 namespace
 {
-// Rasterization keeps its own layout until the per-pass space1 migration lands
-// (ADR 0017 phase 4 remainder). The raytracing output UAV, TLAS and merged
-// vertex/index SRVs are deliberately absent: reflection shows no rasterization
-// shader touches them.
+// Rasterization keeps its own layout rather than adopting the frame one: the
+// raytracing output UAV, TLAS and merged vertex/index SRVs are deliberately
+// absent, because reflection shows no rasterization shader touches them and
+// carrying them would only cost root DWORDs. So every slot here is pass-scoped
+// (space1) — except PassConstants, which really is a frame binding and stays at
+// its space0 register, shared with passConstants.hlsl.
 constexpr BindingSlot kCamera =
-    TableEntry("CameraParams", BindingKind::Cbv, RASTER_REG_CAMERA_CB, GlobalDescriptor::CameraMatrices);
-constexpr BindingSlot kTextures = TableEntry("gTextures", BindingKind::Srv, RASTER_REG_TEXTURES,
-                                             GlobalDescriptor::MaterialTextures, FRAME_MAX_TEXTURES);
+    PassTableEntry("CameraParams", BindingKind::Cbv, RASTER_REG_CAMERA_CB, GlobalDescriptor::CameraMatrices);
+constexpr BindingSlot kTextures = PassTableEntry("gTextures", BindingKind::Srv, RASTER_REG_TEXTURES,
+                                                 GlobalDescriptor::MaterialTextures, FRAME_MAX_TEXTURES);
 // One entry per register rather than contiguous runs: each carries its own name
 // for reflection validation, and each names its own heap slot instead of relying
 // on the enum happening to be adjacent.
 constexpr BindingSlot kVoxelOccupancy =
-    TableEntry("gVoxelOccupancy", BindingKind::Uav, RASTER_REG_VOXEL_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
+    PassTableEntry("gVoxelOccupancy", BindingKind::Uav, RASTER_REG_VOXEL_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
 constexpr BindingSlot kVoxelIrradiance =
-    TableEntry("gVoxelIrradiance", BindingKind::Uav, RASTER_REG_VOXEL_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
+    PassTableEntry("gVoxelIrradiance", BindingKind::Uav, RASTER_REG_VOXEL_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
 constexpr BindingSlot kVoxelVplCount =
-    TableEntry("gVoxelVplCount", BindingKind::Uav, RASTER_REG_VOXEL_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
-constexpr BindingSlot kShadingPoints = TableEntry("gShadingPoints", BindingKind::Uav, RASTER_REG_SHADING_POINTS,
-                                                  GlobalDescriptor::ShadingPoints); // debug overlay
+    PassTableEntry("gVoxelVplCount", BindingKind::Uav, RASTER_REG_VOXEL_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
+constexpr BindingSlot kShadingPoints = PassTableEntry("gShadingPoints", BindingKind::Uav, RASTER_REG_SHADING_POINTS,
+                                                      GlobalDescriptor::ShadingPoints); // debug overlay
 // superpixel index + representative center (debug views 15/16)
 constexpr BindingSlot kSuperpixelIndex =
-    TableEntry("gSuperpixelIndex", BindingKind::Uav, RASTER_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
+    PassTableEntry("gSuperpixelIndex", BindingKind::Uav, RASTER_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
 constexpr BindingSlot kSuperpixelCenter =
-    TableEntry("gSuperpixelCenter", BindingKind::Uav, RASTER_REG_SUPERPIXEL_CENTER, GlobalDescriptor::SuperpixelCenter);
+    PassTableEntry("gSuperpixelCenter", BindingKind::Uav, RASTER_REG_SUPERPIXEL_CENTER, GlobalDescriptor::SuperpixelCenter);
 
-constexpr BindingSlot kModelConstants     = RootCbv("ModelTransforms", RASTER_REG_MODEL_CB);
-constexpr BindingSlot kMaterialConstants  = RootCbv("Material", RASTER_REG_MATERIAL_CB);
+constexpr BindingSlot kModelConstants     = PassCbv("ModelTransforms", RASTER_REG_MODEL_CB);
+constexpr BindingSlot kMaterialConstants  = PassCbv("Material", RASTER_REG_MATERIAL_CB);
 constexpr BindingSlot kPassConstants      = RootCbv("PassConstants", FRAME_REG_PASS_CONSTANTS);
-constexpr BindingSlot kVoxelGridConstants = RootCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
+constexpr BindingSlot kVoxelGridConstants = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
 
 constexpr BindingSlot kRasterSlots[] = {
     kCamera,         kTextures,          kVoxelOccupancy,  kVoxelIrradiance,

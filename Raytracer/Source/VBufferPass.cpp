@@ -35,7 +35,7 @@ TechniqueDesc VBufferPass::GetTechniqueDesc() const
 
 // The frame layout plus one output: the packed primary-hit identity.
 static constexpr BindingSlot kVBufferOutput =
-    TableEntry("gVBuffer", BindingKind::Uav, VBUFFER_REG_VBUFFER, GlobalDescriptor::VBuffer);
+    PassTableEntry("gVBuffer", BindingKind::Uav, VBUFFER_REG_VBUFFER, GlobalDescriptor::VBuffer);
 
 void VBufferPass::CreateGlobalRootSignature()
 {

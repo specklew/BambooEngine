@@ -44,19 +44,19 @@ TechniqueDesc LightInjectionPass::GetTechniqueDesc() const
 namespace
 {
 constexpr BindingSlot kVoxelIrradiance =
-    TableEntry("gVoxelIrradiance", BindingKind::Uav, INJECT_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
+    PassTableEntry("gVoxelIrradiance", BindingKind::Uav, INJECT_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
 constexpr BindingSlot kVoxelVplCount =
-    TableEntry("gVoxelVplCount", BindingKind::Uav, INJECT_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
+    PassTableEntry("gVoxelVplCount", BindingKind::Uav, INJECT_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
 constexpr BindingSlot kShadingPoints =
-    TableEntry("gShadingPoints", BindingKind::Uav, INJECT_REG_SHADING_POINTS, GlobalDescriptor::ShadingPoints);
-constexpr BindingSlot kVoxelRepresentative = TableEntry("gVoxelRepresentative", BindingKind::Uav,
+    PassTableEntry("gShadingPoints", BindingKind::Uav, INJECT_REG_SHADING_POINTS, GlobalDescriptor::ShadingPoints);
+constexpr BindingSlot kVoxelRepresentative = PassTableEntry("gVoxelRepresentative", BindingKind::Uav,
                                                         INJECT_REG_VOXEL_REPRESENTATIVE,
                                                         GlobalDescriptor::VoxelRepresentative);
 constexpr BindingSlot kVplPosition =
-    TableEntry("gVplPosition", BindingKind::Uav, INJECT_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
+    PassTableEntry("gVplPosition", BindingKind::Uav, INJECT_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
 constexpr BindingSlot kVBuffer =
-    TableEntry("gVBuffer", BindingKind::Uav, INJECT_REG_VBUFFER, GlobalDescriptor::VBuffer);
-constexpr BindingSlot kVoxelGridConstants = RootCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
+    PassTableEntry("gVBuffer", BindingKind::Uav, INJECT_REG_VBUFFER, GlobalDescriptor::VBuffer);
+constexpr BindingSlot kVoxelGridConstants = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
 }
 
 void LightInjectionPass::CreateGlobalRootSignature()

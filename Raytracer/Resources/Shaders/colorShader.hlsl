@@ -12,7 +12,7 @@ SamplerState gsamLinearClamp : register(s3);
 SamplerState gsamAnisotropicWrap : register(s4);
 SamplerState gsamAnisotropicClamp : register(s5);
 
-cbuffer CameraParams : BAMBOO_CBV(RASTER_REG_CAMERA_CB)
+cbuffer CameraParams : BAMBOO_PASS_CBV(RASTER_REG_CAMERA_CB)
 {
     float4x4 viewProj;
     float4x4 view;
@@ -21,13 +21,13 @@ cbuffer CameraParams : BAMBOO_CBV(RASTER_REG_CAMERA_CB)
     float4x4 projectionI;
 }
 
-cbuffer ModelTransforms : BAMBOO_CBV(RASTER_REG_MODEL_CB)
+cbuffer ModelTransforms : BAMBOO_PASS_CBV(RASTER_REG_MODEL_CB)
 {
     float4x4 world;
     float4x4 worldInvTranspose;
 }
 
-cbuffer Material : BAMBOO_CBV(RASTER_REG_MATERIAL_CB)
+cbuffer Material : BAMBOO_PASS_CBV(RASTER_REG_MATERIAL_CB)
 {
     float4 baseColorFactor;
     int textureIndex;
@@ -37,22 +37,22 @@ cbuffer Material : BAMBOO_CBV(RASTER_REG_MATERIAL_CB)
     float roughnessFactor;
 }
 
-Texture2D gTextures[MAX_TEXTURES] : BAMBOO_SRV(RASTER_REG_TEXTURES);
+Texture2D gTextures[MAX_TEXTURES] : BAMBOO_PASS_SRV(RASTER_REG_TEXTURES);
 
-ByteAddressBuffer g_indices : BAMBOO_SRV(RASTER_REG_INDICES);
+ByteAddressBuffer g_indices : BAMBOO_PASS_SRV(RASTER_REG_INDICES);
 
-RWTexture3D<uint> gVoxelOccupancy  : BAMBOO_UAV(RASTER_REG_VOXEL_OCCUPANCY);
-RWTexture3D<uint> gVoxelIrradiance : BAMBOO_UAV(RASTER_REG_VOXEL_IRRADIANCE);
-RWTexture3D<uint> gVoxelVplCount   : BAMBOO_UAV(RASTER_REG_VOXEL_VPL_COUNT);
-RWTexture2D<float4> gShadingPoints : BAMBOO_UAV(RASTER_REG_SHADING_POINTS); // VXPG primary G-buffer (pos, octaN)
+RWTexture3D<uint> gVoxelOccupancy  : BAMBOO_PASS_UAV(RASTER_REG_VOXEL_OCCUPANCY);
+RWTexture3D<uint> gVoxelIrradiance : BAMBOO_PASS_UAV(RASTER_REG_VOXEL_IRRADIANCE);
+RWTexture3D<uint> gVoxelVplCount   : BAMBOO_PASS_UAV(RASTER_REG_VOXEL_VPL_COUNT);
+RWTexture2D<float4> gShadingPoints : BAMBOO_PASS_UAV(RASTER_REG_SHADING_POINTS); // VXPG primary G-buffer (pos, octaN)
 
 // Stage A supervoxel cluster output (debug view 14 reads these). Bound as root UAVs.
 
 // Stage B superpixel outputs (debug views 15/16).
-RWTexture2D<int>    gSuperpixelIndex  : BAMBOO_UAV(RASTER_REG_SUPERPIXEL_INDEX); // per-pixel superpixel id (screen res)
-RWTexture2D<float4> gSuperpixelCenter : BAMBOO_UAV(RASTER_REG_SUPERPIXEL_CENTER); // representative pos + octaN (map res)
+RWTexture2D<int>    gSuperpixelIndex  : BAMBOO_PASS_UAV(RASTER_REG_SUPERPIXEL_INDEX); // per-pixel superpixel id (screen res)
+RWTexture2D<float4> gSuperpixelCenter : BAMBOO_PASS_UAV(RASTER_REG_SUPERPIXEL_CENTER); // representative pos + octaN (map res)
 
-cbuffer VoxelGridCB : BAMBOO_CBV(REG_VOXEL_GRID_CB)
+cbuffer VoxelGridCB : BAMBOO_PASS_CBV(REG_VOXEL_GRID_CB)
 {
     float3 voxGridMin;
     float  voxVoxelSize;

@@ -11,7 +11,7 @@
 #include "passConstants.hlsl"
 #include "VBuffer.hlsl"
 
-RWTexture2D<uint4> gVBuffer : BAMBOO_UAV(VBUFFER_REG_VBUFFER);
+RWTexture2D<uint4> gVBuffer : BAMBOO_PASS_UAV(VBUFFER_REG_VBUFFER);
 
 struct VBufferPayload
 {

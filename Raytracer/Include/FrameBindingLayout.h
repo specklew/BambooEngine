@@ -50,7 +50,7 @@ namespace FrameBindingLayout
     // Whether a register belongs to the frame layout. Frame bindings are present
     // in every signature whether the pass reads them or not, so the unused-binding
     // report has to skip them or it reports nothing else.
-    [[nodiscard]] bool IsFrameRegister(D3D12_DESCRIPTOR_RANGE_TYPE type, uint32_t baseRegister, uint32_t registerSpace);
+    [[nodiscard]] bool IsFrameRegister(uint32_t registerSpace);
 
     // Binds the whole frame layout. Every raytracing pass calls this instead of
     // repeating seven near-identical binds.

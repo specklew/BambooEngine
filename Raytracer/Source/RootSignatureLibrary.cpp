@@ -113,8 +113,7 @@ void RootSignatureLibrary::LogUnreferencedSlots() const
             const BindingSlot& slot = slots[index];
             if (slot.kind == BindingKind::Sampler)
                 continue; // shared boilerplate, not a per-pass declaration
-            if (entry.usesFrameLayout &&
-                FrameBindingLayout::IsFrameRegister(RangeTypeOf(slot.kind), slot.shaderRegister, slot.registerSpace))
+            if (entry.usesFrameLayout && FrameBindingLayout::IsFrameRegister(slot.registerSpace))
                 continue;
 
             unreferenced += fmt::format(" {} ({})", slot.name, RegisterName(slot));

@@ -8,6 +8,13 @@
 // bound by one signature agrees. Where several shaders share a signature (the guided
 // integrator and its adaptive-q update; the two fingerprint kernels) that sharing is
 // noted, because those numbers are not independent.
+//
+// Everything below lives in **space1**, declared with BAMBOO_PASS_CBV/_SRV/_UAV in HLSL
+// and PassCbv/PassSrv/PassUav/PassTableEntry in C++ (ADR 0017 phase 4). space0 belongs to
+// the frame layout alone, so these numbers are chosen freely: a pass register can never
+// collide with a frame one, and adding a frame binding no longer means scanning every
+// pass. The one exception is PassConstants (b3, space0), which is a frame binding that
+// passes without the full frame layout still declare — passConstants.hlsl owns it.
 #ifdef __cplusplus
 #pragma once
 #endif
@@ -15,8 +22,9 @@
 #include "FrameBindingRegisters.h"
 
 // Voxel grid constants, shared by every pass that reads the grid: the guided
-// integrator, light injection and the rasterization debug views.
-#define REG_VOXEL_GRID_CB 4
+// integrator, light injection and the rasterization debug views. Same number in
+// all three signatures, so it is defined once here rather than per section.
+#define REG_VOXEL_GRID_CB 0 // b
 
 // ---------------------------------------------------------------------------
 // FrameAccumulationPass — accumulation.hlsl
@@ -157,62 +165,63 @@
 // ---------------------------------------------------------------------------
 // LightInjectionPass — lightInjection.hlsl (frame layout plus these)
 // ---------------------------------------------------------------------------
-#define INJECT_REG_IRRADIANCE           1 // u
-#define INJECT_REG_VPL_COUNT            2 // u
-#define INJECT_REG_SHADING_POINTS       3 // u
-#define INJECT_REG_VOXEL_REPRESENTATIVE 4 // u
-#define INJECT_REG_VPL_POSITION         5 // u
-#define INJECT_REG_VBUFFER              6 // u
+#define INJECT_REG_IRRADIANCE           0 // u
+#define INJECT_REG_VPL_COUNT            1 // u
+#define INJECT_REG_SHADING_POINTS       2 // u
+#define INJECT_REG_VOXEL_REPRESENTATIVE 3 // u
+#define INJECT_REG_VPL_POSITION         4 // u
+#define INJECT_REG_VBUFFER              5 // u
 
 // ---------------------------------------------------------------------------
 // VBufferPass — vbufferPass.hlsl (frame layout plus this)
 // ---------------------------------------------------------------------------
-#define VBUFFER_REG_VBUFFER 9 // u
+#define VBUFFER_REG_VBUFFER 0 // u
 
 // ---------------------------------------------------------------------------
 // GuidedPathTracingPass — guidedPathTracing.hlsl and vxpgAdaptiveQ.hlsl, which
 // share one root signature (the adaptive-q update chains onto the raygen), so
 // u22/u23 below are the same registers in both shaders.
 // ---------------------------------------------------------------------------
-#define GUIDED_REG_IRRADIANCE           1  // u
-#define GUIDED_REG_VPL_COUNT            2  // u
-#define GUIDED_REG_COUNTERS             3  // u
-#define GUIDED_REG_COMPACT_IDS          4  // u
-#define GUIDED_REG_SUPERPIXEL_INDEX     5  // u
-#define GUIDED_REG_INVERSE_INDEX        6  // u
-#define GUIDED_REG_VOXEL_REPRESENTATIVE 7  // u
-#define GUIDED_REG_VPL_POSITION         8  // u
-#define GUIDED_REG_VBUFFER              9  // u
-#define GUIDED_REG_FINGERPRINTS         10 // u
-#define GUIDED_REG_CLUSTER_ASSIGNMENTS  11 // u
-#define GUIDED_REG_CLUSTER_SEEDS        12 // u
-#define GUIDED_REG_VISIBILITY_MASK      13 // u
-#define GUIDED_REG_LIGHT_TREE_NODES     14 // u
-#define GUIDED_REG_COMPACT_TO_LEAF      15 // u
-#define GUIDED_REG_CLUSTER_ROOTS        16 // u
-#define GUIDED_REG_IMPORTANCE_HEAP      17 // u
-#define GUIDED_REG_LIVE_BOUND_MIN       18 // u
-#define GUIDED_REG_LIVE_BOUND_MAX       19 // u
-#define GUIDED_REG_FUZZY_WEIGHT         20 // u
-#define GUIDED_REG_FUZZY_INDEX          21 // u
-#define GUIDED_REG_TILE_GUIDE_Q         22 // u
-#define GUIDED_REG_TILE_STRATEGY_STATS  23 // u
+#define GUIDED_REG_IRRADIANCE           0  // u
+#define GUIDED_REG_VPL_COUNT            1  // u
+#define GUIDED_REG_COUNTERS             2  // u
+#define GUIDED_REG_COMPACT_IDS          3  // u
+#define GUIDED_REG_SUPERPIXEL_INDEX     4  // u
+#define GUIDED_REG_INVERSE_INDEX        5  // u
+#define GUIDED_REG_VOXEL_REPRESENTATIVE 6  // u
+#define GUIDED_REG_VPL_POSITION         7  // u
+#define GUIDED_REG_VBUFFER              8  // u
+#define GUIDED_REG_FINGERPRINTS         9  // u
+#define GUIDED_REG_CLUSTER_ASSIGNMENTS  10 // u
+#define GUIDED_REG_CLUSTER_SEEDS        11 // u
+#define GUIDED_REG_VISIBILITY_MASK      12 // u
+#define GUIDED_REG_LIGHT_TREE_NODES     13 // u
+#define GUIDED_REG_COMPACT_TO_LEAF      14 // u
+#define GUIDED_REG_CLUSTER_ROOTS        15 // u
+#define GUIDED_REG_IMPORTANCE_HEAP      16 // u
+#define GUIDED_REG_LIVE_BOUND_MIN       17 // u
+#define GUIDED_REG_LIVE_BOUND_MAX       18 // u
+#define GUIDED_REG_FUZZY_WEIGHT         19 // u
+#define GUIDED_REG_FUZZY_INDEX          20 // u
+#define GUIDED_REG_TILE_GUIDE_Q         21 // u
+#define GUIDED_REG_TILE_STRATEGY_STATS  22 // u
 // Tile count for the adaptive-q update's bounds check. Root descriptors carry no
-// size, so GetDimensions on u22/u23 returns garbage — the count has to be told.
-#define GUIDED_REG_ADAPTIVE_Q_CB        5  // b
+// size, so GetDimensions on u21/u22 returns garbage — the count has to be told.
+#define GUIDED_REG_ADAPTIVE_Q_CB        1  // b
 
 // ---------------------------------------------------------------------------
-// Rasterization — colorShader.hlsl. Its own layout, not the frame one; raster
-// joins the frame layout when it becomes a graph node (ADR 0017 phase 5).
+// Rasterization — colorShader.hlsl. Its own layout, not the frame one: it needs
+// none of the raytracing frame bindings, so adopting them would only cost root
+// DWORDs. b0 is the shared REG_VOXEL_GRID_CB, hence the camera at b1.
 // ---------------------------------------------------------------------------
-#define RASTER_REG_CAMERA_CB        0 // b
-#define RASTER_REG_MODEL_CB         1 // b
-#define RASTER_REG_MATERIAL_CB      2 // b
-#define RASTER_REG_INDICES          2 // t
-#define RASTER_REG_TEXTURES         3 // t
-#define RASTER_REG_VOXEL_OCCUPANCY  1 // u
-#define RASTER_REG_VOXEL_IRRADIANCE 2 // u
-#define RASTER_REG_VOXEL_VPL_COUNT  3 // u
-#define RASTER_REG_SHADING_POINTS   4 // u
-#define RASTER_REG_SUPERPIXEL_INDEX 7 // u
-#define RASTER_REG_SUPERPIXEL_CENTER 8 // u
+#define RASTER_REG_CAMERA_CB         1 // b
+#define RASTER_REG_MODEL_CB          2 // b
+#define RASTER_REG_MATERIAL_CB       3 // b
+#define RASTER_REG_INDICES           0 // t
+#define RASTER_REG_TEXTURES          1 // t
+#define RASTER_REG_VOXEL_OCCUPANCY   0 // u
+#define RASTER_REG_VOXEL_IRRADIANCE  1 // u
+#define RASTER_REG_VOXEL_VPL_COUNT   2 // u
+#define RASTER_REG_SHADING_POINTS    3 // u
+#define RASTER_REG_SUPERPIXEL_INDEX  4 // u
+#define RASTER_REG_SUPERPIXEL_CENTER 5 // u

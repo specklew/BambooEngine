@@ -57,65 +57,65 @@ typedef float GuidePdf;
 
 // ---- VXPG guiding resources ----
 
-RWTexture3D<uint> gVoxIrradiance : BAMBOO_UAV(GUIDED_REG_IRRADIANCE);
-RWTexture3D<uint> gVoxVplCount   : BAMBOO_UAV(GUIDED_REG_VPL_COUNT);
+RWTexture3D<uint> gVoxIrradiance : BAMBOO_PASS_UAV(GUIDED_REG_IRRADIANCE);
+RWTexture3D<uint> gVoxVplCount   : BAMBOO_PASS_UAV(GUIDED_REG_VPL_COUNT);
 
 // [0] = compacted voxel count ([1] retired with the flat CDF)
-RWStructuredBuffer<uint>  gVoxCounters     : BAMBOO_UAV(GUIDED_REG_COUNTERS);
-RWStructuredBuffer<uint>  gVoxCompactIds   : BAMBOO_UAV(GUIDED_REG_COMPACT_IDS);
+RWStructuredBuffer<uint>  gVoxCounters     : BAMBOO_PASS_UAV(GUIDED_REG_COUNTERS);
+RWStructuredBuffer<uint>  gVoxCompactIds   : BAMBOO_PASS_UAV(GUIDED_REG_COMPACT_IDS);
 // Per-pixel SLIC superpixel assignment (flat map index, -1 invalid), written by
 // SuperpixelBuildPass. SIByL u_spixelIdx. NOT pixel/32 — assignment follows
 // geometry. Global-heap slot 523.
-RWTexture2D<int> gSpixelIndexImage : BAMBOO_UAV(GUIDED_REG_SUPERPIXEL_INDEX);
+RWTexture2D<int> gSpixelIndexImage : BAMBOO_PASS_UAV(GUIDED_REG_SUPERPIXEL_INDEX);
 // voxelID (flat) -> compactID, sentinel -1 (built by VoxelGuidingBuildPass).
-RWStructuredBuffer<int>   gVoxInverseIndex : BAMBOO_UAV(GUIDED_REG_INVERSE_INDEX);
+RWStructuredBuffer<int>   gVoxInverseIndex : BAMBOO_PASS_UAV(GUIDED_REG_INVERSE_INDEX);
 
 // Written by light injection (debug views 6/7 read them here): per-voxel
 // representative VPL and per-pixel VPL hit position, both pos + octa normal.
-RWTexture3D<float4> gVoxelRepresentative : BAMBOO_UAV(GUIDED_REG_VOXEL_REPRESENTATIVE);
-RWTexture2D<float4> gVplPosition         : BAMBOO_UAV(GUIDED_REG_VPL_POSITION);
+RWTexture3D<float4> gVoxelRepresentative : BAMBOO_PASS_UAV(GUIDED_REG_VOXEL_REPRESENTATIVE);
+RWTexture2D<float4> gVplPosition         : BAMBOO_PASS_UAV(GUIDED_REG_VPL_POSITION);
 
 // Shared primary-visibility buffer (ADR 0004): the first path vertex comes
 // from here; all spp samples of a frame share it and diverge at the bounce.
-RWTexture2D<uint4> gVBuffer : BAMBOO_UAV(GUIDED_REG_VBUFFER);
+RWTexture2D<uint4> gVBuffer : BAMBOO_PASS_UAV(GUIDED_REG_VBUFFER);
 
 // Voxel fingerprints (4 uints = 128-bit visibility mask per compact voxel),
 // built by VxpgFingerprintPass. Read only by debug view 8.
-RWStructuredBuffer<uint> gVoxelFingerprints : BAMBOO_UAV(GUIDED_REG_FINGERPRINTS);
+RWStructuredBuffer<uint> gVoxelFingerprints : BAMBOO_PASS_UAV(GUIDED_REG_FINGERPRINTS);
 
 // Cluster pass outputs (debug view 9). SIByL u_Clusters / u_Seeds.
-RWStructuredBuffer<int> gVoxelClusterAssignments : BAMBOO_UAV(GUIDED_REG_CLUSTER_ASSIGNMENTS);
-RWStructuredBuffer<int> gClusterSeedCompactIds   : BAMBOO_UAV(GUIDED_REG_CLUSTER_SEEDS);
+RWStructuredBuffer<int> gVoxelClusterAssignments : BAMBOO_PASS_UAV(GUIDED_REG_CLUSTER_ASSIGNMENTS);
+RWStructuredBuffer<int> gClusterSeedCompactIds   : BAMBOO_PASS_UAV(GUIDED_REG_CLUSTER_SEEDS);
 
 // Cluster-visibility mask (debug view 10). SIByL u_spixel_visibility: bit k =
 // this superpixel tile can see light cluster k. Global-heap slot 530.
-RWTexture2D<uint> gClusterVisibilityMask : BAMBOO_UAV(GUIDED_REG_VISIBILITY_MASK);
+RWTexture2D<uint> gClusterVisibilityMask : BAMBOO_PASS_UAV(GUIDED_REG_VISIBILITY_MASK);
 
 // Bottom light tree (guided sampling + debug view 11). SIByL u_Nodes /
 // compact2leaf / cluster_roots.
-RWStructuredBuffer<LightTreeNode> gLightTreeNodes  : BAMBOO_UAV(GUIDED_REG_LIGHT_TREE_NODES);
-RWStructuredBuffer<int>           gCompactToLeaf   : BAMBOO_UAV(GUIDED_REG_COMPACT_TO_LEAF);
-RWStructuredBuffer<int>           gClusterRootNodes : BAMBOO_UAV(GUIDED_REG_CLUSTER_ROOTS);
+RWStructuredBuffer<LightTreeNode> gLightTreeNodes  : BAMBOO_PASS_UAV(GUIDED_REG_LIGHT_TREE_NODES);
+RWStructuredBuffer<int>           gCompactToLeaf   : BAMBOO_PASS_UAV(GUIDED_REG_COMPACT_TO_LEAF);
+RWStructuredBuffer<int>           gClusterRootNodes : BAMBOO_PASS_UAV(GUIDED_REG_CLUSTER_ROOTS);
 
 // Top-level tree (guided sampling + debug view 12). SIByL tltree:
 // per-superpixel 64-slot importance heap.
-RWStructuredBuffer<float>         gSpixelClusterImportanceHeap : BAMBOO_UAV(GUIDED_REG_IMPORTANCE_HEAP);
+RWStructuredBuffer<float>         gSpixelClusterImportanceHeap : BAMBOO_PASS_UAV(GUIDED_REG_IMPORTANCE_HEAP);
 
 // Live per-voxel geometry bounds, quantized to the voxel cube (uint 0 =
 // cube min, 0xffffffff = cube max), reloaded from the bake each frame by
 // VoxelGuidingBuildPass. With voxel.bake.useCompact off (default) the bake
 // stores the full cube, so unpacking is an exact no-op. SIByL u_pMin/u_pMax.
-RWStructuredBuffer<uint4>         gVoxelLiveBoundMin : BAMBOO_UAV(GUIDED_REG_LIVE_BOUND_MIN);
-RWStructuredBuffer<uint4>         gVoxelLiveBoundMax : BAMBOO_UAV(GUIDED_REG_LIVE_BOUND_MAX);
+RWStructuredBuffer<uint4>         gVoxelLiveBoundMin : BAMBOO_PASS_UAV(GUIDED_REG_LIVE_BOUND_MIN);
+RWStructuredBuffer<uint4>         gVoxelLiveBoundMax : BAMBOO_PASS_UAV(GUIDED_REG_LIVE_BOUND_MAX);
 
 // Fuzzy 4-nearest superpixel blend (SIByL u_fuzzyWeight / u_fuzzyIdx, written
 // by the superpixel pass): the 4 nearest superpixel centers per pixel and
 // their normalized 1/dist^2 weights. Top-level cluster selection becomes a
 // mixture over these parents. Global-heap slots 531/532.
-RWTexture2D<float4> gFuzzyWeights : BAMBOO_UAV(GUIDED_REG_FUZZY_WEIGHT);
-RWTexture2D<int4>   gFuzzyIndices : BAMBOO_UAV(GUIDED_REG_FUZZY_INDEX);
+RWTexture2D<float4> gFuzzyWeights : BAMBOO_PASS_UAV(GUIDED_REG_FUZZY_WEIGHT);
+RWTexture2D<int4>   gFuzzyIndices : BAMBOO_PASS_UAV(GUIDED_REG_FUZZY_INDEX);
 
-cbuffer VoxelGridCB : BAMBOO_CBV(REG_VOXEL_GRID_CB)
+cbuffer VoxelGridCB : BAMBOO_PASS_CBV(REG_VOXEL_GRID_CB)
 {
     float3 voxGridMin;
     float  voxVoxelSize;
@@ -1345,12 +1345,12 @@ int SampleGuideDirection(float3 shadingPos, float3 shadingNormal, float4 fuzzyWe
 // Per-16x16-tile guide-selection probability, learned from the previous
 // frame's per-strategy contribution shares (adaptive q, guidingFlags bit 9;
 // updated + cleared by vxpgAdaptiveQ.hlsl after every guided dispatch).
-RWStructuredBuffer<float> gTileGuideQ        : BAMBOO_UAV(GUIDED_REG_TILE_GUIDE_Q);
+RWStructuredBuffer<float> gTileGuideQ        : BAMBOO_PASS_UAV(GUIDED_REG_TILE_GUIDE_Q);
 // [tile*2] = guide-attributed luminance (fixed point), [tile*2+1] = total
 // strategy luminance. Both are sums of actual sample contributions, whose
 // 1/(q x pdf) scaling makes them estimates of int(w_G f) and int(f) — the
 // ratio is the variance-aware target for q.
-RWStructuredBuffer<uint>  gTileStrategyStats : BAMBOO_UAV(GUIDED_REG_TILE_STRATEGY_STATS);
+RWStructuredBuffer<uint>  gTileStrategyStats : BAMBOO_PASS_UAV(GUIDED_REG_TILE_STRATEGY_STATS);
 
 // Keep in sync with vxpgAdaptiveQ.hlsl. MAX capped at 1/2 (defensive): the
 // semi-NEE gate leaves a large slice of transport BSDF-exclusive, and a

@@ -39,31 +39,31 @@ namespace
 //
 // Texture UAVs cannot be root descriptors, so they ride the shared heap table at
 // their global slots; everything else is a root descriptor.
-constexpr BindingSlot kVoxelIrradiance = TableEntry("gVoxIrradiance", BindingKind::Uav, GUIDED_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
-constexpr BindingSlot kVoxelVplCount = TableEntry("gVoxVplCount", BindingKind::Uav, GUIDED_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
-constexpr BindingSlot kSuperpixelIndex = TableEntry("gSpixelIndexImage", BindingKind::Uav, GUIDED_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
-constexpr BindingSlot kVoxelRepresentative = TableEntry("gVoxelRepresentative", BindingKind::Uav, GUIDED_REG_VOXEL_REPRESENTATIVE, GlobalDescriptor::VoxelRepresentative); // debug views 6/7
-constexpr BindingSlot kVplPosition = TableEntry("gVplPosition", BindingKind::Uav, GUIDED_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
-constexpr BindingSlot kVBuffer = TableEntry("gVBuffer", BindingKind::Uav, GUIDED_REG_VBUFFER, GlobalDescriptor::VBuffer);
-constexpr BindingSlot kVisibilityMask = TableEntry("gClusterVisibilityMask", BindingKind::Uav, GUIDED_REG_VISIBILITY_MASK, GlobalDescriptor::ClusterVisibilityMask); // debug view 10
-constexpr BindingSlot kFuzzyWeights = TableEntry("gFuzzyWeights", BindingKind::Uav, GUIDED_REG_FUZZY_WEIGHT, GlobalDescriptor::FuzzyWeight);
-constexpr BindingSlot kFuzzyIndices = TableEntry("gFuzzyIndices", BindingKind::Uav, GUIDED_REG_FUZZY_INDEX, GlobalDescriptor::FuzzyIndex);
-constexpr BindingSlot kVoxelGridConstants  = RootCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
-constexpr BindingSlot kGuidingCounters     = RootUav("gVoxCounters", GUIDED_REG_COUNTERS);
-constexpr BindingSlot kGuidingCompactIds   = RootUav("gVoxCompactIds", GUIDED_REG_COMPACT_IDS);
-constexpr BindingSlot kGuidingInverseIndex = RootUav("gVoxInverseIndex", GUIDED_REG_INVERSE_INDEX);
-constexpr BindingSlot kVoxelFingerprints   = RootUav("gVoxelFingerprints", GUIDED_REG_FINGERPRINTS);
-constexpr BindingSlot kClusterAssignments  = RootUav("gVoxelClusterAssignments", GUIDED_REG_CLUSTER_ASSIGNMENTS);
-constexpr BindingSlot kClusterSeeds        = RootUav("gClusterSeedCompactIds", GUIDED_REG_CLUSTER_SEEDS);
-constexpr BindingSlot kLightTreeNodes      = RootUav("gLightTreeNodes", GUIDED_REG_LIGHT_TREE_NODES);
-constexpr BindingSlot kCompactToLeaf       = RootUav("gCompactToLeaf", GUIDED_REG_COMPACT_TO_LEAF);
-constexpr BindingSlot kClusterRoots        = RootUav("gClusterRootNodes", GUIDED_REG_CLUSTER_ROOTS);
-constexpr BindingSlot kImportanceHeap = RootUav("gSpixelClusterImportanceHeap", GUIDED_REG_IMPORTANCE_HEAP);
-constexpr BindingSlot kLiveBoundMin   = RootUav("gVoxelLiveBoundMin", GUIDED_REG_LIVE_BOUND_MIN);
-constexpr BindingSlot kLiveBoundMax   = RootUav("gVoxelLiveBoundMax", GUIDED_REG_LIVE_BOUND_MAX);
-constexpr BindingSlot kTileGuideQ     = RootUav("gTileGuideQ", GUIDED_REG_TILE_GUIDE_Q);         // ADR 0015
-constexpr BindingSlot kTileStrategyStats = RootUav("gTileStrategyStats", GUIDED_REG_TILE_STRATEGY_STATS);
-constexpr BindingSlot kAdaptiveQConstants = RootConstants("AdaptiveQCB", GUIDED_REG_ADAPTIVE_Q_CB, 1);
+constexpr BindingSlot kVoxelIrradiance = PassTableEntry("gVoxIrradiance", BindingKind::Uav, GUIDED_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
+constexpr BindingSlot kVoxelVplCount = PassTableEntry("gVoxVplCount", BindingKind::Uav, GUIDED_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
+constexpr BindingSlot kSuperpixelIndex = PassTableEntry("gSpixelIndexImage", BindingKind::Uav, GUIDED_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
+constexpr BindingSlot kVoxelRepresentative = PassTableEntry("gVoxelRepresentative", BindingKind::Uav, GUIDED_REG_VOXEL_REPRESENTATIVE, GlobalDescriptor::VoxelRepresentative); // debug views 6/7
+constexpr BindingSlot kVplPosition = PassTableEntry("gVplPosition", BindingKind::Uav, GUIDED_REG_VPL_POSITION, GlobalDescriptor::VplPosition);
+constexpr BindingSlot kVBuffer = PassTableEntry("gVBuffer", BindingKind::Uav, GUIDED_REG_VBUFFER, GlobalDescriptor::VBuffer);
+constexpr BindingSlot kVisibilityMask = PassTableEntry("gClusterVisibilityMask", BindingKind::Uav, GUIDED_REG_VISIBILITY_MASK, GlobalDescriptor::ClusterVisibilityMask); // debug view 10
+constexpr BindingSlot kFuzzyWeights = PassTableEntry("gFuzzyWeights", BindingKind::Uav, GUIDED_REG_FUZZY_WEIGHT, GlobalDescriptor::FuzzyWeight);
+constexpr BindingSlot kFuzzyIndices = PassTableEntry("gFuzzyIndices", BindingKind::Uav, GUIDED_REG_FUZZY_INDEX, GlobalDescriptor::FuzzyIndex);
+constexpr BindingSlot kVoxelGridConstants  = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
+constexpr BindingSlot kGuidingCounters     = PassUav("gVoxCounters", GUIDED_REG_COUNTERS);
+constexpr BindingSlot kGuidingCompactIds   = PassUav("gVoxCompactIds", GUIDED_REG_COMPACT_IDS);
+constexpr BindingSlot kGuidingInverseIndex = PassUav("gVoxInverseIndex", GUIDED_REG_INVERSE_INDEX);
+constexpr BindingSlot kVoxelFingerprints   = PassUav("gVoxelFingerprints", GUIDED_REG_FINGERPRINTS);
+constexpr BindingSlot kClusterAssignments  = PassUav("gVoxelClusterAssignments", GUIDED_REG_CLUSTER_ASSIGNMENTS);
+constexpr BindingSlot kClusterSeeds        = PassUav("gClusterSeedCompactIds", GUIDED_REG_CLUSTER_SEEDS);
+constexpr BindingSlot kLightTreeNodes      = PassUav("gLightTreeNodes", GUIDED_REG_LIGHT_TREE_NODES);
+constexpr BindingSlot kCompactToLeaf       = PassUav("gCompactToLeaf", GUIDED_REG_COMPACT_TO_LEAF);
+constexpr BindingSlot kClusterRoots        = PassUav("gClusterRootNodes", GUIDED_REG_CLUSTER_ROOTS);
+constexpr BindingSlot kImportanceHeap = PassUav("gSpixelClusterImportanceHeap", GUIDED_REG_IMPORTANCE_HEAP);
+constexpr BindingSlot kLiveBoundMin   = PassUav("gVoxelLiveBoundMin", GUIDED_REG_LIVE_BOUND_MIN);
+constexpr BindingSlot kLiveBoundMax   = PassUav("gVoxelLiveBoundMax", GUIDED_REG_LIVE_BOUND_MAX);
+constexpr BindingSlot kTileGuideQ     = PassUav("gTileGuideQ", GUIDED_REG_TILE_GUIDE_Q);         // ADR 0015
+constexpr BindingSlot kTileStrategyStats = PassUav("gTileStrategyStats", GUIDED_REG_TILE_STRATEGY_STATS);
+constexpr BindingSlot kAdaptiveQConstants = PassRootConstants("AdaptiveQCB", GUIDED_REG_ADAPTIVE_Q_CB, 1);
 
 constexpr BindingSlot kGuidedSlots[] = {
     kVoxelIrradiance,     kVoxelVplCount,   kSuperpixelIndex,  kVoxelRepresentative, kVplPosition,

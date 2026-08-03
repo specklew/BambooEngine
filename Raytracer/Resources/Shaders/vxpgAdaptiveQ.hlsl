@@ -8,13 +8,13 @@
 
 #include "PassRegisters.h"
 
-RWStructuredBuffer<float> gTileGuideQ        : BAMBOO_UAV(GUIDED_REG_TILE_GUIDE_Q);
-RWStructuredBuffer<uint>  gTileStrategyStats : BAMBOO_UAV(GUIDED_REG_TILE_STRATEGY_STATS);
+RWStructuredBuffer<float> gTileGuideQ        : BAMBOO_PASS_UAV(GUIDED_REG_TILE_GUIDE_Q);
+RWStructuredBuffer<uint>  gTileStrategyStats : BAMBOO_PASS_UAV(GUIDED_REG_TILE_STRATEGY_STATS);
 
 // Both buffers are bound as root descriptors, which carry no size — GetDimensions
 // on them returns garbage and would let the tail of the last thread group run off
 // the end. The CPU knows the tile grid, so it says so.
-cbuffer AdaptiveQCB : BAMBOO_CBV(GUIDED_REG_ADAPTIVE_Q_CB)
+cbuffer AdaptiveQCB : BAMBOO_PASS_CBV(GUIDED_REG_ADAPTIVE_Q_CB)
 {
     uint gTileCount;
 };
