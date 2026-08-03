@@ -105,6 +105,14 @@ static AutoCVarInt   g_dumpRenderGraph("rdg.dump", "Log the next frame's render 
 // Off by default: two timestamps per node plus a resolve is real per-frame cost,
 // and benchmark runs must measure the renderer, not the instrumentation.
 static AutoCVarInt   g_renderGraphTimings("rdg.timings", "Measure each render-graph node on the GPU (ImGui: Render Graph)", 0, CVarFlags::EditCheckbox);
+
+// Restores the pre-phase-6a frame: a full GPU drain after every Present, so no
+// frame overlaps another. Kept as a debugging switch because it is the fastest
+// way to tell a cross-frame race from anything else — if a symptom disappears
+// with this on, the frame is missing a barrier or overwriting something a frame
+// in flight still reads. It is also how the pacing win is measured, since only a
+// same-session A/B survives the thermal drift.
+static AutoCVarInt   g_serializeFrames("renderer.serializeFrames", "Drain the GPU after every Present (pre-frame-pacing behaviour)", 0, CVarFlags::EditCheckbox);
 static AutoCVarFloat g_exposure("renderer.postprocess.exposure","Exposure multiplier applied before display", 1.0f, CVarFlags::EditDrag, 0.0f, 10.0f);
 static AutoCVarFloat g_contrast("renderer.postprocess.contrast", "Pre-ACES contrast power curve", 1.0f, CVarFlags::EditDrag, 0.1f, 3.0f);
 static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES saturation", 1.0f, CVarFlags::EditDrag, 0.0f, 2.0f);
@@ -618,16 +626,26 @@ void Renderer::Render(double elapsedTime, double totalTime)
 
 	ThrowIfFailed(m_graphicsDevice->GetSwapChain()->Present(0, presentFlags));
 
-	FlushCommandQueue();
+	m_graphicsDevice->SignalFrame();
+
+	// The two readbacks below map buffers THIS frame wrote, so they need this
+	// frame finished — which the pacing wait does not give, being NUM_FRAMES-1
+	// frames behind. Both are diagnostic paths: a capture happens once per
+	// benchmark window, and timings are opt-in, so serializing them costs nothing
+	// that is being measured. Everything else runs unserialized.
+	const bool readsBackThisFrame = m_screenshotManager->IsCaptureDue() || g_renderGraphTimings.Get() != 0;
+	if (readsBackThisFrame || g_serializeFrames.Get() != 0)
+		FlushCommandQueue();
+
+	// Wait only for the slot about to be reused, so the CPU keeps NUM_FRAMES-1
+	// frames of run-ahead. This is what makes triple buffering mean anything.
+	m_graphicsDevice->RefreshFrameIndex();
+	m_graphicsDevice->WaitForCurrentFrame();
 	ResetCommandList();
 
-	// Same guarantee the screenshot readback relies on: the GPU is done, so the
-	// timestamp readback buffer holds this frame's values. The dump runs after it
-	// so a single one-shot dump carries the node costs of the frame it describes.
 	m_renderGraph.ResolveTimings();
 	DumpRenderGraphIfRequested();
 
-	// Map readback buffer and write PNG; GPU is guaranteed done after FlushCommandQueue
 	if (m_screenshotManager->IsCaptureDue())
 		m_screenshotManager->FinishCapture();
 }
@@ -1486,9 +1504,7 @@ void Renderer::BuildVxpgGraph()
 	// nodes and each iteration gets its own timing row.
 	if (m_superpixelBuildPass)
 	{
-		m_superpixelBuildPass->SetFrameInputs(
-			m_lightInjectionPass ? m_lightInjectionPass->GetShadingPointsTexture().Get() : nullptr,
-			g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
+		m_superpixelBuildPass->SetFrameInputs(g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
 
 		m_renderGraph.AddPass("VXPG Superpixel InitSeeds",
 			[&](RenderGraphPassBuilder& pass)

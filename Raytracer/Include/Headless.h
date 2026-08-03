@@ -103,6 +103,12 @@ struct HeadlessArgs
     bool debugLayer = false;
     bool rdgDump    = false;
     bool rdgTimings = false;
+
+    // --cvar name=value, repeatable. Applied after Initialize so CVar defaults
+    // cannot undo them. Exists so an A/B over an engine switch is one command
+    // line rather than a source edit and a rebuild — which matters because only
+    // a same-session alternating A/B survives the GPU's thermal drift.
+    std::vector<std::string> cvarAssignments;
 };
 
 HeadlessArgs   ParseHeadlessArgs(int argc, wchar_t** argv);

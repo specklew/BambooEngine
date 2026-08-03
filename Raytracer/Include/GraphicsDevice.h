@@ -18,9 +18,19 @@ public:
     bool CheckTearingSupport();
     bool CheckRayTracingSupport() const;
 
-    // Signal + CPU-wait until the queue drains, then refresh the frame index.
+    // Signal + CPU-wait until the queue drains, then refresh the frame index. For
+    // structural changes only (resize, scene switch, shader reload, a readback):
+    // the steady-state frame paces itself with the pair below instead.
     void FlushCommandQueue();
     void RefreshFrameIndex();
+
+    // Frame pacing (ADR 0017 phase 6a). SignalFrame() marks the queue position of
+    // the frame just submitted; WaitForCurrentFrame() blocks until whatever the
+    // frame slot we are about to reuse last submitted has finished, which frees
+    // its command allocator and its copy of the per-frame constants. That is
+    // NUM_FRAMES-1 frames of run-ahead, where the flush allowed none.
+    void SignalFrame();
+    void WaitForCurrentFrame();
 
     [[nodiscard]] Microsoft::WRL::ComPtr<ID3D12Device5>& GetDevice() { return m_device; }
     [[nodiscard]] Microsoft::WRL::ComPtr<ID3D12CommandQueue>& GetCommandQueue() { return m_commandQueue; }
@@ -45,6 +55,9 @@ private:
 
     Microsoft::WRL::ComPtr<ID3D12Fence> m_fence;
     UINT64 m_fenceValue = 0;
+    // Queue position of the last frame submitted from each slot; 0 means the slot
+    // has never been used, so its first reuse waits for nothing.
+    UINT64 m_frameFenceValues[Constants::Graphics::NUM_FRAMES] = {};
     HANDLE m_fenceEvent = nullptr;
 
     Microsoft::WRL::ComPtr<IDXGISwapChain3> m_swapChain;

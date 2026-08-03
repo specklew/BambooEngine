@@ -236,6 +236,25 @@ void GraphicsDevice::RefreshFrameIndex()
 	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 }
 
+void GraphicsDevice::SignalFrame()
+{
+	m_fenceValue++;
+	ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceValue));
+	m_frameFenceValues[m_frameIndex] = m_fenceValue;
+}
+
+void GraphicsDevice::WaitForCurrentFrame()
+{
+	// A full flush leaves every slot's recorded value already completed, so this
+	// costs nothing after one and needs no bookkeeping of its own.
+	const UINT64 target = m_frameFenceValues[m_frameIndex];
+	if (target == 0 || m_fence->GetCompletedValue() >= target)
+		return;
+
+	ThrowIfFailed(m_fence->SetEventOnCompletion(target, m_fenceEvent));
+	WaitForSingleObject(m_fenceEvent, INFINITE);
+}
+
 ComPtr<IDXGIAdapter4> GraphicsDevice::GetHardwareAdapter(bool useWarp)
 {
 	ComPtr<IDXGIAdapter1> adapter1;

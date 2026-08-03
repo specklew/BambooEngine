@@ -55,6 +55,7 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
         else if (flag == "--debug-layer") args.debugLayer = true;
         else if (flag == "--rdg-dump")    args.rdgDump = true;
         else if (flag == "--rdg-timings") args.rdgTimings = true;
+        else if (flag == "--cvar")        args.cvarAssignments.push_back(valueOf(i));
     }
 
     return args;

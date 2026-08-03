@@ -13,19 +13,27 @@ using Microsoft::WRL::ComPtr;
 
 namespace
 {
-    // The seven SLIC buffers are consecutive UAVs in this pass's private heap.
-    // Declared one per register rather than as a single seven-wide range so each
-    // carries its own name for reflection validation; the kernels differ only in
-    // which they touch.
+    // The seven SLIC buffers, off the global heap. Declared one per register
+    // rather than as a single seven-wide range so each carries its own name for
+    // reflection validation; the kernels differ only in which they touch.
+    //
+    // These lived in a private heap until ADR 0017 phase 6a. Every one of them
+    // already had a global slot, written when its resource is created — and the
+    // private copy of the ShadingPoints descriptor did not, so it was re-pointed
+    // lazily at record time instead. That was sound only while the frame ended in
+    // a full flush: without one, the rewrite lands in a heap that frames still in
+    // flight are reading, and between injection recreating ShadingPoints and the
+    // next bind the private descriptor named a destroyed resource. Both disappear
+    // with the heap, which is what GPU-based validation caught.
     constexpr BindingSlot kSuperpixelConstants = PassRootConstants("SuperpixelCB", SUPERPIXEL_REG_CB, 12);
     constexpr BindingSlot kSuperpixelSlots[] = {
-        PassTableEntryAt("u_input", BindingKind::Uav, SUPERPIXEL_REG_INPUT, 0),
-        PassTableEntryAt("u_center", BindingKind::Uav, SUPERPIXEL_REG_CENTER, 1),
-        PassTableEntryAt("u_index", BindingKind::Uav, SUPERPIXEL_REG_INDEX, 2),
-        PassTableEntryAt("u_spixel_counter", BindingKind::Uav, SUPERPIXEL_REG_SPIXEL_COUNTER, 3),
-        PassTableEntryAt("u_spixel_gathered", BindingKind::Uav, SUPERPIXEL_REG_SPIXEL_GATHERED, 4),
-        PassTableEntryAt("u_fuzzy_weight", BindingKind::Uav, SUPERPIXEL_REG_FUZZY_WEIGHT, 5),
-        PassTableEntryAt("u_fuzzy_index", BindingKind::Uav, SUPERPIXEL_REG_FUZZY_INDEX, 6),
+        PassTableEntry("u_input", BindingKind::Uav, SUPERPIXEL_REG_INPUT, GlobalDescriptor::ShadingPoints),
+        PassTableEntry("u_center", BindingKind::Uav, SUPERPIXEL_REG_CENTER, GlobalDescriptor::SuperpixelCenter),
+        PassTableEntry("u_index", BindingKind::Uav, SUPERPIXEL_REG_INDEX, GlobalDescriptor::SuperpixelIndex),
+        PassTableEntry("u_spixel_counter", BindingKind::Uav, SUPERPIXEL_REG_SPIXEL_COUNTER, GlobalDescriptor::SpixelCounter),
+        PassTableEntry("u_spixel_gathered", BindingKind::Uav, SUPERPIXEL_REG_SPIXEL_GATHERED, GlobalDescriptor::SpixelGathered),
+        PassTableEntry("u_fuzzy_weight", BindingKind::Uav, SUPERPIXEL_REG_FUZZY_WEIGHT, GlobalDescriptor::FuzzyWeight),
+        PassTableEntry("u_fuzzy_index", BindingKind::Uav, SUPERPIXEL_REG_FUZZY_INDEX, GlobalDescriptor::FuzzyIndex),
     };
 
     constexpr uint32_t SP = Constants::Graphics::SUPERPIXEL_SIZE;
@@ -109,38 +117,6 @@ void SuperpixelBuildPass::CreateBuffers()
     makeTex(DXGI_FORMAT_R32G32B32A32_SINT,  m_width,  m_height, L"Superpixel FuzzyIndex",  m_fuzzyIndex);
 }
 
-void SuperpixelBuildPass::CreatePrivateHeap(ID3D12Resource* shadingPoints)
-{
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.NumDescriptors = 7;
-    heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_privateHeap)));
-
-    UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE handle(m_privateHeap->GetCPUDescriptorHandleForHeapStart());
-
-    auto writeUav = [&](ID3D12Resource* res, DXGI_FORMAT fmt)
-    {
-        D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
-        uav.Format             = fmt;
-        uav.ViewDimension      = D3D12_UAV_DIMENSION_TEXTURE2D;
-        uav.Texture2D.MipSlice = 0;
-        m_device->CreateUnorderedAccessView(res, nullptr, &uav, handle);
-        handle.Offset(1, inc);
-    };
-
-    writeUav(shadingPoints,   DXGI_FORMAT_R32G32B32A32_FLOAT); // u0 ShadingPoints
-    writeUav(m_center.Get(),  DXGI_FORMAT_R32G32B32A32_FLOAT); // u1
-    writeUav(m_index.Get(),   DXGI_FORMAT_R32_SINT);           // u2
-    writeUav(m_counter.Get(), DXGI_FORMAT_R32_UINT);           // u3
-    writeUav(m_gathered.Get(),DXGI_FORMAT_R32G32_SINT);        // u4
-    writeUav(m_fuzzyWeight.Get(), DXGI_FORMAT_R32G32B32A32_FLOAT); // u5
-    writeUav(m_fuzzyIndex.Get(),  DXGI_FORMAT_R32G32B32A32_SINT);  // u6
-
-    m_boundShadingPoints = shadingPoints;
-}
-
 void SuperpixelBuildPass::OnResize(uint32_t width, uint32_t height, ID3D12Resource* shadingPoints)
 {
     if (!m_initialized || width == 0 || height == 0 || !shadingPoints)
@@ -153,10 +129,14 @@ void SuperpixelBuildPass::OnResize(uint32_t width, uint32_t height, ID3D12Resour
 
     m_center.Reset(); m_index.Reset(); m_counter.Reset(); m_gathered.Reset();
     m_fuzzyWeight.Reset(); m_fuzzyIndex.Reset();
-    m_privateHeap.Reset();
 
     CreateBuffers();
-    CreatePrivateHeap(shadingPoints);
+    m_buffersCreated = true;
+
+    // The caller writes the new resources into their global-heap slots
+    // (Renderer::WriteSuperpixelUavsToGlobalHeap and its cluster-visibility
+    // counterpart, which owns the gathered/counter pair) — always at a flush
+    // point, which is what makes a shader-visible descriptor safe to overwrite.
 }
 
 void SuperpixelBuildPass::WriteIndexUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const
@@ -195,9 +175,8 @@ void SuperpixelBuildPass::WriteFuzzyIndexUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest)
     m_device->CreateUnorderedAccessView(m_fuzzyIndex.Get(), nullptr, &uav, dest);
 }
 
-void SuperpixelBuildPass::SetFrameInputs(ID3D12Resource* shadingPoints, float weight, float posNormalizer)
+void SuperpixelBuildPass::SetFrameInputs(float weight, float posNormalizer)
 {
-    m_shadingPoints = shadingPoints;
     m_weight        = weight;
     m_posNormalizer = posNormalizer;
 }
@@ -207,28 +186,15 @@ void SuperpixelBuildPass::SetFrameInputs(ID3D12Resource* shadingPoints, float we
 // another's root state. writeGather selects the association variant.
 bool SuperpixelBuildPass::BindCommon(bool writeGather)
 {
-    if (!m_initialized || !m_privateHeap)
+    if (!m_initialized || !m_buffersCreated)
         return false;
-
-    // Injection may have recreated ShadingPoints (resize / scene change / shader
-    // reload); re-point private-heap slot 0 so its descriptor never dangles. Only
-    // happens at flush points, so overwriting the live descriptor is safe.
-    if (m_shadingPoints && m_shadingPoints != m_boundShadingPoints)
-    {
-        D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
-        uav.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
-        uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        m_device->CreateUnorderedAccessView(m_shadingPoints, nullptr, &uav,
-            m_privateHeap->GetCPUDescriptorHandleForHeapStart()); // slot 0 = u_input
-        m_boundShadingPoints = m_shadingPoints;
-    }
 
     auto* cmd = m_commandList.Get();
 
-    ID3D12DescriptorHeap* heaps[] = { m_privateHeap.Get() };
+    ID3D12DescriptorHeap* heaps[] = { GlobalDescriptorHeap::Get().GetHeap() };
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
     cmd->SetComputeRootSignature(m_rootSig.Get());
-    m_rootSig.SetTable(cmd, 0, m_privateHeap->GetGPUDescriptorHandleForHeapStart());
+    m_rootSig.SetTable(cmd, 0, GlobalDescriptorHeap::Get().GpuStart());
 
     SuperpixelConstants c{};
     c.mapX = static_cast<int32_t>(m_mapX);
