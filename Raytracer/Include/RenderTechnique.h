@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "DebugViewDoc.h"
 #include "RenderGraph.h"
 #include "Resources/Texture.h"
 #include "VxpgGraphHandles.h"
@@ -73,11 +74,12 @@ public:
     // shader variant carrying the view branches has to be compiled (ADR 0014).
     virtual bool HasActiveDebugView() const { return false; }
 
-    // Every debug view this technique understands, as (index, name) pairs with
-    // "off" first. Headless walks this to capture each view unattended, which is
-    // the only way a view gets checked without a human at the window.
-    struct DebugView { int index; std::string name; };
-    virtual std::vector<DebugView> GetDebugViews() const { return { {0, "None"} }; }
+    // Every debug view this technique understands, "off" first. Headless walks
+    // this to capture each view unattended, which is the only way a view gets
+    // checked without a human at the window; the UI shows `doc` as a tooltip so
+    // the expected image is readable at the point of choosing it.
+    struct DebugView { int index; std::string name; std::string doc; };
+    virtual std::vector<DebugView> GetDebugViews() const { return { {0, "None", ""} }; }
 
     // Selects one of the views above. Indices belong to this technique's own
     // enumeration, so a value from another technique's list is rejected.
@@ -103,6 +105,26 @@ public:
     static std::vector<Entry>& GetRegistry();
     static int RegisterTechnique(std::string name, std::function<std::shared_ptr<RenderTechnique>()> factory);
 };
+
+// Turns a debug-view enum plus its doc table into the list the UI and headless
+// walk. The docs array is already required to be one-per-entry in enum order
+// (FormatDebugViewDocs static_asserts the count), so the two line up by index.
+template <typename EnumType, size_t N>
+std::vector<RenderTechnique::DebugView> BuildDebugViews(const DebugViewDoc (&docs)[N])
+{
+    static_assert(N == magic_enum::enum_count<EnumType>(), "every debug view needs a DebugViewDoc entry");
+
+    std::vector<RenderTechnique::DebugView> views;
+    views.reserve(N);
+    size_t index = 0;
+    for (const EnumType value : magic_enum::enum_values<EnumType>())
+    {
+        views.push_back({static_cast<int>(value), std::string(magic_enum::enum_name(value)),
+                         FormatDebugViewDoc(docs[index])});
+        ++index;
+    }
+    return views;
+}
 
 // Place at file scope in a .cpp alongside the subclass definition.
 #define REGISTER_TECHNIQUE(Name, Class) \

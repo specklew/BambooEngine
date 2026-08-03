@@ -21,10 +21,7 @@ bool DxrTechnique::HasActiveDebugView() const
 
 std::vector<RenderTechnique::DebugView> DxrTechnique::GetDebugViews() const
 {
-    std::vector<DebugView> views;
-    for (const RaytraceDebugMode mode : magic_enum::enum_values<RaytraceDebugMode>())
-        views.push_back({static_cast<int>(mode), std::string(magic_enum::enum_name(mode))});
-    return views;
+    return BuildDebugViews<RaytraceDebugMode>(kRaytraceDebugModeDocs);
 }
 
 bool DxrTechnique::SetDebugView(int index)

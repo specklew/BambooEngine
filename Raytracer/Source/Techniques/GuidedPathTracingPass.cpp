@@ -95,10 +95,7 @@ bool IsAmdDevice(ID3D12Device* device)
 
 std::vector<RenderTechnique::DebugView> GuidedPathTracingPass::GetDebugViews() const
 {
-    std::vector<DebugView> views;
-    for (const GuidingDebugView view : magic_enum::enum_values<GuidingDebugView>())
-        views.push_back({static_cast<int>(view), std::string(magic_enum::enum_name(view))});
-    return views;
+    return BuildDebugViews<GuidingDebugView>(kGuidingDebugViewDocs);
 }
 
 bool GuidedPathTracingPass::SetDebugView(int index)

@@ -146,10 +146,7 @@ int RasterizationTechnique::GetDebugMode() const
 
 std::vector<RenderTechnique::DebugView> RasterizationTechnique::GetDebugViews() const
 {
-    std::vector<DebugView> views;
-    for (const RasterDebugMode mode : magic_enum::enum_values<RasterDebugMode>())
-        views.push_back({static_cast<int>(mode), std::string(magic_enum::enum_name(mode))});
-    return views;
+    return BuildDebugViews<RasterDebugMode>(kRasterDebugModeDocs);
 }
 
 bool RasterizationTechnique::SetDebugView(int index)

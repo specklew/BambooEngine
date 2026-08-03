@@ -452,14 +452,30 @@ void EditorUI::DrawDebugViewCombo()
 	if (views.empty())
 		return;
 
-	std::vector<const char*> labels;
-	labels.reserve(views.size());
-	for (const RenderTechnique::DebugView& view : views)
-		labels.push_back(view.name.c_str());
-
 	if (m_currentDebugViewRow >= static_cast<int>(views.size()))
 		m_currentDebugViewRow = 0;
 
-	if (ImGui::Combo("Debug View", &m_currentDebugViewRow, labels.data(), static_cast<int>(labels.size())))
-		m_onDebugViewPicked(views[m_currentDebugViewRow].index);
+	// BeginCombo rather than ImGui::Combo: the docs say what a healthy image looks
+	// like, which is worth reading while picking rather than after.
+	if (ImGui::BeginCombo("Debug View", views[m_currentDebugViewRow].name.c_str()))
+	{
+		for (int row = 0; row < static_cast<int>(views.size()); ++row)
+		{
+			const bool selected = row == m_currentDebugViewRow;
+			if (ImGui::Selectable(views[row].name.c_str(), selected))
+			{
+				m_currentDebugViewRow = row;
+				m_onDebugViewPicked(views[row].index);
+			}
+			if (ImGui::IsItemHovered() && !views[row].doc.empty())
+				ImGui::SetTooltip("%s", views[row].doc.c_str());
+			if (selected)
+				ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+
+	// Same text under the closed combo, so the active view explains itself too.
+	if (ImGui::IsItemHovered() && !views[m_currentDebugViewRow].doc.empty())
+		ImGui::SetTooltip("%s", views[m_currentDebugViewRow].doc.c_str());
 }

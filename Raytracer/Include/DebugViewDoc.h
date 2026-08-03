@@ -13,6 +13,13 @@ struct DebugViewDoc
 	const char* how;          // one-line mechanism
 };
 
+inline std::string FormatDebugViewDoc(const DebugViewDoc& doc)
+{
+	return std::string("Debugs:   ") + doc.debuggedPass +
+	       "\nExpected: " + doc.expected +
+	       "\nHow:      " + doc.how;
+}
+
 // Formats per-view docs into the strings the CVar editor displays.
 // The static_assert forces every enum entry to have a doc.
 template <typename EnumType, size_t N>
@@ -22,11 +29,6 @@ std::vector<std::string> FormatDebugViewDocs(const DebugViewDoc (&docs)[N])
 	std::vector<std::string> formatted;
 	formatted.reserve(N);
 	for (const DebugViewDoc& doc : docs)
-	{
-		formatted.push_back(
-			std::string("Debugs:   ") + doc.debuggedPass +
-			"\nExpected: " + doc.expected +
-			"\nHow:      " + doc.how);
-	}
+		formatted.push_back(FormatDebugViewDoc(doc));
 	return formatted;
 }
