@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "CommandContext.h"
-#include "RaytracePass.h"
+#include "DxrPass.h"
 
 #include <wrl/client.h>
 
@@ -22,30 +22,13 @@
 
 
 // ---------------------------------------------------------------------------
-// Registry
-// ---------------------------------------------------------------------------
-
-std::vector<TechniqueEntry>& RaytracePass::GetRegistry()
-{
-    static std::vector<TechniqueEntry> registry;
-    return registry;
-}
-
-int RaytracePass::RegisterTechnique(const std::string& name, std::function<std::shared_ptr<RaytracePass>()> factory)
-{
-    GetRegistry().push_back({name, std::move(factory)});
-    return static_cast<int>(GetRegistry().size()) - 1;
-}
-
-
-// ---------------------------------------------------------------------------
 // Initialize / lifecycle
 // ---------------------------------------------------------------------------
 
-void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
-                              Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
-                              std::shared_ptr<Scene> initialScene,
-                              std::shared_ptr<PassConstants> passConstants)
+void DxrPass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
+                         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
+                         std::shared_ptr<Scene> initialScene,
+                         std::shared_ptr<PassConstants> passConstants)
 {
     spdlog::info("Initializing raytracer pass...");
 
@@ -55,43 +38,24 @@ void RaytracePass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
     m_passConstants = passConstants;
 
     InitializeRaytracingPipeline();
-    CreateRaytracingOutputBuffer();
     CreateShaderResourceHeap();
     CreateShaderBindingTable();
 
     spdlog::info("Raytracer pass initialized successfully.");
 }
 
-void RaytracePass::OnResize()
+void DxrPass::OnResize()
 {
-    m_outputResource.reset();
-    CreateRaytracingOutputBuffer();
     CreateShaderResourceHeap();
 }
 
-void RaytracePass::OnShaderReload()
+void DxrPass::OnShaderReload()
 {
     InitializeRaytracingPipeline();
     CreateShaderBindingTable();
 }
 
-bool RaytracePass::SetDebugViewsCompiled(bool enabled)
-{
-    if (m_compileDebugViews == enabled)
-        return false;
-    m_compileDebugViews = enabled;
-    return true;
-}
-
-bool RaytracePass::SetOneSampleMisCompiled(bool enabled)
-{
-    if (m_compileOneSampleMis == enabled)
-        return false;
-    m_compileOneSampleMis = enabled;
-    return true;
-}
-
-void RaytracePass::OnSceneChange(std::shared_ptr<Scene> scene)
+void DxrPass::OnSceneChange(std::shared_ptr<Scene> scene)
 {
     spdlog::debug("Scene change for Ray Tracing...");
     m_currentScene = scene;
@@ -103,7 +67,7 @@ void RaytracePass::OnSceneChange(std::shared_ptr<Scene> scene)
 // Render
 // ---------------------------------------------------------------------------
 
-void RaytracePass::Render()
+void DxrPass::Render()
 {
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
     m_commandList->SetGraphicsRootSignature(nullptr);
@@ -135,7 +99,7 @@ void RaytracePass::Render()
 // Default TechniqueDesc (original path tracing shaders)
 // ---------------------------------------------------------------------------
 
-TechniqueDesc RaytracePass::GetTechniqueDesc() const
+TechniqueDesc DxrPass::GetTechniqueDesc() const
 {
     // Default implementation mirrors the original hardcoded path tracing setup.
     // Subclasses override this to provide their own shaders and hit groups.
@@ -163,7 +127,7 @@ TechniqueDesc RaytracePass::GetTechniqueDesc() const
 // Pipeline initialization — generic over TechniqueDesc
 // ---------------------------------------------------------------------------
 
-void RaytracePass::LoadShaders()
+void DxrPass::LoadShaders()
 {
     auto& rm = ResourceManager::Get();
     spdlog::debug("Loading raytracing shaders from TechniqueDesc ({} shaders)", m_techniqueDesc.shaders.size());
@@ -180,13 +144,13 @@ void RaytracePass::LoadShaders()
 
 // Every library in a state object is served by the one global root signature, so
 // each is checked against it and their coverage accumulates.
-void RaytracePass::ValidateShaderBindings() const
+void DxrPass::ValidateShaderBindings() const
 {
     for (const auto& shaderDesc : m_techniqueDesc.shaders)
         ShaderReflection::ValidateLibraryAsset(shaderDesc.shaderPath.c_str(), m_globalRootSignature.Get());
 }
 
-void RaytracePass::InitializeRaytracingPipeline()
+void DxrPass::InitializeRaytracingPipeline()
 {
     spdlog::debug("Initializing raytracing pipeline");
 
@@ -291,7 +255,7 @@ void RaytracePass::InitializeRaytracingPipeline()
 // Default local root signatures — empty, one per role group
 // ---------------------------------------------------------------------------
 
-void RaytracePass::CreateLocalRootSignatures()
+void DxrPass::CreateLocalRootSignatures()
 {
     spdlog::debug("Creating local root signatures (empty defaults)");
 
@@ -312,9 +276,9 @@ void RaytracePass::CreateLocalRootSignatures()
 // Default global root signature — standard 7-param scene bindings
 // ---------------------------------------------------------------------------
 
-void RaytracePass::CreateGlobalRootSignature()
+void DxrPass::CreateGlobalRootSignature()
 {
-    m_globalRootSignature = RootSignatureBuilder(L"RaytracePass GlobalRootSig", /*tableCount*/ 1)
+    m_globalRootSignature = RootSignatureBuilder(L"DxrPass GlobalRootSig", /*tableCount*/ 1)
                                 .AddFrameLayout()
                                 .WithStaticSamplers()
                                 .Build(m_device.Get());
@@ -325,7 +289,7 @@ void RaytracePass::CreateGlobalRootSignature()
 // SBT — generic, built from TechniqueDesc hit groups + shader roles
 // ---------------------------------------------------------------------------
 
-void RaytracePass::CreateShaderBindingTable()
+void DxrPass::CreateShaderBindingTable()
 {
     spdlog::info("Creating shader binding table");
 
@@ -350,37 +314,12 @@ void RaytracePass::CreateShaderBindingTable()
 
 
 // ---------------------------------------------------------------------------
-// Output buffer + TLAS descriptor
+// TLAS descriptor — the one view every DXR pass needs
 // ---------------------------------------------------------------------------
 
-void RaytracePass::CreateRaytracingOutputBuffer()
+void DxrPass::CreateShaderResourceHeap()
 {
-    spdlog::debug("Creating raytracing output buffer");
-    D3D12_RESOURCE_DESC outputBufferDesc = {};
-    outputBufferDesc.DepthOrArraySize = 1;
-    outputBufferDesc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    outputBufferDesc.Format           = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    outputBufferDesc.Width            = Window::Get().GetWidth();
-    outputBufferDesc.Height           = Window::Get().GetHeight();
-    outputBufferDesc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    outputBufferDesc.MipLevels        = 1;
-    outputBufferDesc.SampleDesc.Count = 1;
-    outputBufferDesc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-    m_outputResource = std::make_unique<Texture>(m_device, outputBufferDesc,
-        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, L"Raytrace Output");
-}
-
-void RaytracePass::CreateShaderResourceHeap()
-{
-    GlobalDescriptorHeap& heap = GlobalDescriptorHeap::Get();
-
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(m_outputResource->GetUnderlyingResource().Get(), nullptr, &uavDesc,
-        heap.CpuHandle(GlobalDescriptor::RaytraceOutput));
-
-    const D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = heap.CpuHandle(GlobalDescriptor::Tlas);
+    const D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::Tlas);
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format                                   = DXGI_FORMAT_UNKNOWN;

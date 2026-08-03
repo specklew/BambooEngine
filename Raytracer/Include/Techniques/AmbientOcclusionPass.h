@@ -1,7 +1,7 @@
 #pragma once
-#include "RaytracePass.h"
+#include "DxrTechnique.h"
 
-class AmbientOcclusionPass : public RaytracePass
+class AmbientOcclusionPass : public DxrTechnique
 {
 protected:
     TechniqueDesc GetTechniqueDesc() const override;

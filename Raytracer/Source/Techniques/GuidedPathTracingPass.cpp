@@ -185,6 +185,8 @@ void GuidedPathTracingPass::EnsureAdaptiveQUpdatePso()
 
 void GuidedPathTracingPass::DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass)
 {
+    DeclareVoxelGuidingReads(dispatchPass);
+
     if (!m_compileOneSampleMis)
         return;
 
@@ -196,6 +198,42 @@ void GuidedPathTracingPass::DeclareDispatchResources(RenderGraph& graph, RenderG
 
     dispatchPass.Read(m_tileGuideQHandle, GraphAccess::UnorderedAccessRead);
     dispatchPass.Write(m_tileStrategyStatsHandle, GraphAccess::ComputeWrite);
+}
+
+// Every VXPG product the integrator samples. This declaration is the only thing
+// keeping the twenty-six nodes that produce them alive through culling, so a
+// resource dropped from here silently loses its producer rather than erroring.
+void GuidedPathTracingPass::DeclareVoxelGuidingReads(RenderGraphPassBuilder& pass) const
+{
+    constexpr GraphAccess kUavRead = GraphAccess::UnorderedAccessRead;
+    const VxpgGraphHandles& vxpg = *m_frameGuiding;
+
+    // Read through the global descriptor table.
+    pass.Read(vxpg.voxelOccupancy, kUavRead);
+    pass.Read(vxpg.voxelIrradiance, kUavRead);
+    pass.Read(vxpg.voxelVplCount, kUavRead);
+    pass.Read(vxpg.voxelRepresentative, kUavRead);
+    pass.Read(vxpg.shadingPoints, kUavRead);
+    pass.Read(vxpg.vbuffer, kUavRead);
+    pass.Read(vxpg.superpixelIndex, kUavRead);
+    pass.Read(vxpg.superpixelCenter, kUavRead);
+    pass.Read(vxpg.superpixelFuzzyWeight, kUavRead);
+    pass.Read(vxpg.superpixelFuzzyIndex, kUavRead);
+    pass.Read(vxpg.clusterVisibilityMask, kUavRead);
+
+    // Read as root UAVs (root parameters 8-19 of this technique's global signature).
+    pass.Read(vxpg.counters, kUavRead);
+    pass.Read(vxpg.compactIds, kUavRead);
+    pass.Read(vxpg.inverseIndex, kUavRead);
+    pass.Read(vxpg.voxelFingerprints, kUavRead);
+    pass.Read(vxpg.clusterAssignments, kUavRead);
+    pass.Read(vxpg.clusterSeedCompactIds, kUavRead);
+    pass.Read(vxpg.lightTreeNodes, kUavRead);
+    pass.Read(vxpg.lightTreeCompactToLeaf, kUavRead);
+    pass.Read(vxpg.lightTreeClusterRoots, kUavRead);
+    pass.Read(vxpg.superpixelClusterHeap, kUavRead);
+    pass.Read(vxpg.liveBoundMin, kUavRead);
+    pass.Read(vxpg.liveBoundMax, kUavRead);
 }
 
 void GuidedPathTracingPass::AppendPostDispatchNodes(RenderGraph& graph)
@@ -296,4 +334,4 @@ void GuidedPathTracingPass::Render()
     }
 }
 
-REGISTER_RAYTRACE_TECHNIQUE("Guided Path Tracing (VXPG)", GuidedPathTracingPass)
+REGISTER_TECHNIQUE("Guided Path Tracing (VXPG)", GuidedPathTracingPass)

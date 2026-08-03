@@ -1,6 +1,6 @@
 #pragma once
 
-#include "RaytracePass.h"
+#include "DxrPass.h"
 
 class VoxelizationPass;
 
@@ -8,7 +8,7 @@ class VoxelizationPass;
 // bounce per pixel, evaluates direct light at the second path vertex and
 // atomically injects packed scalar irradiance into the voxel grid.
 // Auxiliary pass — not registered as a user-selectable technique.
-class LightInjectionPass : public RaytracePass
+class LightInjectionPass : public DxrPass
 {
 public:
     void SetVoxelizationPass(const std::shared_ptr<VoxelizationPass>& voxelPass) { m_voxelPass = voxelPass; }
@@ -30,9 +30,6 @@ public:
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;
-
-    // No full-screen output buffer — do not clobber shared heap slot 2
-    void CreateRaytracingOutputBuffer() override {}
     void CreateShaderResourceHeap() override;
 
 private:

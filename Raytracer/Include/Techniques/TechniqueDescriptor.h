@@ -35,16 +35,3 @@ struct TechniqueDesc
     uint32_t maxRecursionDepth = 8;
 };
 
-class RaytracePass;
-
-struct TechniqueEntry
-{
-    std::string name;
-    std::function<std::shared_ptr<RaytracePass>()> create;
-};
-
-// Place at file scope in a .cpp alongside the subclass definition.
-// Runs before main() to self-register into RaytracePass::GetRegistry().
-#define REGISTER_RAYTRACE_TECHNIQUE(Name, Class) \
-    static int _reg_##Class = RaytracePass::RegisterTechnique( \
-        Name, []() { return std::make_shared<Class>(); });

@@ -246,7 +246,16 @@
     <ClInclude Include="Include\Primitive.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\RaytracePass.h">
+    <ClInclude Include="Include\DxrPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\DxrTechnique.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\RenderTechnique.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\VxpgGraphHandles.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\ScreenshotManager.h">
@@ -746,7 +755,13 @@
     <ClCompile Include="Source\SceneResources\TungstenLoading.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="Source\RaytracePass.cpp">
+    <ClCompile Include="Source\DxrPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DxrTechnique.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\RenderTechnique.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\ScreenshotManager.cpp">

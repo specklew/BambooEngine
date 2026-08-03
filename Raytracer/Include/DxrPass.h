@@ -3,21 +3,23 @@
 #include "Resources/Texture.h"
 #include "RootSignatureLibrary.h"
 #include "Techniques/TechniqueDescriptor.h"
-#include "RasterDebugMode.h"
-#include "RenderGraph.h"
 
 class PassConstants;
-class Renderer;
 class Scene;
 class ShaderBindingTable;
 class AccelerationStructures;
 
-class RaytracePass
+// A DXR dispatch and everything it takes to build one: shader libraries, hit
+// groups, local and global root signatures, the state object and the SBT. Not a
+// technique — auxiliary passes (VBuffer, light injection) are DXR dispatches the
+// frame needs but the user never selects, so they derive from this directly.
+// A selectable integrator derives from DxrTechnique instead.
+class DxrPass
 {
 public:
-    virtual ~RaytracePass() = default;
+    virtual ~DxrPass() = default;
 
-    void Initialize(
+    virtual void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
         std::shared_ptr<Scene> initialScene,
@@ -25,43 +27,9 @@ public:
 
     virtual void Render();
 
-    // Furthest VXPG pipeline stage this technique needs run before it dispatches.
-    // Default None: most techniques (vanilla path tracing, AO) use no VXPG data.
-    // Whether this technique samples the VXPG subgraph at all. Which of its
-    // stages run is derived by the render graph from the reads the technique
-    // declares, not from a stage order maintained here.
-    virtual bool UsesVoxelGuiding() const { return false; }
-
-    // The technique's own contribution to the frame graph (ADR 0017 phase 5), in
-    // two parts because a node cannot be added while another node's declaration is
-    // still open: what its dispatch touches beyond the frame layout, then the nodes
-    // that run after it. A technique that needs neither places no barriers at all.
-    virtual void DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass) {}
-    virtual void AppendPostDispatchNodes(RenderGraph& graph) {}
-
-    void OnResize();
-    void OnShaderReload();
-    void OnSceneChange(std::shared_ptr<Scene> scene);
-
-    // Debug-view shader variant switch: true compiles the raygen with the
-    // debug-view branches, false picks the clean benchmark variant. Returns
-    // true when the value changed — caller then owes a pipeline rebuild
-    // (Renderer::OnShaderReload; GPU must be idle before the state object swap).
-    bool SetDebugViewsCompiled(bool enabled);
-
-    // One-sample MIS raygen variant (ADR 0015): compiled only while
-    // vxpg.oneSampleMis is on — the estimator code must not ride in (and
-    // codegen-tax) the faithful two-sample build. Same rebuild contract as
-    // SetDebugViewsCompiled. Only the guided technique's GetTechniqueDesc
-    // reads the flag.
-    bool SetOneSampleMisCompiled(bool enabled);
-
-    // Null for auxiliary passes that override CreateRaytracingOutputBuffer empty.
-    Texture* GetOutputTexture() const { return m_outputResource.get(); }
-
-    // Technique registry — populated via REGISTER_RAYTRACE_TECHNIQUE macro
-    static std::vector<TechniqueEntry>& GetRegistry();
-    static int RegisterTechnique(const std::string& name, std::function<std::shared_ptr<RaytracePass>()> factory);
+    virtual void OnResize();
+    virtual void OnShaderReload();
+    virtual void OnSceneChange(std::shared_ptr<Scene> scene);
 
 protected:
     // Subclasses override this to define their shaders, hit groups, and pipeline config.
@@ -81,10 +49,9 @@ protected:
     virtual void InitializeRaytracingPipeline();
     virtual void CreateShaderBindingTable();
 
-    // Output buffer + heap descriptor writes — auxiliary passes without their own
-    // full-screen output (e.g. light injection) override these to skip clobbering
-    // the shared heap's output UAV slot.
-    virtual void CreateRaytracingOutputBuffer();
+    // Descriptor writes into the shared heap. The base writes the TLAS every DXR
+    // pass needs; an override adds its own views and calls up. Also the resize
+    // hook: anything created here is recreated at the new render dimensions.
     virtual void CreateShaderResourceHeap();
 
     // Shared device/command interfaces
@@ -109,8 +76,6 @@ protected:
     // Global root signature
     RootSignature m_globalRootSignature;
 
-    // Output resources
-    std::unique_ptr<Texture>                     m_outputResource;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_cbDescriptorHeap;
 
     std::shared_ptr<ShaderBindingTable> m_shaderBindingTable;

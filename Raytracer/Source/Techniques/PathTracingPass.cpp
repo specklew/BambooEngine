@@ -26,4 +26,4 @@ TechniqueDesc PathTracingPass::GetTechniqueDesc() const
     return desc;
 }
 
-REGISTER_RAYTRACE_TECHNIQUE("Path Tracing", PathTracingPass)
+REGISTER_TECHNIQUE("Path Tracing", PathTracingPass)

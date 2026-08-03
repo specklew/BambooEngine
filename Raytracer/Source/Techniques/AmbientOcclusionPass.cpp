@@ -21,4 +21,4 @@ TechniqueDesc AmbientOcclusionPass::GetTechniqueDesc() const
     return desc;
 }
 
-REGISTER_RAYTRACE_TECHNIQUE("Ambient Occlusion", AmbientOcclusionPass)
+REGISTER_TECHNIQUE("Ambient Occlusion", AmbientOcclusionPass)

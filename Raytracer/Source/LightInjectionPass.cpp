@@ -76,15 +76,7 @@ void LightInjectionPass::CreateGlobalRootSignature()
 
 void LightInjectionPass::CreateShaderResourceHeap()
 {
-    // TLAS only — the main raytrace pass owns the output UAV slot.
-    const D3D12_CPU_DESCRIPTOR_HANDLE srvHandle = GlobalDescriptorHeap::Get().CpuHandle(GlobalDescriptor::Tlas);
-
-    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-    srvDesc.Format                                   = DXGI_FORMAT_UNKNOWN;
-    srvDesc.ViewDimension                            = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
-    srvDesc.Shader4ComponentMapping                  = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srvDesc.RaytracingAccelerationStructure.Location = m_currentScene->GetAccelerationStructures()->GetTopLevelAS().p_result->GetGPUVirtualAddress();
-    m_device->CreateShaderResourceView(nullptr, &srvDesc, srvHandle);
+    DxrPass::CreateShaderResourceHeap();
 
     // ShadingPoints G-buffer (re)created here so window resize (which re-runs
     // CreateShaderResourceHeap) resizes it to the new render dimensions.

@@ -122,7 +122,10 @@
     <ClInclude Include="Include\InputElements.h" />
     <ClInclude Include="Include\pch.h" />
     <ClInclude Include="Include\RasterDebugMode.h" />
-    <ClInclude Include="Include\RaytracePass.h" />
+    <ClInclude Include="Include\DxrPass.h" />
+    <ClInclude Include="Include\DxrTechnique.h" />
+    <ClInclude Include="Include\RenderTechnique.h" />
+    <ClInclude Include="Include\VxpgGraphHandles.h" />
     <ClInclude Include="Include\Techniques\TechniqueDescriptor.h" />
     <ClInclude Include="Include\Techniques\PathTracingPass.h" />
     <ClInclude Include="Include\Techniques\AmbientOcclusionPass.h" />
@@ -395,7 +398,9 @@
     <ClCompile Include="Source\PostProcessPass.cpp" />
     <ClCompile Include="Source\HighResolutionClock.cpp" />
     <ClCompile Include="Source\InputElements.cpp" />
-    <ClCompile Include="Source\RaytracePass.cpp" />
+    <ClCompile Include="Source\DxrPass.cpp" />
+    <ClCompile Include="Source\DxrTechnique.cpp" />
+    <ClCompile Include="Source\RenderTechnique.cpp" />
     <ClCompile Include="Source\Techniques\PathTracingPass.cpp" />
     <ClCompile Include="Source\Techniques\AmbientOcclusionPass.cpp" />
     <ClCompile Include="Source\ScreenshotManager.cpp" />

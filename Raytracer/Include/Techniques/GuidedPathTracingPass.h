@@ -2,7 +2,7 @@
 
 #include "ShaderProgram.h"
 
-#include "RaytracePass.h"
+#include "DxrTechnique.h"
 #include "Resources/RWStructuredBuffer.h"
 
 class VoxelizationPass;
@@ -15,7 +15,7 @@ class VxpgLightTreePass;
 // between BSDF sampling and the voxel irradiance distribution (CDF over
 // compacted voxels, cone sampling toward the chosen voxel). Falls back to a
 // uniform-sphere guide when no guiding data exists.
-class GuidedPathTracingPass : public RaytracePass
+class GuidedPathTracingPass : public DxrTechnique
 {
 public:
     // Wired by the Renderer after construction (registry factory takes no args)
@@ -35,9 +35,6 @@ public:
 
     void Render() override;
 
-    void DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass) override;
-    void AppendPostDispatchNodes(RenderGraph& graph) override;
-
     // Consumes voxelize -> inject -> guiding distribution -> fingerprint ->
     // cluster -> cluster-visibility. Fingerprint/cluster/cvis are required always
     // (not just for debug views 8/9/10): the tree passes consume them and their
@@ -47,6 +44,12 @@ public:
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;
+
+    void DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass) override;
+    void AppendPostDispatchNodes(RenderGraph& graph) override;
+
+private:
+    void DeclareVoxelGuidingReads(RenderGraphPassBuilder& pass) const;
 
 private:
     // Inline-RayQuery compute build of the integrator (ADR 0011), created

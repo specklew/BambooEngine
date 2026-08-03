@@ -14,7 +14,7 @@
 #include "Constants.h"
 #include "FrameAccumulationPass.h"
 #include "StatesManager.h"
-#include "RaytracePass.h"
+#include "RenderTechnique.h"
 #include "SceneResources/Scene.h"
 #include "SceneResources/LightData.h"
 #include "ScreenshotManager.h"
@@ -418,7 +418,7 @@ void EditorUI::DrawSceneSection()
 
 void EditorUI::DrawTechniqueSection()
 {
-	const auto& registry = RaytracePass::GetRegistry();
+	const auto& registry = RenderTechnique::GetRegistry();
 	if (registry.empty())
 		return;
 

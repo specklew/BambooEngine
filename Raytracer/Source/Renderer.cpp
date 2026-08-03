@@ -26,7 +26,7 @@
 #include "Resources/ResourceStateTracker.h"
 #include "SceneResources/ModelLoading.h"
 #include "SceneResources/Primitive.h"
-#include "RaytracePass.h"
+#include "RenderTechnique.h"
 #include "Techniques/PathTracingPass.h"
 #include "ScreenshotManager.h"
 #include "VoxelizationPass.h"
@@ -292,14 +292,16 @@ void Renderer::Initialize()
 
 	ExecuteCommandsAndReset();
 
-	const auto& registry = RaytracePass::GetRegistry();
+	const auto& registry = RenderTechnique::GetRegistry();
+	assert(!registry.empty() && "No render technique registered — check REGISTER_TECHNIQUE static init.");
 	// Default to vanilla path tracing regardless of static-init registration order
 	auto defaultEntry = std::find_if(registry.begin(), registry.end(),
-		[](const TechniqueEntry& e) { return e.name == "Path Tracing"; });
-	if (defaultEntry == registry.end() && !registry.empty())
+		[](const RenderTechnique::Entry& e) { return e.name == "Path Tracing"; });
+	if (defaultEntry == registry.end())
 		defaultEntry = registry.begin();
-	m_raytracePass = (defaultEntry == registry.end()) ? std::make_shared<RaytracePass>() : defaultEntry->create();
-	m_raytracePass->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
+	m_activeTechniqueIndex = static_cast<int>(defaultEntry - registry.begin());
+	m_technique = defaultEntry->create();
+	m_technique->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
 
 	m_accumulationPass = std::make_shared<FrameAccumulationPass>();
 	m_accumulationPass->Initialize(g_device, m_d3d12CommandList);
@@ -446,12 +448,12 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	// OnShaderReload path (flush + pipeline/SBT rebuild), same as F2 — rare.
 	if (!m_rasterize)
 	{
-		const bool viewActive = m_raytracePass->UsesVoxelGuiding()
+		const bool viewActive = m_technique->UsesVoxelGuiding()
 			? g_guidingDebugView.Get() != GuidingDebugView::None
 			: g_raytraceDebugMode.Get() != RaytraceDebugMode::None;
 		const bool wantsDebugViews = viewActive || g_raygenCleanVariant.Get() == 0;
-		bool needsReload = m_raytracePass->SetDebugViewsCompiled(wantsDebugViews);
-		needsReload |= m_raytracePass->SetOneSampleMisCompiled(g_guidingOneSampleMis.Get() != 0);
+		bool needsReload = m_technique->SetDebugViewsCompiled(wantsDebugViews);
+		needsReload |= m_technique->SetOneSampleMisCompiled(g_guidingOneSampleMis.Get() != 0);
 		if (needsReload)
 			OnShaderReload();
 	}
@@ -587,9 +589,22 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	m_renderGraph.MarkExternallyRead(backBufferHandle);
 
 	if (m_rasterize)
+	{
 		BuildRasterGraph(backBufferHandle, depthStencilHandle, frameIndex);
+	}
 	else
-		BuildRaytraceGraph(backBufferHandle, backBuffer);
+	{
+		FrameGraphContext frame;
+		frame.backBuffer      = backBufferHandle;
+		frame.depthStencil    = depthStencilHandle;
+		frame.backBufferRtv   = CD3DX12_CPU_DESCRIPTOR_HANDLE(
+			m_d3d12RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), frameIndex, m_rtvDescriptorSize);
+		frame.depthStencilDsv = m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+		frame.voxelGuiding    = &m_vxpg;
+
+		const GraphResourceHandle techniqueOutput = m_technique->BuildGraph(m_renderGraph, frame);
+		BuildDisplayChain(techniqueOutput, *m_technique->GetOutputTexture(), backBufferHandle, backBuffer);
+	}
 
 	if (!m_headless)
 	{
@@ -697,7 +712,7 @@ void Renderer::OnResize()
 	SetScissorRect();
 	SetViewport();
 
-	m_raytracePass->OnResize();
+	m_technique->OnResize();
 	m_accumulationPass->OnResize();
 	m_postProcessPass->OnResize();
 
@@ -1122,7 +1137,7 @@ void Renderer::LoadScene(const std::wstring& path)
 	CreateIndexSRV();
 	ExecuteCommandsAndReset();
 
-	m_raytracePass->OnSceneChange(m_scene);
+	m_technique->OnSceneChange(m_scene);
 	if (m_vbufferPass)
 		m_vbufferPass->OnSceneChange(m_scene);
 	if (m_lightInjectionPass)
@@ -1138,20 +1153,20 @@ void Renderer::LoadScene(const std::wstring& path)
 
 void Renderer::SetTechniqueByIndex(int index)
 {
-	const auto& registry = RaytracePass::GetRegistry();
+	const auto& registry = RenderTechnique::GetRegistry();
 	if (index < 0 || index >= static_cast<int>(registry.size()))
 		return;
 	spdlog::info("Switching raytracing technique to: {}", registry[index].name);
 	auto newPass = registry[index].create();
 	newPass->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
-	m_raytracePass = std::move(newPass);
+	m_technique = std::move(newPass);
 	m_activeTechniqueIndex = index;
 	WireGuidingResources();
 }
 
 bool Renderer::SetTechnique(const std::string& name)
 {
-	const auto& registry = RaytracePass::GetRegistry();
+	const auto& registry = RenderTechnique::GetRegistry();
 	for (int i = 0; i < static_cast<int>(registry.size()); ++i)
 	{
 		if (registry[i].name == name)
@@ -1166,7 +1181,7 @@ bool Renderer::SetTechnique(const std::string& name)
 std::vector<std::string> Renderer::GetTechniqueNames() const
 {
 	std::vector<std::string> names;
-	for (const auto& entry : RaytracePass::GetRegistry())
+	for (const auto& entry : RenderTechnique::GetRegistry())
 		names.push_back(entry.name);
 	return names;
 }
@@ -1231,7 +1246,7 @@ void Renderer::SetLights(const std::vector<LightData>& lights)
 
 void Renderer::WireGuidingResources()
 {
-	if (auto guided = std::dynamic_pointer_cast<GuidedPathTracingPass>(m_raytracePass))
+	if (auto guided = std::dynamic_pointer_cast<GuidedPathTracingPass>(m_technique))
 		guided->SetGuidingResources(m_voxelizationPass, m_voxelGuidingBuildPass,
 			m_fingerprintPass, m_clusterPass, m_lightTreePass);
 }
@@ -1243,7 +1258,7 @@ bool Renderer::FrameUsesVoxelGuiding() const
 	// too. Which of the declared nodes run is the graph's call.
 	return m_rasterize
 		? RasterDebugViewUsesVoxelGuiding(g_rasterizationDebugMode.Get())
-		: (m_raytracePass && m_raytracePass->UsesVoxelGuiding());
+		: (m_technique && m_technique->UsesVoxelGuiding());
 }
 
 void Renderer::BuildVxpgGraph()
@@ -1738,43 +1753,6 @@ void Renderer::BuildVxpgGraph()
 	}
 }
 
-void Renderer::DeclareGuidingReads(RenderGraphPassBuilder& pass)
-{
-	// Only a guiding technique touches these; a plain path tracer declares nothing
-	// and every VXPG node is culled.
-	if (!m_raytracePass || !m_raytracePass->UsesVoxelGuiding())
-		return;
-
-	constexpr GraphAccess kUavRead = GraphAccess::UnorderedAccessRead;
-
-	// Read through the global descriptor table.
-	pass.Read(m_vxpg.voxelOccupancy, kUavRead);
-	pass.Read(m_vxpg.voxelIrradiance, kUavRead);
-	pass.Read(m_vxpg.voxelVplCount, kUavRead);
-	pass.Read(m_vxpg.voxelRepresentative, kUavRead);
-	pass.Read(m_vxpg.shadingPoints, kUavRead);
-	pass.Read(m_vxpg.vbuffer, kUavRead);
-	pass.Read(m_vxpg.superpixelIndex, kUavRead);
-	pass.Read(m_vxpg.superpixelCenter, kUavRead);
-	pass.Read(m_vxpg.superpixelFuzzyWeight, kUavRead);
-	pass.Read(m_vxpg.superpixelFuzzyIndex, kUavRead);
-	pass.Read(m_vxpg.clusterVisibilityMask, kUavRead);
-
-	// Read as root UAVs (GuidedPathTracingPass root parameters 8-19).
-	pass.Read(m_vxpg.counters, kUavRead);
-	pass.Read(m_vxpg.compactIds, kUavRead);
-	pass.Read(m_vxpg.inverseIndex, kUavRead);
-	pass.Read(m_vxpg.voxelFingerprints, kUavRead);
-	pass.Read(m_vxpg.clusterAssignments, kUavRead);
-	pass.Read(m_vxpg.clusterSeedCompactIds, kUavRead);
-	pass.Read(m_vxpg.lightTreeNodes, kUavRead);
-	pass.Read(m_vxpg.lightTreeCompactToLeaf, kUavRead);
-	pass.Read(m_vxpg.lightTreeClusterRoots, kUavRead);
-	pass.Read(m_vxpg.superpixelClusterHeap, kUavRead);
-	pass.Read(m_vxpg.liveBoundMin, kUavRead);
-	pass.Read(m_vxpg.liveBoundMax, kUavRead);
-}
-
 void Renderer::DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass)
 {
 	// What the active debug view samples is what keeps the VXPG stages behind it
@@ -1840,7 +1818,12 @@ void Renderer::BuildRasterGraph(GraphResourceHandle backBuffer, GraphResourceHan
 		[this, frameIndex]() { DrawScene(frameIndex); });
 }
 
-void Renderer::BuildRaytraceGraph(GraphResourceHandle backBufferHandle, Texture& backBuffer)
+// ADR 0017 step A: the technique -> accumulate -> tonemap -> copy chain declares
+// what it touches and the graph places the barriers. The passes themselves no
+// longer carry any. Everything from accumulation on is technique-independent,
+// which is why it lives here rather than in whatever produced the image.
+void Renderer::BuildDisplayChain(GraphResourceHandle techniqueOutput, Texture& techniqueOutputTexture,
+                                 GraphResourceHandle backBufferHandle, Texture& backBuffer)
 {
 	PostProcessParams postProcessParams;
 	postProcessParams.exposure   = g_exposure.Get();
@@ -1848,39 +1831,21 @@ void Renderer::BuildRaytraceGraph(GraphResourceHandle backBufferHandle, Texture&
 	postProcessParams.saturation = g_saturation.Get();
 	postProcessParams.lift       = g_lift.Get();
 
-	// ADR 0017 step A: the raytrace -> accumulate -> tonemap -> copy chain declares
-	// what it touches and the graph places the barriers. The passes themselves no
-	// longer carry any.
-	Texture& raytraceOutput = *m_raytracePass->GetOutputTexture();
-	const bool accumulate   = g_accumulationEnabled.Get() != 0;
-	Texture& tonemapInput   = accumulate ? m_accumulationPass->GetDisplayBuffer() : raytraceOutput;
+	const bool accumulate = g_accumulationEnabled.Get() != 0;
+	Texture& tonemapInput = accumulate ? m_accumulationPass->GetDisplayBuffer() : techniqueOutputTexture;
 
-	const GraphResourceHandle raytraceOutputHandle = m_renderGraph.Import(raytraceOutput, "Raytrace Output");
-	const GraphResourceHandle tonemapInputHandle   = m_renderGraph.Import(tonemapInput, "Tonemap Input");
-	const GraphResourceHandle tonemapOutputHandle  = m_renderGraph.Import(m_postProcessPass->GetOutputBuffer(), "PostProcess Output");
-
-	m_renderGraph.AddPass("Raytrace Technique",
-		[&](RenderGraphPassBuilder& pass)
-		{
-			pass.Write(raytraceOutputHandle, GraphAccess::ComputeWrite);
-			// A guiding technique reads the VXPG products; this declaration is what
-			// keeps their producers alive through culling.
-			DeclareGuidingReads(pass);
-			m_raytracePass->DeclareDispatchResources(m_renderGraph, pass);
-		},
-		[this]() { m_raytracePass->Render(); });
-
-	m_raytracePass->AppendPostDispatchNodes(m_renderGraph);
+	const GraphResourceHandle tonemapInputHandle  = m_renderGraph.Import(tonemapInput, "Tonemap Input");
+	const GraphResourceHandle tonemapOutputHandle = m_renderGraph.Import(m_postProcessPass->GetOutputBuffer(), "PostProcess Output");
 
 	if (accumulate)
 	{
 		m_renderGraph.AddPass("Accumulation",
 			[&](RenderGraphPassBuilder& pass)
 			{
-				pass.Read(raytraceOutputHandle, GraphAccess::ComputeRead);
+				pass.Read(techniqueOutput, GraphAccess::ComputeRead);
 				pass.Write(tonemapInputHandle, GraphAccess::ComputeWrite);
 			},
-			[this, &raytraceOutput]() { m_accumulationPass->Render(raytraceOutput); });
+			[this, &techniqueOutputTexture]() { m_accumulationPass->Render(techniqueOutputTexture); });
 	}
 
 	m_renderGraph.AddPass("PostProcess",
@@ -2163,7 +2128,7 @@ void Renderer::OnShaderReload()
 	// Every cached compute PSO at once — the VXPG passes hold pointer-stable
 	// programs, so none of them needs its own reload path.
 	ShaderProgramCache::Get().RebuildAll();
-	m_raytracePass->OnShaderReload();
+	m_technique->OnShaderReload();
 	if (m_vbufferPass)
 		m_vbufferPass->OnShaderReload();
 	if (m_lightInjectionPass)
@@ -2344,7 +2309,7 @@ ScreenshotMetadata Renderer::BuildScreenshotMetadata(const std::string& modelNam
         m.cameraFov      = m_camera->GetFovYRadians();
     }
 
-    const auto& registry = RaytracePass::GetRegistry();
+    const auto& registry = RenderTechnique::GetRegistry();
     if (m_activeTechniqueIndex >= 0 && m_activeTechniqueIndex < static_cast<int>(registry.size()))
         m.techniqueName = registry[m_activeTechniqueIndex].name;
 

@@ -5,6 +5,7 @@
 #include "GlobalDescriptorHeap.h"
 #include "GraphicsDevice.h"
 #include "RenderGraph.h"
+#include "RenderTechnique.h"
 #include "RootSignatureLibrary.h"
 #include "Headless.h" // HeadlessConfig
 #include "InputElements.h"
@@ -33,7 +34,6 @@ namespace DirectX
 
 class Camera;
 struct Primitive;
-class RaytracePass;
 class VBufferPass;
 class LightInjectionPass;
 class VoxelGuidingBuildPass;
@@ -143,14 +143,14 @@ private:
 
 	void OnShaderReload();
 	void LoadSkybox(const std::wstring& path);
-	void DeclareGuidingReads(RenderGraphPassBuilder& pass);
 	void DeclareRasterDebugViewReads(RenderGraphPassBuilder& pass);
 
 	// The two halves of a frame, each adding its own nodes to the graph the VXPG
 	// stages were already declared into. Everything that touches the back buffer is
 	// a node, so one Compile()/Execute() covers the whole frame in either mode.
 	void BuildRasterGraph(GraphResourceHandle backBuffer, GraphResourceHandle depthStencil, uint32_t frameIndex);
-	void BuildRaytraceGraph(GraphResourceHandle backBufferHandle, Texture& backBuffer);
+	void BuildDisplayChain(GraphResourceHandle techniqueOutput, Texture& techniqueOutputTexture,
+	                       GraphResourceHandle backBufferHandle, Texture& backBuffer);
 	void BindBackBufferTarget(uint32_t frameIndex) const;
 	void DrawScene(uint32_t frameIndex);
 
@@ -164,53 +164,9 @@ private:
 	void BuildVxpgGraph();
 	bool FrameUsesVoxelGuiding() const;
 
-	// Handles for this frame's VXPG resources, refreshed by BuildVxpgGraph.
-	// Imports last one frame, so these are re-acquired every Render().
-	struct VxpgGraphHandles
-	{
-		GraphResourceHandle vbuffer              = InvalidGraphResource;
-		GraphResourceHandle shadingPoints        = InvalidGraphResource;
-		GraphResourceHandle voxelRepresentative  = InvalidGraphResource;
-		GraphResourceHandle vplPosition          = InvalidGraphResource;
-		GraphResourceHandle voxelOccupancy       = InvalidGraphResource;
-		GraphResourceHandle bakedBoundMin        = InvalidGraphResource;
-		GraphResourceHandle bakedBoundMax        = InvalidGraphResource;
-		GraphResourceHandle voxelIrradiance      = InvalidGraphResource;
-		GraphResourceHandle voxelVplCount        = InvalidGraphResource;
-		GraphResourceHandle counters             = InvalidGraphResource;
-		GraphResourceHandle compactIds           = InvalidGraphResource;
-		GraphResourceHandle inverseIndex         = InvalidGraphResource;
-		GraphResourceHandle compactLightPoints   = InvalidGraphResource;
-		GraphResourceHandle premulIrradiance     = InvalidGraphResource;
-		GraphResourceHandle liveBoundMin         = InvalidGraphResource;
-		GraphResourceHandle liveBoundMax         = InvalidGraphResource;
-		GraphResourceHandle voxelFingerprints    = InvalidGraphResource;
-		GraphResourceHandle screenRepresentatives = InvalidGraphResource;
-		GraphResourceHandle guidingDispatchArgs   = InvalidGraphResource;
-		GraphResourceHandle clusterAssignments   = InvalidGraphResource;
-		GraphResourceHandle clusterSeedCompactIds = InvalidGraphResource;
-		GraphResourceHandle clusterCenters        = InvalidGraphResource;
-		GraphResourceHandle superpixelIndex      = InvalidGraphResource;
-		GraphResourceHandle superpixelCenter     = InvalidGraphResource;
-		GraphResourceHandle superpixelCounter    = InvalidGraphResource;
-		GraphResourceHandle superpixelGathered   = InvalidGraphResource;
-		GraphResourceHandle superpixelFuzzyWeight = InvalidGraphResource;
-		GraphResourceHandle superpixelFuzzyIndex  = InvalidGraphResource;
-		GraphResourceHandle clusterVisibilityMask = InvalidGraphResource;
-		GraphResourceHandle avgVisibility        = InvalidGraphResource;
-		GraphResourceHandle clusterGatheredLightPoints = InvalidGraphResource;
-		GraphResourceHandle clusterLightPointCounts    = InvalidGraphResource;
-		GraphResourceHandle lightTreeNodes       = InvalidGraphResource;
-		GraphResourceHandle lightTreeCompactToLeaf = InvalidGraphResource;
-		GraphResourceHandle lightTreeClusterRoots  = InvalidGraphResource;
-		GraphResourceHandle lightTreeSortKeys      = InvalidGraphResource;
-		GraphResourceHandle lightTreeDispatchArgs  = InvalidGraphResource;
-		GraphResourceHandle lightTreeNodeVisited   = InvalidGraphResource;
-		GraphResourceHandle superpixelClusterHeap  = InvalidGraphResource;
-	};
 	VxpgGraphHandles m_vxpg;
 
-	std::shared_ptr<RaytracePass> m_raytracePass;
+	std::shared_ptr<RenderTechnique> m_technique;
 	std::shared_ptr<VBufferPass> m_vbufferPass;
 	std::shared_ptr<LightInjectionPass> m_lightInjectionPass;
 	std::shared_ptr<FrameAccumulationPass> m_accumulationPass;
