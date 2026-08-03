@@ -29,6 +29,7 @@ enum class GlobalDescriptor : uint32_t
     ClusterVisibilityMask,
     FuzzyWeight,
     FuzzyIndex,
+    DebugViewOutput, // painted by DebugViewPass, copied to the back buffer
     Count
 };
 
@@ -55,6 +56,7 @@ inline constexpr uint32_t GlobalDescriptorSlotCounts[] = {
     1,                                 // ClusterVisibilityMask
     1,                                 // FuzzyWeight
     1,                                 // FuzzyIndex
+    1,                                 // DebugViewOutput
 };
 
 static_assert(std::size(GlobalDescriptorSlotCounts) == static_cast<size_t>(GlobalDescriptor::Count), "Every GlobalDescriptor needs a slot count");

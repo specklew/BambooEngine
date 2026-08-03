@@ -36,32 +36,12 @@ constexpr BindingSlot kCamera =
     PassTableEntry("CameraParams", BindingKind::Cbv, RASTER_REG_CAMERA_CB, GlobalDescriptor::CameraMatrices);
 constexpr BindingSlot kTextures = PassTableEntry("gTextures", BindingKind::Srv, RASTER_REG_TEXTURES,
                                                  GlobalDescriptor::MaterialTextures, FRAME_MAX_TEXTURES);
-// One entry per register rather than contiguous runs: each carries its own name
-// for reflection validation, and each names its own heap slot instead of relying
-// on the enum happening to be adjacent.
-constexpr BindingSlot kVoxelOccupancy =
-    PassTableEntry("gVoxelOccupancy", BindingKind::Uav, RASTER_REG_VOXEL_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
-constexpr BindingSlot kVoxelIrradiance =
-    PassTableEntry("gVoxelIrradiance", BindingKind::Uav, RASTER_REG_VOXEL_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
-constexpr BindingSlot kVoxelVplCount =
-    PassTableEntry("gVoxelVplCount", BindingKind::Uav, RASTER_REG_VOXEL_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
-constexpr BindingSlot kShadingPoints = PassTableEntry("gShadingPoints", BindingKind::Uav, RASTER_REG_SHADING_POINTS,
-                                                      GlobalDescriptor::ShadingPoints); // debug overlay
-// superpixel index + representative center (debug views 15/16)
-constexpr BindingSlot kSuperpixelIndex =
-    PassTableEntry("gSuperpixelIndex", BindingKind::Uav, RASTER_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex);
-constexpr BindingSlot kSuperpixelCenter =
-    PassTableEntry("gSuperpixelCenter", BindingKind::Uav, RASTER_REG_SUPERPIXEL_CENTER, GlobalDescriptor::SuperpixelCenter);
-
 constexpr BindingSlot kModelConstants     = PassCbv("ModelTransforms", RASTER_REG_MODEL_CB);
 constexpr BindingSlot kMaterialConstants  = PassCbv("Material", RASTER_REG_MATERIAL_CB);
-constexpr BindingSlot kPassConstants      = RootCbv("PassConstants", FRAME_REG_PASS_CONSTANTS);
-constexpr BindingSlot kVoxelGridConstants = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
+constexpr BindingSlot kPassConstants     = RootCbv("PassConstants", FRAME_REG_PASS_CONSTANTS);
 
 constexpr BindingSlot kRasterSlots[] = {
-    kCamera,         kTextures,          kVoxelOccupancy,  kVoxelIrradiance,
-    kVoxelVplCount,  kShadingPoints,     kSuperpixelIndex, kSuperpixelCenter,
-    kModelConstants, kMaterialConstants, kPassConstants,   kVoxelGridConstants};
+    kCamera, kTextures, kModelConstants, kMaterialConstants, kPassConstants};
 } // namespace
 
 void RasterizationTechnique::SetFrameTargetFormats(DXGI_FORMAT backBufferFormat, DXGI_FORMAT depthStencilFormat)
@@ -134,9 +114,11 @@ void RasterizationTechnique::CreatePipelineState()
     m_pipelineStateObject = pso;
 }
 
+// Surface views read the material and the interpolated vertex data, nothing the
+// VXPG chain produces — every buffer view moved to DebugViewPass.
 bool RasterizationTechnique::UsesVoxelGuiding() const
 {
-    return RasterDebugViewUsesVoxelGuiding(g_rasterizationDebugMode.Get());
+    return false;
 }
 
 int RasterizationTechnique::GetDebugMode() const
@@ -146,7 +128,7 @@ int RasterizationTechnique::GetDebugMode() const
 
 std::vector<RenderTechnique::DebugView> RasterizationTechnique::GetDebugViews() const
 {
-    return BuildDebugViews<RasterDebugMode>(kRasterDebugModeDocs);
+    return WithBufferViews(BuildDebugViews<RasterDebugMode>(kRasterDebugModeDocs));
 }
 
 bool RasterizationTechnique::SetDebugView(int index)
@@ -160,8 +142,6 @@ bool RasterizationTechnique::SetDebugView(int index)
 
 GraphResourceHandle RasterizationTechnique::BuildGraph(RenderGraph& graph, const FrameGraphContext& frame)
 {
-    const VxpgGraphHandles& vxpg = *frame.voxelGuiding;
-
     // Raytracing overwrites the whole back buffer with the present copy and draws
     // no geometry, so both clears only exist on this path (measured 2026-08-01,
     // ABeautifulGame 3 s Debug: PT 3151 -> 3276 frames without them).
@@ -178,42 +158,11 @@ GraphResourceHandle RasterizationTechnique::BuildGraph(RenderGraph& graph, const
         {
             pass.Write(frame.backBuffer, GraphAccess::RenderTarget);
             pass.Write(frame.depthStencil, GraphAccess::DepthWrite);
-            DeclareDebugViewReads(pass, vxpg);
         },
         [this, frame]() { DrawScene(frame); });
 
     // The back buffer already holds the image; the frame needs no display chain.
     return InvalidGraphResource;
-}
-
-void RasterizationTechnique::DeclareDebugViewReads(RenderGraphPassBuilder& pass, const VxpgGraphHandles& vxpg) const
-{
-    constexpr GraphAccess kUavRead = GraphAccess::UnorderedAccessRead;
-
-    switch (g_rasterizationDebugMode.Get())
-    {
-    case RasterDebugMode::VoxelOccupancy:
-    case RasterDebugMode::Supervoxels:
-        pass.Read(vxpg.voxelOccupancy, kUavRead);
-        break;
-    case RasterDebugMode::VoxelIrradiance:
-        pass.Read(vxpg.voxelIrradiance, kUavRead);
-        pass.Read(vxpg.voxelVplCount, kUavRead);
-        break;
-    case RasterDebugMode::ShadingPointsNormal:
-    case RasterDebugMode::ShadingPointsPos:
-        pass.Read(vxpg.shadingPoints, kUavRead);
-        break;
-    case RasterDebugMode::SuperpixelId:
-        pass.Read(vxpg.superpixelIndex, kUavRead);
-        break;
-    case RasterDebugMode::SuperpixelRepresentative:
-        pass.Read(vxpg.superpixelIndex, kUavRead);
-        pass.Read(vxpg.superpixelCenter, kUavRead);
-        break;
-    default:
-        break;
-    }
 }
 
 void RasterizationTechnique::Clear(const FrameGraphContext& frame) const
@@ -236,10 +185,6 @@ void RasterizationTechnique::DrawScene(const FrameGraphContext& frame) const
     commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 
     m_rootSignature.Set(commandList, kPassConstants, m_passConstants->GetGpuVirtualAddress());
-
-    if (m_voxelPass)
-        m_rootSignature.Set(commandList, kVoxelGridConstants,
-                            m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
 
     for (const auto& go : m_scene->GetGameObjects())
     {

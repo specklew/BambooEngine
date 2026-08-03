@@ -14,14 +14,7 @@ enum class RasterDebugMode : int
 	Tangents = 5,
 	UVs = 6,
 	Roughness = 7,
-	VoxelOccupancy = 8,
-	VoxelIrradiance = 9,
-	Supervoxels = 10,
-	ShadingPointsNormal = 11,
-	ShadingPointsPos = 12,
 	TangentHealth = 13,
-	SuperpixelId = 15,
-	SuperpixelRepresentative = 16,
 };
 
 // Runtime docs, one per enum entry in order (FormatDebugViewDocs static_asserts the count).
@@ -34,40 +27,10 @@ inline constexpr DebugViewDoc kRasterDebugModeDocs[] = {
 	{"tangent import / mikktspace", "smooth RGB direction colors following UV seams", "outputs the vertex tangent"},
 	{"UV unwrap", "red-green gradients per chart, no distortion", "outputs texcoords as RG"},
 	{"roughness texture", "grayscale: dark = smooth, bright = rough", "outputs the roughness channel"},
-	{"VoxelizationPass", "geometry-conforming voxel shell, checkerboard colors", "shades surfaces whose voxel is occupied"},
-	{"LightInjectionPass irradiance", "heat ramp bright on lit surfaces, dark in shadow", "reads injected voxel irradiance at the surface voxel"},
-	{"grid-cell supervoxels (analytic)", "coarse colored blocks over geometry", "hash-colors voxelCoord / supervoxelFactor at the surface voxel"},
-	{"LightInjectionPass ShadingPoints G-buffer",
-	 "same direction colors as WorldNormals, black where primary ray missed",
-	 "decodes the octahedral normal from the ShadingPoints texture"},
-	{"LightInjectionPass ShadingPoints G-buffer", "world-position gradient, black where primary ray missed", "visualizes ShadingPoints.xyz scaled into color"},
 	{"tangent quality (NaN regression sentinel)",
 	 "all green; red = tangent parallel to normal, magenta = NaN",
 	 "flags degenerate tangent frames that produced the blue-artifact bug"},
-	{"SuperpixelPass (SLIC)", "~32px mosaic cells hugging geometry edges", "hash-colors the per-pixel superpixel id"},
-	{"SuperpixelPass (SLIC)", "mosaic of direction colors, one normal per cell", "paints each pixel with its superpixel's representative normal"},
-};
-
-// A raster debug view is the only raster consumer of the VXPG subgraph; this says
-// whether the active view reads any of it at all. Which stages actually run is
-// derived by the render graph from the reads the view declares (Renderer's
-// "Raster Draw" node), not from a hand-maintained stage order.
-inline bool RasterDebugViewUsesVoxelGuiding(RasterDebugMode mode)
-{
-	switch (mode)
-	{
-	case RasterDebugMode::VoxelOccupancy:
-	case RasterDebugMode::Supervoxels:
-	case RasterDebugMode::SuperpixelId:
-	case RasterDebugMode::SuperpixelRepresentative:
-	case RasterDebugMode::VoxelIrradiance:
-	case RasterDebugMode::ShadingPointsNormal:
-	case RasterDebugMode::ShadingPointsPos:
-		return true;
-	default:
-		return false;
-	}
-}
+	};
 
 #else // HLSL
 

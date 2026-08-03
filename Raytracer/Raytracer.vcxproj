@@ -122,6 +122,8 @@
     <ClInclude Include="Include\InputElements.h" />
     <ClInclude Include="Include\pch.h" />
     <ClInclude Include="Include\RasterDebugMode.h" />
+    <ClInclude Include="Include\BufferDebugView.h" />
+    <ClInclude Include="Include\DebugViewPass.h" />
     <ClInclude Include="Include\DxrPass.h" />
     <ClInclude Include="Include\DxrTechnique.h" />
     <ClInclude Include="Include\RasterizationTechnique.h" />
@@ -399,6 +401,7 @@
     <ClCompile Include="Source\PostProcessPass.cpp" />
     <ClCompile Include="Source\HighResolutionClock.cpp" />
     <ClCompile Include="Source\InputElements.cpp" />
+    <ClCompile Include="Source\DebugViewPass.cpp" />
     <ClCompile Include="Source\DxrPass.cpp" />
     <ClCompile Include="Source\DxrTechnique.cpp" />
     <ClCompile Include="Source\RasterizationTechnique.cpp" />

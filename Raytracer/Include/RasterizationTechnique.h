@@ -2,8 +2,6 @@
 #include "RenderTechnique.h"
 #include "RootSignatureLibrary.h"
 
-class VoxelizationPass;
-
 // Traditional vertex/pixel pipeline over the scene's meshes, drawing straight
 // into the back buffer. A peer of the raytracing integrators rather than a mode
 // the renderer switches into: it registers, it declares nodes, and it is culled
@@ -13,7 +11,6 @@ class RasterizationTechnique : public RenderTechnique
 public:
     // Must be called before Initialize — the pipeline state bakes the formats in.
     void SetFrameTargetFormats(DXGI_FORMAT backBufferFormat, DXGI_FORMAT depthStencilFormat);
-    void SetVoxelizationPass(const std::shared_ptr<VoxelizationPass>& voxelPass) { m_voxelPass = voxelPass; }
 
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5> device,
@@ -37,10 +34,6 @@ private:
     void CreateRootSignature();
     void CreatePipelineState();
 
-    // What the active debug view samples is what keeps the VXPG stages behind it
-    // alive: the draw declares its reads, and culling derives the rest.
-    void DeclareDebugViewReads(RenderGraphPassBuilder& pass, const VxpgGraphHandles& vxpg) const;
-
     void Clear(const FrameGraphContext& frame) const;
     void DrawScene(const FrameGraphContext& frame) const;
 
@@ -55,7 +48,6 @@ private:
     DXGI_FORMAT m_backBufferFormat   = DXGI_FORMAT_R8G8B8A8_UNORM;
     DXGI_FORMAT m_depthStencilFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 
-    std::shared_ptr<Scene>            m_scene;
-    std::shared_ptr<PassConstants>    m_passConstants;
-    std::shared_ptr<VoxelizationPass> m_voxelPass;
+    std::shared_ptr<Scene>         m_scene;
+    std::shared_ptr<PassConstants> m_passConstants;
 };

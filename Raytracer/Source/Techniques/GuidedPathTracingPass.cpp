@@ -95,7 +95,7 @@ bool IsAmdDevice(ID3D12Device* device)
 
 std::vector<RenderTechnique::DebugView> GuidedPathTracingPass::GetDebugViews() const
 {
-    return BuildDebugViews<GuidingDebugView>(kGuidingDebugViewDocs);
+    return WithBufferViews(BuildDebugViews<GuidingDebugView>(kGuidingDebugViewDocs));
 }
 
 bool GuidedPathTracingPass::SetDebugView(int index)

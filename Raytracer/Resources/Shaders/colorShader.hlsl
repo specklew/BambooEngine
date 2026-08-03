@@ -41,41 +41,7 @@ Texture2D gTextures[MAX_TEXTURES] : BAMBOO_PASS_SRV(RASTER_REG_TEXTURES);
 
 ByteAddressBuffer g_indices : BAMBOO_PASS_SRV(RASTER_REG_INDICES);
 
-RWTexture3D<uint> gVoxelOccupancy  : BAMBOO_PASS_UAV(RASTER_REG_VOXEL_OCCUPANCY);
-RWTexture3D<uint> gVoxelIrradiance : BAMBOO_PASS_UAV(RASTER_REG_VOXEL_IRRADIANCE);
-RWTexture3D<uint> gVoxelVplCount   : BAMBOO_PASS_UAV(RASTER_REG_VOXEL_VPL_COUNT);
-RWTexture2D<float4> gShadingPoints : BAMBOO_PASS_UAV(RASTER_REG_SHADING_POINTS); // VXPG primary G-buffer (pos, octaN)
-
-// Stage A supervoxel cluster output (debug view 14 reads these). Bound as root UAVs.
-
-// Stage B superpixel outputs (debug views 15/16).
-RWTexture2D<int>    gSuperpixelIndex  : BAMBOO_PASS_UAV(RASTER_REG_SUPERPIXEL_INDEX); // per-pixel superpixel id (screen res)
-RWTexture2D<float4> gSuperpixelCenter : BAMBOO_PASS_UAV(RASTER_REG_SUPERPIXEL_CENTER); // representative pos + octaN (map res)
-
-cbuffer VoxelGridCB : BAMBOO_PASS_CBV(REG_VOXEL_GRID_CB)
-{
-    float3 voxGridMin;
-    float  voxVoxelSize;
-    float3 voxGridMax;
-    uint   voxGridDim;
-    uint   voxInjectUseAvg;
-    uint   voxSupervoxelFactor;
-    float  voxHeatScale;
-    uint   _voxPad0;
-}
-
-// Black -> red -> yellow -> white heat ramp, t in [0, 1]
-float3 HeatColor(float t)
-{
-    t = saturate(t);
-    float3 c;
-    c.r = saturate(t * 3.0);
-    c.g = saturate(t * 3.0 - 1.0);
-    c.b = saturate(t * 3.0 - 2.0);
-    return c;
-}
-
-#include "DebugViews.hlsl" // after voxel resources, VoxelGridCB, HeatColor
+#include "DebugViews.hlsl" // after DebugData; buffer views live in DebugViewPass now
 
 struct VertexIn
 {
@@ -195,7 +161,7 @@ float4 pixel(VertexOut pin) : SV_Target
     debugData.worldNormalNaN = (worldNormal.x != worldNormal.x) ? 1.0 : 0.0;
 
     float4 debugResult;
-    if (TryDebugView(debugMode, debugData, pin.PosW, pin.ScreenUV, debugResult))
+    if (TryDebugView(debugMode, debugData, debugResult))
         return debugResult;
 
     // PBR shading

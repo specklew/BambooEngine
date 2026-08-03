@@ -26,6 +26,7 @@
 #include "Resources/ResourceStateTracker.h"
 #include "SceneResources/ModelLoading.h"
 #include "SceneResources/Primitive.h"
+#include "DebugViewPass.h"
 #include "RasterizationTechnique.h"
 #include "RenderTechnique.h"
 #include "Techniques/PathTracingPass.h"
@@ -264,6 +265,9 @@ void Renderer::Initialize()
 	m_postProcessPass = std::make_shared<PostProcessPass>();
 	m_postProcessPass->Initialize(g_device, m_d3d12CommandList);
 
+	m_debugViewPass = std::make_shared<DebugViewPass>();
+	m_debugViewPass->Initialize(g_device, m_d3d12CommandList);
+
 	m_screenshotManager = std::make_shared<ScreenshotManager>();
 	m_screenshotManager->Initialize(g_device, m_d3d12CommandList);
 
@@ -271,6 +275,7 @@ void Renderer::Initialize()
 	m_voxelizationPass->Initialize(g_device, m_d3d12CommandList);
 
 	WriteVoxelUavsToGlobalHeap();
+	m_debugViewPass->SetVoxelizationPass(m_voxelizationPass);
 
 	m_voxelizationPass->OnSceneLoaded(*m_scene);
 
@@ -551,10 +556,17 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	frame.depthStencilDsv = m_d3d12DSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
 	frame.voxelGuiding    = &m_vxpg;
 
+	// A buffer view paints the frame from the VXPG products alone, so the
+	// technique is skipped outright rather than rendered and thrown away
+	// (ADR 0017 phase 5b).
+	if (DebugViewPass::IsActive())
+	{
+		BuildBufferDebugChain(backBufferHandle, backBuffer);
+	}
 	// A technique that renders offscreen hands its image back here; one that drew
 	// straight into the back buffer returns nothing and needs no display chain.
-	const GraphResourceHandle techniqueOutput = m_technique->BuildGraph(m_renderGraph, frame);
-	if (techniqueOutput != InvalidGraphResource)
+	else if (const GraphResourceHandle techniqueOutput = m_technique->BuildGraph(m_renderGraph, frame);
+	         techniqueOutput != InvalidGraphResource)
 		BuildDisplayChain(techniqueOutput, *m_technique->GetOutputTexture(), backBufferHandle, backBuffer);
 	else if (m_screenshotManager->IsCaptureDue())
 	{
@@ -681,6 +693,7 @@ void Renderer::OnResize()
 	m_technique->OnResize();
 	m_accumulationPass->OnResize();
 	m_postProcessPass->OnResize();
+	m_debugViewPass->OnResize();
 
 	// Recreate the ShadingPoints G-buffer at the new resolution. Without this it
 	// stays at its init size while injection dispatches at the live resolution,
@@ -1114,7 +1127,7 @@ std::vector<RenderTechnique::DebugView> Renderer::GetTechniqueDebugViews() const
 
 bool Renderer::SetTechniqueDebugView(int index)
 {
-	return m_technique && m_technique->SetDebugView(index);
+	return m_technique && RenderTechnique::SelectDebugView(*m_technique, index);
 }
 
 std::vector<std::string> Renderer::GetStateNames() const
@@ -1184,7 +1197,6 @@ void Renderer::WireTechniqueResources(const std::shared_ptr<RenderTechnique>& te
 	if (auto raster = std::dynamic_pointer_cast<RasterizationTechnique>(technique))
 	{
 		raster->SetFrameTargetFormats(m_backBufferFormat, m_depthStencilFormat);
-		raster->SetVoxelizationPass(m_voxelizationPass);
 	}
 }
 
@@ -1193,7 +1205,9 @@ bool Renderer::FrameUsesVoxelGuiding() const
 	// One bit, not a stage ladder: it only gates whether the VXPG subgraph is
 	// declared at all, so a frame that cannot use it skips the resize/import work
 	// too. Which of the declared nodes run is the graph's call.
-	return m_technique && m_technique->UsesVoxelGuiding();
+	// A buffer view needs the chain whatever the technique thinks, and it is the
+	// only consumer that frame.
+	return DebugViewPass::IsActive() || (m_technique && m_technique->UsesVoxelGuiding());
 }
 
 void Renderer::BuildVxpgGraph()
@@ -1211,7 +1225,10 @@ void Renderer::BuildVxpgGraph()
 	// Same reasoning one level up: only a technique that traces GI paths has
 	// anything to reuse. Rasterization reaches here for its VXPG debug views and
 	// traces nothing, so reuse would leave the irradiance grid permanently zero.
+	// A buffer view skips the integrator, so nothing would write the VPLs reuse
+	// waits for — same reasoning as ProducesGuidingVpls, one level further out.
 	const bool reuseGiVpl = g_injectionReuseGi.Get() != 0 &&
+		!DebugViewPass::IsActive() &&
 		m_technique->ProducesGuidingVpls() &&
 		(g_guidingDebugView.Get() == GuidingDebugView::None ||
 		 g_guidingDebugView.Get() == GuidingDebugView::SymmetricBsdfBaseline);
@@ -1749,6 +1766,41 @@ void Renderer::BuildDisplayChain(GraphResourceHandle techniqueOutput, Texture& t
 			{
 				m_screenshotManager->RecordCopy(m_postProcessPass->GetOutputBuffer().GetUnderlyingResource());
 			});
+	}
+}
+
+// The whole frame when a buffer view is up: the VXPG stages the view samples,
+// the paint, and the copy out. No integrator, no accumulation, no tone mapping —
+// a false-colour image must not be graded, and the technique has nothing to say.
+void Renderer::BuildBufferDebugChain(GraphResourceHandle backBufferHandle, Texture& backBuffer)
+{
+	Texture& debugOutput = m_debugViewPass->GetOutputBuffer();
+	const GraphResourceHandle debugOutputHandle = m_renderGraph.Import(debugOutput, "Debug View Output");
+
+	m_renderGraph.AddPass("Debug View Paint",
+		[&](RenderGraphPassBuilder& pass)
+		{
+			m_debugViewPass->DeclareGraphResources(pass, debugOutputHandle, m_vxpg);
+		},
+		[this]() { m_debugViewPass->Dispatch(); });
+
+	m_renderGraph.AddPass("Debug View Present",
+		[&](RenderGraphPassBuilder& pass)
+		{
+			pass.Read(debugOutputHandle, GraphAccess::CopySource);
+			pass.Write(backBufferHandle, GraphAccess::CopyDestination);
+		},
+		[this, &backBuffer]() { m_debugViewPass->CopyToBackBuffer(backBuffer); });
+
+	if (m_screenshotManager->IsCaptureDue())
+	{
+		m_renderGraph.AddPass("Screenshot Readback",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.NeverCull();
+				pass.Read(debugOutputHandle, GraphAccess::CopySource);
+			},
+			[this, &debugOutput]() { m_screenshotManager->RecordCopy(debugOutput.GetUnderlyingResource()); });
 	}
 }
 

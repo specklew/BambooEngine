@@ -48,6 +48,7 @@ namespace
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32_UINT },                // ClusterVisibilityMask
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // FuzzyWeight
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_SINT },       // FuzzyIndex
+        { NullViewKind::UavTexture2D, DXGI_FORMAT_R8G8B8A8_UNORM },          // DebugViewOutput
     };
 
     static_assert(std::size(NullViews) == static_cast<size_t>(GlobalDescriptor::Count), "Every GlobalDescriptor needs a null view definition");

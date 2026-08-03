@@ -246,6 +246,12 @@
     <ClInclude Include="Include\Primitive.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\BufferDebugView.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\DebugViewPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\DxrPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -756,6 +762,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\SceneResources\TungstenLoading.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\DebugViewPass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="Source\DxrPass.cpp">

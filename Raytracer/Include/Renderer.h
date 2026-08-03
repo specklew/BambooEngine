@@ -44,6 +44,7 @@ class VxpgLightTreePass;
 class SuperpixelBuildPass;
 class FrameAccumulationPass;
 class PostProcessPass;
+class DebugViewPass;
 class AccelerationStructures;
 class ScreenshotManager;
 class StatesManager;
@@ -148,6 +149,8 @@ private:
 	// covers the whole frame whichever technique produced it.
 	void BuildDisplayChain(GraphResourceHandle techniqueOutput, Texture& techniqueOutputTexture,
 	                       GraphResourceHandle backBufferHandle, Texture& backBuffer);
+	// Replaces the display chain outright while a buffer debug view is selected.
+	void BuildBufferDebugChain(GraphResourceHandle backBufferHandle, Texture& backBuffer);
 	void BindBackBufferTarget(uint32_t frameIndex) const;
 
 	void DumpRenderGraphIfRequested();
@@ -170,6 +173,7 @@ private:
 	std::shared_ptr<LightInjectionPass> m_lightInjectionPass;
 	std::shared_ptr<FrameAccumulationPass> m_accumulationPass;
 	std::shared_ptr<PostProcessPass> m_postProcessPass;
+	std::shared_ptr<DebugViewPass> m_debugViewPass;
 	std::shared_ptr<ScreenshotManager> m_screenshotManager;
 	std::vector<std::shared_ptr<AccelerationStructures>> m_accelerationStructures;
 

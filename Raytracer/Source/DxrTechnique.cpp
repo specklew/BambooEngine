@@ -21,7 +21,7 @@ bool DxrTechnique::HasActiveDebugView() const
 
 std::vector<RenderTechnique::DebugView> DxrTechnique::GetDebugViews() const
 {
-    return BuildDebugViews<RaytraceDebugMode>(kRaytraceDebugModeDocs);
+    return WithBufferViews(BuildDebugViews<RaytraceDebugMode>(kRaytraceDebugModeDocs));
 }
 
 bool DxrTechnique::SetDebugView(int index)

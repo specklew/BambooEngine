@@ -27,6 +27,19 @@
 #define REG_VOXEL_GRID_CB 0 // b
 
 // ---------------------------------------------------------------------------
+// DebugViewPass — debugViewPaint.hlsl. Reads VXPG products off the global heap
+// and paints one full-screen image; no technique state, so it runs under any.
+// ---------------------------------------------------------------------------
+#define DEBUG_VIEW_REG_CB                 1 // b (b0 is REG_VOXEL_GRID_CB)
+#define DEBUG_VIEW_REG_OUTPUT             0 // u
+#define DEBUG_VIEW_REG_SHADING_POINTS     1 // u
+#define DEBUG_VIEW_REG_VOXEL_OCCUPANCY    2 // u
+#define DEBUG_VIEW_REG_VOXEL_IRRADIANCE   3 // u
+#define DEBUG_VIEW_REG_VOXEL_VPL_COUNT    4 // u
+#define DEBUG_VIEW_REG_SUPERPIXEL_INDEX   5 // u
+#define DEBUG_VIEW_REG_SUPERPIXEL_CENTER  6 // u
+
+// ---------------------------------------------------------------------------
 // FrameAccumulationPass — accumulation.hlsl
 // ---------------------------------------------------------------------------
 #define ACCUM_REG_CURRENT 0 // t

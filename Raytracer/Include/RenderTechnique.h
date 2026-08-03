@@ -79,11 +79,21 @@ public:
     // checked without a human at the window; the UI shows `doc` as a tooltip so
     // the expected image is readable at the point of choosing it.
     struct DebugView { int index; std::string name; std::string doc; };
+
+    // The shared buffer views live above this, so a technique's own enumeration
+    // and the technique-independent one can share a list without colliding.
+    static constexpr int kBufferViewIndexBase = 1000;
+
     virtual std::vector<DebugView> GetDebugViews() const { return { {0, "None", ""} }; }
 
     // Selects one of the views above. Indices belong to this technique's own
     // enumeration, so a value from another technique's list is rejected.
     virtual bool SetDebugView(int index) { return index == 0; }
+
+    // Appends the buffer views every technique can show (ADR 0017 phase 5b) to a
+    // technique's own list, and routes a pick back to whichever owns it.
+    static std::vector<DebugView> WithBufferViews(std::vector<DebugView> own);
+    static bool SelectDebugView(RenderTechnique& technique, int index);
 
     virtual void OnResize() {}
     virtual void OnShaderReload() {}
