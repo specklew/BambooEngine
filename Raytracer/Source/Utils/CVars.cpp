@@ -238,12 +238,23 @@ public:
 		return &float3CVars;
 	}
 
+	// Every type keeps its own array and a CVarParameter's arrayIndex indexes only
+	// its own. Without this check GetFloatCVar on an int CVar happily returns a
+	// pointer into the float array at the int's index — a non-null pointer to an
+	// unrelated CVar, which is how "--cvar someIntCVar=2" used to silently write a
+	// float somewhere else and leave the int alone.
+	template <typename T> constexpr CVarType CVarTypeOf() const;
+	template <> constexpr CVarType CVarTypeOf<int32_t>() const           { return CVarType::Int; }
+	template <> constexpr CVarType CVarTypeOf<float>() const             { return CVarType::Float; }
+	template <> constexpr CVarType CVarTypeOf<std::string>() const       { return CVarType::String; }
+	template <> constexpr CVarType CVarTypeOf<DirectX::XMFLOAT3>() const { return CVarType::Float3; }
+
 	//templated get-set cvar versions for syntax sugar
 	template <typename T>
 	T* GetCVarCurrent(StringId namehash)
 	{
 		CVarParameter* par = GetCVar(namehash);
-		if (!par)
+		if (!par || par->type != CVarTypeOf<T>())
 		{
 			return nullptr;
 		}
@@ -268,7 +279,7 @@ public:
 	void SetCVarCurrent(StringId namehash, const T& value)
 	{
 		CVarParameter* cvar = GetCVar(namehash);
-		if (cvar)
+		if (cvar && cvar->type == CVarTypeOf<T>())
 		{
 			GetCVarArray<T>()->SetCurrent(value, cvar->arrayIndex);
 		}
