@@ -43,12 +43,10 @@ public:
     RWStructuredBuffer<DirectX::XMUINT4>*  GetGuidingDispatchArgsBuffer() const { return m_guidingDispatchArgs.get(); }
 
 private:
-    // Rebinds the ShadingPoints UAV if injection recreated it; false = cannot run.
+    // False = the pass cannot run this frame (no G-buffer yet).
     bool IsRunnable();
 
     void CreateBuffers();
-    void CreatePrivateHeap();
-    void RebindShadingPointsIfChanged();
     void CreateRootSignatures();
     void CreatePSOs();
     void CreateCommandSignature();
@@ -61,10 +59,6 @@ private:
     std::unique_ptr<RWStructuredBuffer<DirectX::XMFLOAT4>> m_screenRepresentativePoints;
     std::unique_ptr<RWStructuredBuffer<DirectX::XMUINT4>>  m_guidingDispatchArgs;
     std::unique_ptr<RWStructuredBuffer<uint32_t>>          m_voxelFingerprints;
-
-    // Private heap slot 0 = ShadingPoints UAV (presample reads it).
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descHeap;
-    ID3D12Resource* m_boundShadingPoints = nullptr;
 
     RootSignature m_presampleRootSig;
     RootSignature m_visibilityRootSig;

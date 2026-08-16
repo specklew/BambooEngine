@@ -58,7 +58,6 @@ public:
     Microsoft::WRL::ComPtr<ID3D12Resource> GetIrradianceTexture() const { return m_irradianceTex; }
     Microsoft::WRL::ComPtr<ID3D12Resource> GetVplCountTexture() const { return m_vplCountTex; }
     Microsoft::WRL::ComPtr<ID3D12Resource> GetGridConstantsBuffer() const { return m_gridConstantsCB; }
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> GetDescriptorHeap() const { return m_descHeap; } // [0]=occupancy [1]=irradiance [2]=vpl count
     uint32_t GetGridDim() const { return m_gridDim; }
     const VoxelGridConstants&              GetGridConstants() const { return m_gridConstants; }
 
@@ -74,7 +73,6 @@ private:
     void CreateResources();
     void CreateRootSignatures();
     void CreatePSOs();
-    void CreateDescriptorHeap();
     void WriteGridConstantsCB();
     void WriteUintTex3DUav(ID3D12Resource* resource, D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
     void RecreateForNewDim(uint32_t newDim);
@@ -98,8 +96,6 @@ private:
     ComputeProgram* m_bakeClearProgram = nullptr;
     RootSignature m_bakeRootSig;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_bakePso;
-
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descHeap; // [0]=occupancy UAV [1]=irradiance UAV [2]=vpl count UAV
 
     uint32_t m_gridDim     = 64;
     bool     m_initialized = false;

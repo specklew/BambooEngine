@@ -25,19 +25,18 @@ using Microsoft::WRL::ComPtr;
 namespace
 {
 // Three signatures: the per-frame accumulator clear, the bake-time clear, and
-// the bake draw itself. All three address this pass's private heap.
+// the bake draw itself. All three address the three voxel textures at the global
+// heap slots the renderer writes when the grid is created or resized.
 constexpr BindingSlot kFrameClearConstants = PassRootConstants("ClearCB", VOXEL_FRAME_CLEAR_REG_CB, 4);
-// Offsets are relative to the pointer DispatchFrameClear hands SetTable, which
-// is already advanced past the occupancy slot — not to the heap start.
 constexpr BindingSlot kFrameClearIrradiance =
-    PassTableEntryAt("gIrradiance", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_IRRADIANCE, 0);
+    PassTableEntry("gIrradiance", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
 constexpr BindingSlot kFrameClearVplCount =
-    PassTableEntryAt("gVplCount", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_VPL_COUNT, 1);
+    PassTableEntry("gVplCount", BindingKind::Uav, VOXEL_FRAME_CLEAR_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
 constexpr BindingSlot kFrameClearSlots[] = {kFrameClearConstants, kFrameClearIrradiance, kFrameClearVplCount};
 
 constexpr BindingSlot kBakeClearConstants = PassRootConstants("ClearCB", VOXEL_BAKE_CLEAR_REG_CB, 4);
 constexpr BindingSlot kBakeClearOccupancy =
-    PassTableEntryAt("gOccupancy", BindingKind::Uav, VOXEL_BAKE_CLEAR_REG_OCCUPANCY, 0);
+    PassTableEntry("gOccupancy", BindingKind::Uav, VOXEL_BAKE_CLEAR_REG_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
 constexpr BindingSlot kBakeClearBoundMin = PassUav("gBakedBoundMin", VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MIN);
 constexpr BindingSlot kBakeClearBoundMax = PassUav("gBakedBoundMax", VOXEL_BAKE_CLEAR_REG_BAKED_BOUND_MAX);
 constexpr BindingSlot kBakeClearSlots[] = {kBakeClearConstants, kBakeClearOccupancy, kBakeClearBoundMin,
@@ -46,7 +45,8 @@ constexpr BindingSlot kBakeClearSlots[] = {kBakeClearConstants, kBakeClearOccupa
 constexpr BindingSlot kBakeGridConstants  = PassCbv("VoxelGridCB", VOXEL_BAKE_REG_GRID_CB);
 constexpr BindingSlot kBakeModelConstants = PassCbv("ModelTransforms", VOXEL_BAKE_REG_MODEL_CB);
 constexpr BindingSlot kBakeAxisConstants  = PassRootConstants("BakeCB", VOXEL_BAKE_REG_AXIS_CB, 4); // axis + bound flags
-constexpr BindingSlot kBakeOccupancy = PassTableEntryAt("gOccupancy", BindingKind::Uav, VOXEL_BAKE_REG_OCCUPANCY, 0);
+constexpr BindingSlot kBakeOccupancy =
+    PassTableEntry("gOccupancy", BindingKind::Uav, VOXEL_BAKE_REG_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
 constexpr BindingSlot kBakeBoundMin  = PassUav("gBakedBoundMin", VOXEL_BAKE_REG_BAKED_BOUND_MIN);
 constexpr BindingSlot kBakeBoundMax  = PassUav("gBakedBoundMax", VOXEL_BAKE_REG_BAKED_BOUND_MAX);
 constexpr BindingSlot kBakeSlots[] = {kBakeGridConstants, kBakeModelConstants, kBakeAxisConstants, kBakeOccupancy,
@@ -72,7 +72,6 @@ void VoxelizationPass::Initialize(ComPtr<ID3D12Device5> device, ComPtr<ID3D12Gra
     }
 
     CreateResources();
-    CreateDescriptorHeap();
     CreateRootSignatures();
     CreatePSOs();
 
@@ -137,24 +136,6 @@ void VoxelizationPass::CreateResources()
         CD3DX12_RANGE readRange(0, 0);
         ThrowIfFailed(m_gridConstantsCB->Map(0, &readRange, &m_gridConstantsCBMapped));
     }
-}
-
-void VoxelizationPass::CreateDescriptorHeap()
-{
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.NumDescriptors = 3; // occupancy + irradiance + vpl count
-    heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_descHeap)));
-
-    UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE handle(m_descHeap->GetCPUDescriptorHandleForHeapStart());
-
-    WriteUintTex3DUav(m_occupancyTex.Get(), handle);
-    handle.Offset(1, inc);
-    WriteUintTex3DUav(m_irradianceTex.Get(), handle);
-    handle.Offset(1, inc);
-    WriteUintTex3DUav(m_vplCountTex.Get(), handle);
 }
 
 void VoxelizationPass::CreateRootSignatures()
@@ -270,12 +251,10 @@ void VoxelizationPass::RecreateForNewDim(uint32_t newDim)
     m_occupancyTex.Reset();
     m_irradianceTex.Reset();
     m_vplCountTex.Reset();
-    m_descHeap.Reset();
     m_bakedBoundMin.reset();
     m_bakedBoundMax.reset();
 
     CreateResources();
-    CreateDescriptorHeap();
     m_didResize = true;
     m_bakeValid = false;
 }
@@ -331,19 +310,15 @@ void VoxelizationPass::WriteGridConstantsCB()
 
 void VoxelizationPass::DispatchFrameClear()
 {
-    ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
+    GlobalDescriptorHeap& globalHeap = GlobalDescriptorHeap::Get();
+    ID3D12DescriptorHeap* heaps[] = { globalHeap.GetHeap() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetComputeRootSignature(m_clearRootSig.Get());
     m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
 
     uint32_t clearParams[4] = { m_gridDim, 0, 0, 0 };
     m_clearRootSig.SetConstants(m_commandList.Get(), kFrameClearConstants, clearParams, 4);
-
-    // Table starts at heap slot 1 (irradiance); covers irradiance + vpl count.
-    UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    D3D12_GPU_DESCRIPTOR_HANDLE table = m_descHeap->GetGPUDescriptorHandleForHeapStart();
-    table.ptr += inc;
-    m_clearRootSig.SetTable(m_commandList.Get(), 0, table);
+    m_clearRootSig.SetTable(m_commandList.Get(), 0, globalHeap.GpuStart());
 
     const uint32_t groups = (m_gridDim + 7) / 8;
     CommandContext::Get().Dispatch(groups, groups, groups);
@@ -351,14 +326,15 @@ void VoxelizationPass::DispatchFrameClear()
 
 void VoxelizationPass::DispatchBakeClear()
 {
-    ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
+    GlobalDescriptorHeap& globalHeap = GlobalDescriptorHeap::Get();
+    ID3D12DescriptorHeap* heaps[] = { globalHeap.GetHeap() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetComputeRootSignature(m_bakeClearRootSig.Get());
     m_commandList->SetPipelineState(m_bakeClearProgram->GetPipelineState());
 
     uint32_t clearParams[4] = { m_gridDim, 0, 0, 0 };
     m_bakeClearRootSig.SetConstants(m_commandList.Get(), kBakeClearConstants, clearParams, 4);
-    m_bakeClearRootSig.SetTable(m_commandList.Get(), 0, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_bakeClearRootSig.SetTable(m_commandList.Get(), 0, globalHeap.GpuStart());
     m_bakeClearRootSig.Set(m_commandList.Get(), kBakeClearBoundMin, m_bakedBoundMin->GetGPUVirtualAddress());
     m_bakeClearRootSig.Set(m_commandList.Get(), kBakeClearBoundMax, m_bakedBoundMax->GetGPUVirtualAddress());
 
@@ -371,7 +347,8 @@ void VoxelizationPass::DispatchBake(const Scene& scene)
     spdlog::info("VoxelizationPass: baking geometry (gridDim={}, useCompact={}, clipping={})",
         m_gridDim, m_bakedUseCompact, m_bakedClipping);
 
-    ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
+    GlobalDescriptorHeap& globalHeap = GlobalDescriptorHeap::Get();
+    ID3D12DescriptorHeap* heaps[] = { globalHeap.GetHeap() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetGraphicsRootSignature(m_bakeRootSig.Get());
     m_commandList->SetPipelineState(m_bakePso.Get());
@@ -383,7 +360,7 @@ void VoxelizationPass::DispatchBake(const Scene& scene)
     m_commandList->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
 
     m_bakeRootSig.Set(m_commandList.Get(), kBakeGridConstants, m_gridConstantsCB->GetGPUVirtualAddress());
-    m_bakeRootSig.SetTable(m_commandList.Get(), 0, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_bakeRootSig.SetTable(m_commandList.Get(), 0, globalHeap.GpuStart());
     m_bakeRootSig.Set(m_commandList.Get(), kBakeBoundMin, m_bakedBoundMin->GetGPUVirtualAddress());
     m_bakeRootSig.Set(m_commandList.Get(), kBakeBoundMax, m_bakedBoundMax->GetGPUVirtualAddress());
 

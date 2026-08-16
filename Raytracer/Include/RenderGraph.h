@@ -74,6 +74,30 @@ public:
     void AddPass(const char* name, const std::function<void(RenderGraphPassBuilder&)>& declare,
                  std::function<void()> execute);
 
+    // Where a synthesized transition is placed (ADR 0017 phase 6b). Compile()
+    // knows the whole frame before it emits anything, so a transition is legal
+    // anywhere between the node that last touched the resource and the node that
+    // needs the new state — nothing in between may touch it, by construction.
+    //
+    //   Consumer — immediately before the node that needs it (phases 3-6a).
+    //   Earliest — immediately after the previous access, so the drain the
+    //              barrier forces happens ahead of the intervening nodes instead
+    //              of behind them.
+    //   Split    — BEGIN at the earliest legal point, END before the consumer, so
+    //              the driver may overlap the transition with whatever runs in
+    //              between. This is the placement the phase-6b lever is about;
+    //              the other two exist to measure it against.
+    //
+    // Transitions only. A UAV barrier carries no state change to overlap, so
+    // hoisting one only moves its drain earlier — it stays at its consumer.
+    enum class BarrierPlacement
+    {
+        Consumer,
+        Earliest,
+        Split,
+    };
+    void SetBarrierPlacement(BarrierPlacement placement) { m_barrierPlacement = placement; }
+
     // Culls, then synthesizes the barrier plan. Advances the phase-0 tracker, so
     // every Compile() must be followed by exactly one Execute().
     void Compile();
@@ -194,8 +218,19 @@ private:
 
     void Cull();
 
+    // Puts a synthesized transition into a slot's batch according to the placement
+    // mode, and returns the slot it (or its BEGIN half) landed in.
+    uint32_t PlaceTransition(const D3D12_RESOURCE_BARRIER& barrier, ID3D12Resource* resource,
+                             uint32_t earliestSlot, uint32_t consumerSlot);
+
+    [[nodiscard]] std::string DescribePlacement(uint32_t placedSlot, uint32_t consumerSlot) const;
+
     // Two timestamps per node; the cap is the node budget one frame may time.
     static constexpr uint32_t kMaxTimedPasses = 64;
+
+    // "This resource has not been touched yet this frame", so the earliest legal
+    // point for its first barrier is the top of the frame.
+    static constexpr uint32_t kNoSlot = UINT32_MAX;
 
     // How long a UavUsage entry outlives its last touch. Frame pacing keeps the
     // CPU under NUM_FRAMES frames ahead, so work older than that has completed on
@@ -215,6 +250,7 @@ private:
     std::vector<CompiledPass>     m_compiled;
     std::vector<std::string>      m_barrierLog;
     bool                          m_logBarriers = false;
+    BarrierPlacement              m_barrierPlacement = BarrierPlacement::Consumer;
 
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timerQueryHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource>  m_timerReadback;

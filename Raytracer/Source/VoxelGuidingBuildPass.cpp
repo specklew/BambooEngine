@@ -14,15 +14,17 @@ using Microsoft::WRL::ComPtr;
 
 namespace
 {
-// The three voxel textures live in this pass's private heap; everything else is
-// a root descriptor. All three kernels share the layout.
+// The three voxel textures are read out of the global heap, at the same slots
+// their producers (voxelization, light injection) write; everything else is a
+// root descriptor. All three kernels share the layout.
 constexpr BindingSlot kGuidingBuildConstants = PassRootConstants("BuildCB", GUIDING_BUILD_REG_CB, 4);
 constexpr BindingSlot kGuidingBuildIrradiance =
-    PassTableEntryAt("gVoxIrradiance", BindingKind::Uav, GUIDING_BUILD_REG_IRRADIANCE, 0);
+    PassTableEntry("gVoxIrradiance", BindingKind::Uav, GUIDING_BUILD_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance);
 constexpr BindingSlot kGuidingBuildVplCount =
-    PassTableEntryAt("gVoxVplCount", BindingKind::Uav, GUIDING_BUILD_REG_VPL_COUNT, 1);
+    PassTableEntry("gVoxVplCount", BindingKind::Uav, GUIDING_BUILD_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount);
 constexpr BindingSlot kGuidingBuildRepresentative =
-    PassTableEntryAt("gVoxelRepresentative", BindingKind::Uav, GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE, 2);
+    PassTableEntry("gVoxelRepresentative", BindingKind::Uav, GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE,
+                   GlobalDescriptor::VoxelRepresentative);
 constexpr BindingSlot kGuidingBuildCounters      = PassUav("gCounters", GUIDING_BUILD_REG_COUNTERS);
 constexpr BindingSlot kGuidingBuildCompactIds    = PassUav("gCompactIds", GUIDING_BUILD_REG_COMPACT_IDS);
 constexpr BindingSlot kGuidingBuildInverseIndex  = PassUav("gInverseIndex", GUIDING_BUILD_REG_INVERSE_INDEX);
@@ -53,7 +55,6 @@ void VoxelGuidingBuildPass::Initialize(
     m_voxelPass   = std::move(voxelPass);
 
     CreateBuffers();
-    CreateDescriptorHeap();
     CreateRootSignature();
     CreatePSOs();
 
@@ -91,50 +92,6 @@ void VoxelGuidingBuildPass::OnVoxelGridResize()
     if (!m_initialized)
         return;
     CreateGridSizedBuffers();
-    // Force a descriptor rebind: the voxel textures were recreated too.
-    m_boundIrradiance = nullptr;
-    m_boundVplCount = nullptr;
-    m_boundRepresentative = nullptr;
-}
-
-void VoxelGuidingBuildPass::CreateDescriptorHeap()
-{
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.NumDescriptors = 3; // irradiance + vpl count + representative VPL
-    heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_descHeap)));
-    m_descHeap->SetName(L"VoxelGuidingBuild Heap");
-}
-
-void VoxelGuidingBuildPass::RebindDescriptorsIfChanged(ID3D12Resource* representativeTex)
-{
-    ID3D12Resource* irradiance = m_voxelPass->GetIrradianceTexture().Get();
-    ID3D12Resource* vplCount   = m_voxelPass->GetVplCountTexture().Get();
-    if (irradiance == m_boundIrradiance && vplCount == m_boundVplCount &&
-        representativeTex == m_boundRepresentative)
-        return;
-
-    UINT inc = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE handle(m_descHeap->GetCPUDescriptorHandleForHeapStart());
-
-    m_voxelPass->WriteIrradianceUavTo(handle);
-    handle.Offset(1, inc);
-    m_voxelPass->WriteVplCountUavTo(handle);
-    handle.Offset(1, inc);
-
-    if (representativeTex)
-    {
-        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format          = DXGI_FORMAT_R32G32B32A32_FLOAT;
-        uavDesc.ViewDimension   = D3D12_UAV_DIMENSION_TEXTURE3D;
-        uavDesc.Texture3D.WSize = m_voxelPass->GetGridDim();
-        m_device->CreateUnorderedAccessView(representativeTex, nullptr, &uavDesc, handle);
-    }
-
-    m_boundIrradiance     = irradiance;
-    m_boundVplCount       = vplCount;
-    m_boundRepresentative = representativeTex;
 }
 
 void VoxelGuidingBuildPass::CreateRootSignature()
@@ -161,18 +118,17 @@ bool VoxelGuidingBuildPass::BindCommon()
     if (!m_initialized || !m_voxelPass)
         return false;
 
-    RebindDescriptorsIfChanged(m_representativeTex);
-
     const uint32_t gridDim = m_voxelPass->GetGridDim();
 
-    ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
+    GlobalDescriptorHeap& globalHeap = GlobalDescriptorHeap::Get();
+    ID3D12DescriptorHeap* heaps[] = { globalHeap.GetHeap() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetComputeRootSignature(m_rootSig.Get());
 
     uint32_t constants[4] = { gridDim, 0, 0, 0 };
     auto* cmd = m_commandList.Get();
     m_rootSig.SetConstants(cmd, kGuidingBuildConstants, constants, 4);
-    m_rootSig.SetTable(cmd, 0, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_rootSig.SetTable(cmd, 0, globalHeap.GpuStart());
     m_rootSig.Set(cmd, kGuidingBuildCounters, m_counters->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kGuidingBuildCompactIds, m_compactIds->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kGuidingBuildInverseIndex, m_inverseIndex->GetGPUVirtualAddress());

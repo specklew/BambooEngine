@@ -22,11 +22,7 @@ public:
         std::shared_ptr<VoxelizationPass>                  voxelPass);
 
     // One graph node per kernel, so the hazards between them come from the
-    // declarations instead of hand-placed barriers. representativeTex is the
-    // injection pass's per-voxel representative VPL Texture3D, re-bound into the
-    // private heap when it changes (recreated on resize); the renderer hands it
-    // over once per frame and every kernel binds from there.
-    void SetRepresentativeTexture(ID3D12Resource* representativeTex) { m_representativeTex = representativeTex; }
+    // declarations instead of hand-placed barriers.
     void RunClear();
     void RunReload();
     void RunCompact();
@@ -47,8 +43,6 @@ public:
 private:
     void CreateBuffers();
     void CreateGridSizedBuffers();
-    void CreateDescriptorHeap();
-    void RebindDescriptorsIfChanged(ID3D12Resource* representativeTex);
     void CreateRootSignature();
     void CreatePSOs();
 
@@ -68,13 +62,6 @@ private:
     std::unique_ptr<RWStructuredBuffer<DirectX::XMUINT4>> m_liveBoundMax; // grid-sized
     std::unique_ptr<RWStructuredBuffer<DirectX::XMFLOAT4>> m_compactVoxelLightPoints; // SIByL u_RepresentVPL
     std::unique_ptr<RWStructuredBuffer<float>>    m_premulIrradiance;
-
-    // Private heap: [0]=irradiance [1]=vpl count [2]=representative VPL tex.
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_descHeap;
-    ID3D12Resource* m_boundIrradiance     = nullptr; // raw: change detection only
-    ID3D12Resource* m_boundVplCount       = nullptr;
-    ID3D12Resource* m_boundRepresentative = nullptr;
-    ID3D12Resource* m_representativeTex   = nullptr; // owned by the injection pass
 
     RootSignature m_rootSig;
     ComputeProgram* m_clearProgram = nullptr;

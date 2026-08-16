@@ -24,7 +24,8 @@ namespace
     // the two slot tables share register numbers but nothing else.
     constexpr BindingSlot kPresampleConstants = PassRootConstants("PresampleCB", FINGERPRINT_PRESAMPLE_REG_CB, 4);
     constexpr BindingSlot kPresampleShadingPoints =
-        PassTableEntryAt("gShadingPoints", BindingKind::Uav, FINGERPRINT_PRESAMPLE_REG_SHADING_POINTS, 0);
+        PassTableEntry("gShadingPoints", BindingKind::Uav, FINGERPRINT_PRESAMPLE_REG_SHADING_POINTS,
+                       GlobalDescriptor::ShadingPoints);
     constexpr BindingSlot kPresampleRepresentatives =
         PassUav("gScreenRepresentativePoints", FINGERPRINT_PRESAMPLE_REG_REPRESENTATIVES);
     constexpr BindingSlot kPresampleDispatchArgs = PassUav("gGuidingDispatchArgs", FINGERPRINT_PRESAMPLE_REG_DISPATCH_ARGS);
@@ -68,7 +69,6 @@ void VxpgFingerprintPass::Initialize(
     m_injectionPass = std::move(injectionPass);
 
     CreateBuffers();
-    CreatePrivateHeap();
     CreateRootSignatures();
     CreatePSOs();
     CreateCommandSignature();
@@ -86,31 +86,6 @@ void VxpgFingerprintPass::CreateBuffers()
         m_device, kDispatchArgsEntries, L"Fingerprint GuidingDispatchArgs");
     m_voxelFingerprints = std::make_unique<RWStructuredBuffer<uint32_t>>(
         m_device, capacity * kFingerprintMaskWords, L"Fingerprint VoxelFingerprints");
-}
-
-void VxpgFingerprintPass::CreatePrivateHeap()
-{
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.NumDescriptors = 1; // ShadingPoints UAV
-    heapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_descHeap)));
-    m_descHeap->SetName(L"VxpgFingerprint Heap");
-}
-
-void VxpgFingerprintPass::RebindShadingPointsIfChanged()
-{
-    ID3D12Resource* shadingPoints =
-        m_injectionPass ? m_injectionPass->GetShadingPointsTexture().Get() : nullptr;
-    if (!shadingPoints || shadingPoints == m_boundShadingPoints)
-        return;
-
-    D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
-    uav.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
-    uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(shadingPoints, nullptr, &uav,
-        m_descHeap->GetCPUDescriptorHandleForHeapStart());
-    m_boundShadingPoints = shadingPoints;
 }
 
 void VxpgFingerprintPass::CreateRootSignatures()
@@ -166,8 +141,10 @@ bool VxpgFingerprintPass::IsRunnable()
     if (!m_initialized || !m_buildPass || !m_injectionPass || m_width == 0 || m_height == 0)
         return false;
 
-    RebindShadingPointsIfChanged();
-    return m_boundShadingPoints != nullptr;
+    // The G-buffer this pass stratifies over is the injection pass's, bound out of
+    // the global heap slot injection itself writes — so the only thing left to
+    // check is that it exists.
+    return m_injectionPass->GetShadingPointsTexture() != nullptr;
 }
 
 // Kernel 1: pick 128 stratified screen representatives and emit the dispatch args
@@ -179,14 +156,15 @@ void VxpgFingerprintPass::RunPresample(uint32_t frameIndex)
 
     auto* cmd = m_commandList.Get();
 
-    ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
+    GlobalDescriptorHeap& globalHeap = GlobalDescriptorHeap::Get();
+    ID3D12DescriptorHeap* heaps[] = { globalHeap.GetHeap() };
     cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
     cmd->SetComputeRootSignature(m_presampleRootSig.Get());
     uint32_t presampleConstants[4] = { m_width, m_height,
         PcgHash(frameIndex), 0u };
     m_presampleRootSig.SetConstants(cmd, kPresampleConstants, presampleConstants, 4);
-    m_presampleRootSig.SetTable(cmd, 0, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+    m_presampleRootSig.SetTable(cmd, 0, globalHeap.GpuStart());
     m_presampleRootSig.Set(cmd, kPresampleRepresentatives, m_screenRepresentativePoints->GetGPUVirtualAddress());
     m_presampleRootSig.Set(cmd, kPresampleDispatchArgs, m_guidingDispatchArgs->GetGPUVirtualAddress());
     m_presampleRootSig.Set(cmd, kPresampleCounters, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
@@ -209,10 +187,8 @@ void VxpgFingerprintPass::RunVisibility(D3D12_GPU_VIRTUAL_ADDRESS tlasVa)
     if (!IsRunnable() || tlasVa == 0)
         return;
 
+    // No descriptor heap: this signature is all root descriptors (tableCount 0).
     auto* cmd = m_commandList.Get();
-
-    ID3D12DescriptorHeap* heaps[] = { m_descHeap.Get() };
-    cmd->SetDescriptorHeaps(_countof(heaps), heaps);
 
     cmd->SetComputeRootSignature(m_visibilityRootSig.Get());
     m_visibilityRootSig.Set(cmd, kVisibilityTlas, tlasVa);

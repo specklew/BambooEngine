@@ -106,6 +106,13 @@ static AutoCVarInt   g_dumpRenderGraph("rdg.dump", "Log the next frame's render 
 // and benchmark runs must measure the renderer, not the instrumentation.
 static AutoCVarInt   g_renderGraphTimings("rdg.timings", "Measure each render-graph node on the GPU (ImGui: Render Graph)", 0, CVarFlags::EditCheckbox);
 
+// ADR 0017 phase 6b. 0 = the phase-3 placement (barrier immediately before its
+// consumer), 1 = hoisted to the earliest legal point, 2 = split BEGIN/END across
+// the nodes in between. All three are legal; which is fastest is a measurement,
+// so the default only moves once the A/B says so.
+static AutoCVarInt   g_barrierPlacement("rdg.barrierPlacement",
+	"Transition placement: 0 = at consumer, 1 = earliest legal, 2 = split begin/end", 0, CVarFlags::EditDrag, 0, 2);
+
 // Restores the pre-phase-6a frame: a full GPU drain after every Present, so no
 // frame overlaps another. Kept as a debugging switch because it is the fastest
 // way to tell a cross-frame race from anything else — if a symptom disappears
@@ -531,6 +538,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	m_renderGraph.Reset();
 	m_renderGraph.SetBarrierLogging(g_dumpRenderGraph.Get() != 0);
 	m_renderGraph.SetTimingEnabled(g_renderGraphTimings.Get() != 0);
+	m_renderGraph.SetBarrierPlacement(
+		static_cast<RenderGraph::BarrierPlacement>(std::clamp(g_barrierPlacement.Get(), 0, 2)));
 	BuildVxpgGraph();
 
 	SetViewport();
@@ -1391,9 +1400,6 @@ void Renderer::BuildVxpgGraph()
 	// between them comes from these declarations rather than hand-placed barriers.
 	if (m_voxelGuidingBuildPass)
 	{
-		m_voxelGuidingBuildPass->SetRepresentativeTexture(
-			m_lightInjectionPass ? m_lightInjectionPass->GetVoxelRepresentativeTexture().Get() : nullptr);
-
 		m_renderGraph.AddPass("VXPG GuidingBuild Clear",
 			[&](RenderGraphPassBuilder& pass) { pass.Write(m_vxpg.counters, kUavWrite); },
 			[this]() { m_voxelGuidingBuildPass->RunClear(); });

@@ -195,6 +195,10 @@ void RenderGraph::Cull()
     }
 }
 
+// Two passes (ADR 0017 phase 6b). The first fixes the frame's node order, so the
+// second knows the whole timeline and can place a transition anywhere between the
+// node that last touched the resource and the node that needs the new state,
+// instead of only immediately before the consumer.
 void RenderGraph::Compile()
 {
     m_compiled.clear();
@@ -202,21 +206,40 @@ void RenderGraph::Compile()
 
     Cull();
 
+    // Pass one: the surviving nodes, in submission order. Barriers land in these
+    // slots by index, which is what lets pass two write backwards.
     for (uint32_t index = 0; index < m_passes.size(); ++index)
     {
-        PassNode& pass = m_passes[index];
-        if (pass.culled)
+        if (m_passes[index].culled)
             continue;
 
         CompiledPass compiled;
         compiled.passIndex = index;
-        compiled.queue     = pass.queue;
+        compiled.queue     = m_passes[index].queue;
+        m_compiled.push_back(std::move(compiled));
+    }
+
+    // Pass two: synthesize and place. Declarations are still walked in submission
+    // order, so the phase-0 tracker sees exactly the sequence it always did.
+    std::vector<uint32_t> lastAccessSlot(m_resources.size(), kNoSlot);
+
+    for (uint32_t slot = 0; slot < m_compiled.size(); ++slot)
+    {
+        PassNode& pass = m_passes[m_compiled[slot].passIndex];
 
         for (const auto& declaration : pass.declarations)
         {
             assert(declaration.resource < m_resources.size() && "Declared resource was never imported");
             ImportedResource& imported = m_resources[declaration.resource];
             const D3D12_RESOURCE_STATES required = ToResourceState(declaration.access);
+
+            // Earliest legal point: the slot after the previous access. Clamped to
+            // the consumer, which covers both a resource declared twice by one node
+            // and a producer that is the immediately preceding node. kNoSlot means
+            // the previous access was in an earlier frame, so the top of this one is
+            // legal.
+            const uint32_t previous = lastAccessSlot[declaration.resource];
+            const uint32_t earliest = (previous == kNoSlot) ? 0u : std::min(previous + 1, slot);
 
             bool emittedTransition = false;
             if (imported.tracked)
@@ -226,15 +249,16 @@ void RenderGraph::Compile()
                 const D3D12_RESOURCE_STATES before = imported.tracked->GetTrackedState().state;
                 if (before != required)
                 {
-                    compiled.barriers.push_back({
-                        ResourceStateTracker::Get().BuildTransitionChecked(*imported.tracked, before, required),
-                        imported.raw});
+                    const D3D12_RESOURCE_BARRIER barrier =
+                        ResourceStateTracker::Get().BuildTransitionChecked(*imported.tracked, before, required);
+                    const uint32_t placed = PlaceTransition(barrier, imported.raw, earliest, slot);
                     emittedTransition = true;
 
                     if (m_logBarriers)
                         m_barrierLog.push_back(pass.name + ": " + imported.debugName + " " +
                                                ResourceStateConversion::ToString(before) + " -> " +
-                                               ResourceStateConversion::ToString(required));
+                                               ResourceStateConversion::ToString(required) +
+                                               DescribePlacement(placed, slot));
                 }
             }
             else
@@ -254,12 +278,16 @@ void RenderGraph::Compile()
             //
             // A never-seen resource defaults to neither, so its first declaration
             // emits nothing — there is no producer to order against.
+            //
+            // Placed at the consumer whatever the mode: a UAV barrier changes no
+            // state, so there is nothing for an earlier placement to overlap with —
+            // it would only move the drain in front of the nodes in between.
             UavUsage&  usage      = m_uavUsage[underlying];
             const bool afterWrite = usage.writtenSinceLastRead;
             const bool afterRead  = usage.readSinceLastWrite && declaration.isWrite;
             if (!emittedTransition && required == D3D12_RESOURCE_STATE_UNORDERED_ACCESS && (afterWrite || afterRead))
             {
-                compiled.barriers.push_back({CD3DX12_RESOURCE_BARRIER::UAV(underlying), underlying});
+                m_compiled[slot].barriers.push_back({CD3DX12_RESOURCE_BARRIER::UAV(underlying), underlying});
 
                 if (m_logBarriers)
                     m_barrierLog.push_back(pass.name + ": UAV " + imported.debugName +
@@ -269,10 +297,54 @@ void RenderGraph::Compile()
             usage.writtenSinceLastRead = declaration.isWrite;
             usage.readSinceLastWrite   = !declaration.isWrite;
             usage.lastTouchedFrame     = m_frameCounter;
-        }
 
-        m_compiled.push_back(std::move(compiled));
+            lastAccessSlot[declaration.resource] = slot;
+        }
     }
+}
+
+// Returns the slot the barrier (or its BEGIN half) went to, for the log.
+uint32_t RenderGraph::PlaceTransition(const D3D12_RESOURCE_BARRIER& barrier, ID3D12Resource* resource,
+                                      uint32_t earliestSlot, uint32_t consumerSlot)
+{
+    // Nothing to gain from a split or a hoist when the producer is the node right
+    // before the consumer — there is no work in between to overlap with.
+    if (m_barrierPlacement == BarrierPlacement::Consumer || earliestSlot == consumerSlot)
+    {
+        m_compiled[consumerSlot].barriers.push_back({barrier, resource});
+        return consumerSlot;
+    }
+
+    if (m_barrierPlacement == BarrierPlacement::Earliest)
+    {
+        m_compiled[earliestSlot].barriers.push_back({barrier, resource});
+        return earliestSlot;
+    }
+
+    // Split. The resource must not be touched between the two halves, which the
+    // earliest-legal interval guarantees: it is bounded by its own producer and
+    // consumer. Both halves are recorded into the one command list the graph
+    // executes into, so the pair can never straddle an ExecuteCommandLists.
+    D3D12_RESOURCE_BARRIER begin = barrier;
+    begin.Flags = D3D12_RESOURCE_BARRIER_FLAG_BEGIN_ONLY;
+    D3D12_RESOURCE_BARRIER end = barrier;
+    end.Flags = D3D12_RESOURCE_BARRIER_FLAG_END_ONLY;
+
+    m_compiled[earliestSlot].barriers.push_back({begin, resource});
+    m_compiled[consumerSlot].barriers.push_back({end, resource});
+    return earliestSlot;
+}
+
+std::string RenderGraph::DescribePlacement(uint32_t placedSlot, uint32_t consumerSlot) const
+{
+    if (placedSlot == consumerSlot)
+        return {};
+
+    const std::string producer = m_passes[m_compiled[placedSlot].passIndex].name;
+    const std::string span     = std::to_string(consumerSlot - placedSlot);
+    return (m_barrierPlacement == BarrierPlacement::Split)
+        ? " [split from '" + producer + "', " + span + " nodes]"
+        : " [hoisted to '" + producer + "', " + span + " nodes early]";
 }
 
 void RenderGraph::Execute(CommandContext& context)
@@ -430,7 +502,16 @@ std::string RenderGraph::DumpPasses() const
 
 std::string RenderGraph::DumpBarriers() const
 {
-    std::string dump;
+    // The mode is part of the reading: the same frame produces a different list
+    // under each placement, so a dump that does not name it cannot be compared.
+    std::string dump = "placement: ";
+    switch (m_barrierPlacement)
+    {
+    case BarrierPlacement::Consumer: dump += "at consumer\n";   break;
+    case BarrierPlacement::Earliest: dump += "earliest legal\n"; break;
+    case BarrierPlacement::Split:    dump += "split begin/end\n"; break;
+    }
+
     for (const std::string& entry : m_barrierLog)
     {
         dump += entry;
