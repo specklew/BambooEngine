@@ -39,7 +39,9 @@ private:
     std::unique_ptr<Texture>                           m_outputBuffer;
     RootSignature                                      m_rootSignature;
     ComputeProgram*                                    m_program = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>       m_descriptorHeap;
+
+    // Which copy of the pass's global-heap block this frame writes and binds.
+    uint32_t m_ringSlot = 0;
 
     bool m_initialized = false;
 };

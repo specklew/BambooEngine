@@ -18,13 +18,6 @@ void PostProcessPass::Initialize(
     m_device = device;
     m_commandList = commandList;
 
-    // Create descriptor heap for SRV + UAV
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.NumDescriptors = 2;  // 1 SRV + 1 UAV
-    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_descriptorHeap)));
-
     CreateResources();
     CreateRootSignature();
     CreatePSO();
@@ -33,10 +26,14 @@ void PostProcessPass::Initialize(
     spdlog::info("Post-process pass initialized successfully.");
 }
 
-// Private heap: accumulated image in, tone-mapped image out.
-static constexpr BindingSlot kPostSlots[] = {
-    PassTableEntryAt("gInput", BindingKind::Srv, POST_REG_INPUT, 0),
-    PassTableEntryAt("gOutput", BindingKind::Uav, POST_REG_OUTPUT, 1),
+// Accumulated image in, tone-mapped image out. Two tables for the same reason as
+// the accumulation pass: SRV and UAV are separate NUM_FRAMES-deep blocks of the
+// global heap, and the offsets here are relative to the frame slot's base.
+static constexpr BindingSlot kPostInputSlots[] = {
+    PassTableEntryAt("gInput", BindingKind::Srv, POST_REG_INPUT, 0, 1, /*tableIndex*/ 0),
+};
+static constexpr BindingSlot kPostOutputSlots[] = {
+    PassTableEntryAt("gOutput", BindingKind::Uav, POST_REG_OUTPUT, 0, 1, /*tableIndex*/ 1),
 };
 static constexpr BindingSlot kPostConstants = PassRootConstants("PostProcessCB", POST_REG_CB, 4);
 
@@ -44,8 +41,9 @@ void PostProcessPass::CreateRootSignature()
 {
     spdlog::debug("Creating root signature for post-process pass");
 
-    m_rootSignature = RootSignatureBuilder(L"PostProcessPass Root Signature", /*tableCount*/ 1)
-                          .Add(kPostSlots)
+    m_rootSignature = RootSignatureBuilder(L"PostProcessPass Root Signature", /*tableCount*/ 2)
+                          .Add(kPostInputSlots)
+                          .Add(kPostOutputSlots)
                           .Add(kPostConstants)
                           .Build(m_device.Get());
 }
@@ -90,33 +88,34 @@ void PostProcessPass::Dispatch(Texture& input, const PostProcessParams& params)
     if (!m_initialized)
         return;
 
-    // Get descriptor handles
-    UINT descriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_descriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    // This frame's copy of the block: the input is whichever image the frame
+    // produced, so it cannot be written once at creation, and only the ring makes
+    // a record-time write safe (see FrameAccumulationPass).
+    GlobalDescriptorHeap& globalHeap = GlobalDescriptorHeap::Get();
+    const uint32_t ringSlot = m_ringSlot;
+    m_ringSlot = (m_ringSlot + 1) % Constants::Graphics::NUM_FRAMES;
 
-    // Create SRV for input at slot 0 (t0)
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(input.GetUnderlyingResource().Get(), &srvDesc, cpuHandle);
+    m_device->CreateShaderResourceView(input.GetUnderlyingResource().Get(), &srvDesc,
+        globalHeap.CpuHandle(GlobalDescriptor::PostProcessInput, ringSlot));
 
-    // Create UAV for output buffer at slot 1 (u0)
-    cpuHandle.Offset(1, descriptorSize);
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(m_outputBuffer->GetUnderlyingResource().Get(), nullptr, &uavDesc, cpuHandle);
+    m_device->CreateUnorderedAccessView(m_outputBuffer->GetUnderlyingResource().Get(), nullptr, &uavDesc,
+        globalHeap.CpuHandle(GlobalDescriptor::PostProcessOutput, ringSlot));
 
-    // Bind root signature and PSO
     m_commandList->SetComputeRootSignature(m_rootSignature.Get());
     m_commandList->SetPipelineState(m_program->GetPipelineState());
 
-    // Set descriptor heap and bind descriptor table
-    ID3D12DescriptorHeap* heaps[] = { m_descriptorHeap.Get() };
+    ID3D12DescriptorHeap* heaps[] = { globalHeap.GetHeap() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
-    m_rootSignature.SetTable(m_commandList.Get(), 0, m_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    m_rootSignature.SetTable(m_commandList.Get(), 0, globalHeap.GpuHandle(GlobalDescriptor::PostProcessInput, ringSlot));
+    m_rootSignature.SetTable(m_commandList.Get(), 1, globalHeap.GpuHandle(GlobalDescriptor::PostProcessOutput, ringSlot));
 
     static_assert(sizeof(PostProcessParams) == 4 * sizeof(uint32_t), "PostProcessParams must be exactly 4 floats");
     m_rootSignature.SetConstants(m_commandList.Get(), kPostConstants, &params, 4);

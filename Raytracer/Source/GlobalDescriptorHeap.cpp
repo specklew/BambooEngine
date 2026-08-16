@@ -48,6 +48,10 @@ namespace
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // FuzzyWeight
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_SINT },       // FuzzyIndex
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R8G8B8A8_UNORM },          // DebugViewOutput
+        { NullViewKind::SrvTexture2D, DXGI_FORMAT_R16G16B16A16_FLOAT },      // AccumulationInput
+        { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // AccumulationTargets
+        { NullViewKind::SrvTexture2D, DXGI_FORMAT_R16G16B16A16_FLOAT },      // PostProcessInput
+        { NullViewKind::UavTexture2D, DXGI_FORMAT_R8G8B8A8_UNORM },          // PostProcessOutput
     };
 
     static_assert(std::size(NullViews) == static_cast<size_t>(GlobalDescriptor::Count), "Every GlobalDescriptor needs a null view definition");
@@ -90,6 +94,12 @@ D3D12_CPU_DESCRIPTOR_HANDLE GlobalDescriptorHeap::CpuHandle(GlobalDescriptor slo
 D3D12_GPU_DESCRIPTOR_HANDLE GlobalDescriptorHeap::GpuStart() const
 {
     return m_allocator.GetHandle(0).gpu;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE GlobalDescriptorHeap::GpuHandle(GlobalDescriptor slot, uint32_t offset) const
+{
+    assert(offset < GlobalDescriptorSlotCounts[static_cast<uint32_t>(slot)] && "Descriptor offset past the end of its slot range");
+    return m_allocator.GetHandle(IndexOf(slot) + offset).gpu;
 }
 
 int GlobalDescriptorHeap::AllocateMaterialTextureSlot()

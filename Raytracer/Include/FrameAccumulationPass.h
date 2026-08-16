@@ -33,8 +33,9 @@ private:
     std::unique_ptr<Texture>                           m_displayBuffer;
     RootSignature                                      m_rootSignature;
     ComputeProgram*                                    m_program = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>       m_descriptorHeap;  // For input texture SRV
 
+    // Which copy of the pass's global-heap block this frame writes and binds.
+    uint32_t m_ringSlot        = 0;
     uint32_t m_frameCount      = 0;
     double   m_accumulatedTime = 0.0;
     uint32_t m_resetCount      = 0;

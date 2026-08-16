@@ -18,13 +18,6 @@ void FrameAccumulationPass::Initialize(
     m_device = device;
     m_commandList = commandList;
 
-    // Create descriptor heap for SRV + UAVs
-    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    heapDesc.NumDescriptors = 3;  // 1 SRV + 2 UAVs
-    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_descriptorHeap)));
-
     CreateResources();
     CreateRootSignature();
     CreatePSO();
@@ -33,11 +26,16 @@ void FrameAccumulationPass::Initialize(
     spdlog::info("Frame accumulation pass initialized successfully.");
 }
 
-// Private heap: current frame in, running average and display copy out.
-static constexpr BindingSlot kAccumSlots[] = {
-    PassTableEntryAt("gCurrent", BindingKind::Srv, ACCUM_REG_CURRENT, 0),
-    PassTableEntryAt("gAccum", BindingKind::Uav, ACCUM_REG_ACCUM, 1),
-    PassTableEntryAt("gDisplay", BindingKind::Uav, ACCUM_REG_DISPLAY, 2),
+// Current frame in, running average and display copy out. Two tables because the
+// input is an SRV and the outputs are UAVs, and each is its own NUM_FRAMES-deep
+// block of the global heap: offsets here are relative to the frame slot's base,
+// which Render() hands to SetTable.
+static constexpr BindingSlot kAccumInputSlots[] = {
+    PassTableEntryAt("gCurrent", BindingKind::Srv, ACCUM_REG_CURRENT, 0, 1, /*tableIndex*/ 0),
+};
+static constexpr BindingSlot kAccumTargetSlots[] = {
+    PassTableEntryAt("gAccum", BindingKind::Uav, ACCUM_REG_ACCUM, 0, 1, /*tableIndex*/ 1),
+    PassTableEntryAt("gDisplay", BindingKind::Uav, ACCUM_REG_DISPLAY, 1, 1, /*tableIndex*/ 1),
 };
 static constexpr BindingSlot kAccumConstants = PassRootConstants("AccumCB", ACCUM_REG_CB, 1);
 
@@ -45,8 +43,9 @@ void FrameAccumulationPass::CreateRootSignature()
 {
     spdlog::debug("Creating root signature for accumulation pass");
 
-    m_rootSignature = RootSignatureBuilder(L"FrameAccumulationPass Root Signature", /*tableCount*/ 1)
-                          .Add(kAccumSlots)
+    m_rootSignature = RootSignatureBuilder(L"FrameAccumulationPass Root Signature", /*tableCount*/ 2)
+                          .Add(kAccumInputSlots)
+                          .Add(kAccumTargetSlots)
                           .Add(kAccumConstants)
                           .Build(m_device.Get());
 }
@@ -110,38 +109,39 @@ void FrameAccumulationPass::Render(Texture& currentFrameOutput)
     if (!m_initialized)
         return;
 
-    // Get descriptor handles
-    UINT descriptorSize = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle = CD3DX12_CPU_DESCRIPTOR_HANDLE(m_descriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    // This frame's own copy of the block. The ring is what makes writing a
+    // shader-visible descriptor at record time safe: frame pacing has already
+    // waited on the fence for the slot being reused, so no frame in flight can
+    // still be reading these three.
+    GlobalDescriptorHeap& globalHeap = GlobalDescriptorHeap::Get();
+    const uint32_t ringSlot = m_ringSlot;
+    m_ringSlot = (m_ringSlot + 1) % Constants::Graphics::NUM_FRAMES;
 
-    // Create SRV for current frame at slot 0 (t0)
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
     srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srvDesc.Texture2D.MipLevels = 1;
-    m_device->CreateShaderResourceView(currentFrameOutput.GetUnderlyingResource().Get(), &srvDesc, cpuHandle);
+    m_device->CreateShaderResourceView(currentFrameOutput.GetUnderlyingResource().Get(), &srvDesc,
+        globalHeap.CpuHandle(GlobalDescriptor::AccumulationInput, ringSlot));
 
-    // Create UAV for accumulation buffer at slot 1 (u0)
-    cpuHandle.Offset(1, descriptorSize);
     D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
     uavDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
     uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_device->CreateUnorderedAccessView(m_accumulationBuffer->GetUnderlyingResource().Get(), nullptr, &uavDesc, cpuHandle);
+    m_device->CreateUnorderedAccessView(m_accumulationBuffer->GetUnderlyingResource().Get(), nullptr, &uavDesc,
+        globalHeap.CpuHandle(GlobalDescriptor::AccumulationTargets, ringSlot * 2));
 
-    // Create UAV for display buffer at slot 2 (u1)
-    cpuHandle.Offset(1, descriptorSize);
     uavDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    m_device->CreateUnorderedAccessView(m_displayBuffer->GetUnderlyingResource().Get(), nullptr, &uavDesc, cpuHandle);
+    m_device->CreateUnorderedAccessView(m_displayBuffer->GetUnderlyingResource().Get(), nullptr, &uavDesc,
+        globalHeap.CpuHandle(GlobalDescriptor::AccumulationTargets, ringSlot * 2 + 1));
 
-    // Bind root signature and PSO
     m_commandList->SetComputeRootSignature(m_rootSignature.Get());
     m_commandList->SetPipelineState(m_program->GetPipelineState());
 
-    // Set descriptor heap and bind descriptor table
-    ID3D12DescriptorHeap* heaps[] = { m_descriptorHeap.Get() };
+    ID3D12DescriptorHeap* heaps[] = { globalHeap.GetHeap() };
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
-    m_rootSignature.SetTable(m_commandList.Get(), 0, m_descriptorHeap->GetGPUDescriptorHandleForHeapStart());
+    m_rootSignature.SetTable(m_commandList.Get(), 0, globalHeap.GpuHandle(GlobalDescriptor::AccumulationInput, ringSlot));
+    m_rootSignature.SetTable(m_commandList.Get(), 1, globalHeap.GpuHandle(GlobalDescriptor::AccumulationTargets, ringSlot * 2));
 
     const uint32_t frameCount = m_frameCount + 1;
     m_rootSignature.SetConstants(m_commandList.Get(), kAccumConstants, &frameCount, 1);

@@ -29,6 +29,15 @@ enum class GlobalDescriptor : uint32_t
     FuzzyWeight,
     FuzzyIndex,
     DebugViewOutput, // painted by DebugViewPass, copied to the back buffer
+    // The display chain's two passes rebind their input every frame — it is
+    // whichever image the active technique produced — so unlike every slot above,
+    // these cannot be written once at resource creation. They are NUM_FRAMES deep
+    // and each frame writes only its own copy, which the pacing fence guarantees
+    // no frame in flight is still reading.
+    AccumulationInput,   // SRV, one per frame slot
+    AccumulationTargets, // UAV pair (accumulate, display), one pair per frame slot
+    PostProcessInput,    // SRV, one per frame slot
+    PostProcessOutput,   // UAV, one per frame slot
     Count
 };
 
@@ -55,6 +64,10 @@ inline constexpr uint32_t GlobalDescriptorSlotCounts[] = {
     1,                                 // FuzzyWeight
     1,                                 // FuzzyIndex
     1,                                 // DebugViewOutput
+    Constants::Graphics::NUM_FRAMES,     // AccumulationInput
+    Constants::Graphics::NUM_FRAMES * 2, // AccumulationTargets
+    Constants::Graphics::NUM_FRAMES,     // PostProcessInput
+    Constants::Graphics::NUM_FRAMES,     // PostProcessOutput
 };
 
 static_assert(std::size(GlobalDescriptorSlotCounts) == static_cast<size_t>(GlobalDescriptor::Count), "Every GlobalDescriptor needs a slot count");
@@ -82,6 +95,9 @@ public:
     [[nodiscard]] ID3D12DescriptorHeap* GetHeap() const { return m_allocator.GetHeap(); }
     [[nodiscard]] D3D12_CPU_DESCRIPTOR_HANDLE CpuHandle(GlobalDescriptor slot, uint32_t offset = 0) const;
     [[nodiscard]] D3D12_GPU_DESCRIPTOR_HANDLE GpuStart() const;
+    // Table base for a slot-relative range — a per-frame-slot block, where the
+    // signature's offsets are relative to the block rather than to the heap.
+    [[nodiscard]] D3D12_GPU_DESCRIPTOR_HANDLE GpuHandle(GlobalDescriptor slot, uint32_t offset = 0) const;
 
     // glTF material textures: one slot per texture out of the MaterialTextures
     // range. Returns -1 when the range is full (the caller keeps its old index).
