@@ -167,6 +167,9 @@ private:
 	bool FrameUsesVoxelGuiding() const;
 
 	VxpgGraphHandles m_vxpg;
+	// Latched from vxpg.cluster.dumpStats at graph-build time so the copy node,
+	// the frame's flush and the readback all agree on one answer.
+	bool m_clusterStatsPending = false;
 
 	std::shared_ptr<RenderTechnique> m_technique;
 	std::shared_ptr<VBufferPass> m_vbufferPass;

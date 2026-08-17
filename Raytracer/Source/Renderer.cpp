@@ -319,6 +319,8 @@ void Renderer::Initialize()
 	m_clusterPass->Initialize(g_device, m_d3d12CommandList, m_voxelizationPass,
 		m_voxelGuidingBuildPass, m_fingerprintPass);
 
+	m_debugViewPass->SetGuidingPasses(m_voxelGuidingBuildPass, m_clusterPass);
+
 	m_superpixelBuildPass = std::make_shared<SuperpixelBuildPass>();
 	m_superpixelBuildPass->Initialize(g_device, m_d3d12CommandList);
 	m_superpixelBuildPass->OnResize(Window::Get().GetWidth(), Window::Get().GetHeight(),
@@ -646,7 +648,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	// frames behind. Both are diagnostic paths: a capture happens once per
 	// benchmark window, and timings are opt-in, so serializing them costs nothing
 	// that is being measured. Everything else runs unserialized.
-	const bool readsBackThisFrame = m_screenshotManager->IsCaptureDue() || g_renderGraphTimings.Get() != 0;
+	const bool readsBackThisFrame = m_screenshotManager->IsCaptureDue() || g_renderGraphTimings.Get() != 0 ||
+		m_clusterStatsPending;
 	if (readsBackThisFrame || g_serializeFrames.Get() != 0)
 		FlushCommandQueue();
 
@@ -657,6 +660,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	ResetCommandList();
 
 	m_renderGraph.ResolveTimings();
+	if (m_clusterStatsPending && m_clusterPass)
+		m_clusterPass->ResolveStats();
 	DumpRenderGraphIfRequested();
 
 	if (m_screenshotManager->IsCaptureDue())
@@ -1219,6 +1224,10 @@ void Renderer::BuildVxpgGraph()
 {
 	m_vxpg = VxpgGraphHandles{};
 
+	// Latched once per frame: the node that copies the stats out and the readback
+	// that reads them must agree, and ResolveStats disarms the CVar between them.
+	m_clusterStatsPending = VxpgClusterPass::IsStatsDumpArmed();
+
 	if (!FrameUsesVoxelGuiding() || !m_voxelizationPass || !m_scene)
 		return;
 
@@ -1311,6 +1320,7 @@ void Renderer::BuildVxpgGraph()
 		m_vxpg.clusterAssignments    = importBuffer(m_clusterPass->GetVoxelClusterAssignmentsBuffer(), "VXPG ClusterAssignments");
 		m_vxpg.clusterSeedCompactIds = importBuffer(m_clusterPass->GetClusterSeedCompactIdsBuffer(), "VXPG ClusterSeedCompactIds");
 		m_vxpg.clusterCenters        = importBuffer(m_clusterPass->GetClusterCentersBuffer(), "VXPG ClusterCenters");
+		m_vxpg.clusterStats          = importBuffer(m_clusterPass->GetClusterStatsBuffer(), "VXPG ClusterStats");
 	}
 	if (m_superpixelBuildPass)
 	{
@@ -1569,6 +1579,9 @@ void Renderer::BuildVxpgGraph()
 				pass.Read(m_vxpg.guidingDispatchArgs, kUavRead);
 				pass.Write(m_vxpg.clusterSeedCompactIds, kUavWrite);
 				pass.Write(m_vxpg.clusterCenters, kUavWrite);
+				// Seeding zeroes the diagnostic counters the assignment then fills.
+				if (m_clusterStatsPending)
+					pass.Write(m_vxpg.clusterStats, kUavWrite);
 			},
 			[this, frame]() { m_clusterPass->RunSeed(frame); });
 
@@ -1580,8 +1593,23 @@ void Renderer::BuildVxpgGraph()
 				pass.Read(m_vxpg.clusterCenters, kUavRead);
 				pass.Read(m_vxpg.guidingDispatchArgs, GraphAccess::IndirectArgument);
 				pass.Write(m_vxpg.clusterAssignments, kUavWrite);
+				if (m_clusterStatsPending)
+					pass.Write(m_vxpg.clusterStats, kUavWrite);
 			},
 			[this, frame]() { m_clusterPass->RunAssign(frame); });
+
+		// Armed only for the one-shot dump, so the copy and its state flip exist
+		// on exactly the frame that reads them back.
+		if (m_clusterStatsPending)
+		{
+			m_renderGraph.AddPass("VXPG Cluster Stats Readback",
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.NeverCull();
+					pass.Read(m_vxpg.clusterStats, GraphAccess::CopySource);
+				},
+				[this]() { m_clusterPass->RecordStatsCopy(); });
+		}
 	}
 
 	// Stage 7: per-superpixel x per-cluster soft visibility (cvis), one node per

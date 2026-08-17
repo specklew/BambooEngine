@@ -31,9 +31,28 @@ cbuffer ClusterCB : BAMBOO_PASS_CBV(CLUSTER_REG_CB)
     // 0 = SIByL-faithful frame-constant seeding (its sampler is seeded with
     // hardcoded zeros); nonzero = per-frame hash (vxpg.cluster.frameVaryingSeed).
     uint gClusterSeedFrameTerm;
-    uint _clusterPad0;
+    // One-shot diagnostic (vxpg.cluster.dumpStats). Off, the atomics below are
+    // branched out entirely so a benchmark frame never pays for them.
+    uint gCollectStats;
     uint _clusterPad1;
 }
+
+// Diagnostic layout, 4 x CLUSTER_COUNT uints. Population plus the three numbers
+// that separate the possible explanations for a lopsided clustering:
+//   HAMMING   — realised bit distance to the assigned center
+//   INTENSITY — the other distance term (fixed point x1000); whichever of the two
+//               is larger is the one actually choosing clusters
+//   POPCOUNT  — how many of the 128 representatives each voxel sees at all. Near
+//               0 means the fingerprints are empty (a fingerprint-pass fault),
+//               near 128 means everything sees everything, and a mid value with a
+//               small Hamming means the visibility really is that uniform — a
+//               property of the scene, not a bug.
+#define CLUSTER_STAT_POPULATION 0
+#define CLUSTER_STAT_HAMMING    CLUSTER_COUNT
+#define CLUSTER_STAT_INTENSITY  (CLUSTER_COUNT * 2)
+#define CLUSTER_STAT_POPCOUNT   (CLUSTER_COUNT * 3)
+#define CLUSTER_STAT_COUNT      (CLUSTER_COUNT * 4)
+#define CLUSTER_STAT_INTENSITY_SCALE 1000.0
 
 // SIByL svoxel_info (mrcs/cluster-common.hlsli).
 struct ClusterCenter
@@ -50,6 +69,7 @@ RWStructuredBuffer<uint4>         gVoxelFingerprints       : BAMBOO_PASS_UAV(CLU
 RWStructuredBuffer<uint>          gCompactIds              : BAMBOO_PASS_UAV(CLUSTER_REG_COMPACT_IDS); // SIByL u_CompactIndices (compactID -> voxelID)
 RWStructuredBuffer<float>         gPremulIrradiance        : BAMBOO_PASS_UAV(CLUSTER_REG_PREMUL_IRRADIANCE); // SIByL u_PremulIrradiance
 RWStructuredBuffer<int>           gVoxelClusterAssignments : BAMBOO_PASS_UAV(CLUSTER_REG_ASSIGNMENTS); // SIByL u_Clusters
+RWStructuredBuffer<uint>          gClusterStats            : BAMBOO_PASS_UAV(CLUSTER_REG_STATS); // Bamboo diagnostic, no SIByL counterpart
 
 // SIByL call-site weights (kept as named constants; position term is dead but
 // the struct keeps the field for port fidelity).
@@ -98,6 +118,11 @@ void SeedClusterCenters(uint3 tid : SV_DispatchThreadID)
     const uint laneId = WaveGetLaneIndex();
     const uint warpId = threadId / 32u;
     const int litVoxelCount = int(gGuidingDispatchArgs[0].w);
+
+    // Zeroing here rather than in a node of its own: this kernel is one group and
+    // always runs immediately before the assignment that fills them.
+    if (gCollectStats != 0u && threadId < uint(CLUSTER_STAT_COUNT))
+        gClusterStats[threadId] = 0u;
 
     uint randState = pcg_hash((threadId * 9781u + gClusterSeedFrameTerm * 26699u) | 1u);
 
@@ -226,6 +251,8 @@ void AssignVoxelClusters(uint3 tid : SV_DispatchThreadID)
 
     int nearestCluster = -1;
     float nearestDistance = 999999.9999;
+    float nearestHamming = 0.0;
+    float nearestIntensityTerm = 0.0;
     for (int clusterId = 0; clusterId < CLUSTER_COUNT; ++clusterId)
     {
         const ClusterCenter center = gClusterCenters[clusterId];
@@ -236,8 +263,28 @@ void AssignVoxelClusters(uint3 tid : SV_DispatchThreadID)
         {
             nearestDistance = d;
             nearestCluster = clusterId;
+
+            if (gCollectStats != 0u)
+            {
+                const uint4 diff = fingerprint ^ center.fingerprint;
+                nearestHamming = countbits(diff.x) + countbits(diff.y)
+                               + countbits(diff.z) + countbits(diff.w);
+                nearestIntensityTerm = INTENSITY_WEIGHT * abs(intensity - center.intensity);
+            }
         }
     }
 
     gVoxelClusterAssignments[compactId] = nearestCluster;
+
+    if (gCollectStats != 0u && nearestCluster >= 0)
+    {
+        uint ignored;
+        InterlockedAdd(gClusterStats[CLUSTER_STAT_POPULATION + nearestCluster], 1u, ignored);
+        InterlockedAdd(gClusterStats[CLUSTER_STAT_HAMMING + nearestCluster], uint(nearestHamming), ignored);
+        InterlockedAdd(gClusterStats[CLUSTER_STAT_INTENSITY + nearestCluster],
+                       uint(nearestIntensityTerm * CLUSTER_STAT_INTENSITY_SCALE), ignored);
+        const uint ownBits = countbits(fingerprint.x) + countbits(fingerprint.y)
+                           + countbits(fingerprint.z) + countbits(fingerprint.w);
+        InterlockedAdd(gClusterStats[CLUSTER_STAT_POPCOUNT + nearestCluster], ownBits, ignored);
+    }
 }

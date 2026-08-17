@@ -33,6 +33,16 @@ public:
     void RunSeed(uint32_t frameIndex);
     void RunAssign(uint32_t frameIndex);
 
+    // One-shot cluster diagnostics (vxpg.cluster.dumpStats). Armed, the assign
+    // kernel counts each cluster's members and sums the two distance terms it
+    // actually realised; the frame then reads them back and logs. Answers the
+    // question a picture cannot: whether the grouping is driven by the visibility
+    // fingerprint or by the irradiance term.
+    [[nodiscard]] static bool IsStatsDumpArmed();
+    void RecordStatsCopy();
+    void ResolveStats();
+    RWStructuredBuffer<uint32_t>* GetClusterStatsBuffer() const { return m_clusterStats.get(); }
+
     // SIByL svoxel_info: the descriptor each voxel is compared against.
     struct ClusterCenter
     {
@@ -64,6 +74,9 @@ private:
     std::unique_ptr<RWStructuredBuffer<int32_t>>       m_clusterSeedCompactIds;   // SIByL u_Seeds
     std::unique_ptr<RWStructuredBuffer<ClusterCenter>> m_clusterCenters;          // SIByL u_RowClusterInfo
     std::unique_ptr<RWStructuredBuffer<int32_t>>       m_voxelClusterAssignments; // SIByL u_Clusters
+    std::unique_ptr<RWStructuredBuffer<uint32_t>>      m_clusterStats;            // diagnostic, no SIByL counterpart
+    Microsoft::WRL::ComPtr<ID3D12Resource>             m_clusterStatsReadback;
+    uint32_t                                           m_statsRetries = 0;
 
     RootSignature m_rootSig;
     ComputeProgram* m_seedProgram = nullptr;
