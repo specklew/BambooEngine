@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandContext.h"
 #include "RenderTechnique.h"
 #include "RootSignatureLibrary.h"
 
@@ -38,7 +39,7 @@ private:
     void DrawScene(const FrameGraphContext& frame) const;
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
+    ActiveCommandList                                  m_commandList;
 
     RootSignature                               m_rootSignature;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pipelineStateObject;

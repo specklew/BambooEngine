@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandContext.h"
 
 #include "BufferDebugView.h"
 #include "RenderGraph.h"
@@ -39,7 +40,7 @@ private:
     void CreateRootSignature();
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
+    ActiveCommandList                                  m_commandList;
     std::unique_ptr<Texture>                           m_outputBuffer;
     RootSignature                                      m_rootSignature;
     ComputeProgram*                                    m_program = nullptr;

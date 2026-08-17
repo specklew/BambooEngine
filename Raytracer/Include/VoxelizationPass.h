@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandContext.h"
 
 #include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
@@ -78,7 +79,7 @@ private:
     void RecreateForNewDim(uint32_t newDim);
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
+    ActiveCommandList                                  m_commandList;
 
     Microsoft::WRL::ComPtr<ID3D12Resource> m_occupancyTex;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_irradianceTex; // packed fixed-point irradiance (x100), uint atomics

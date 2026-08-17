@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandContext.h"
 
 #include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
@@ -62,7 +63,7 @@ private:
     bool BindCommon(uint32_t frameIndex);
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
+    ActiveCommandList                                  m_commandList;
 
     std::shared_ptr<VoxelizationPass>      m_voxelPass;
     std::shared_ptr<VoxelGuidingBuildPass> m_buildPass;

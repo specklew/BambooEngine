@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandContext.h"
 
 #include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
@@ -31,7 +32,7 @@ private:
     void CreatePSOs();
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
+    ActiveCommandList                                  m_commandList;
 
     RootSignature m_rootSig;
     ComputeProgram* m_presortProgram = nullptr;

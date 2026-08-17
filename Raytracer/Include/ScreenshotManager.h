@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandContext.h"
 #include <string>
 #include <DirectXMath.h>
 
@@ -78,7 +79,7 @@ private:
     std::string m_outStem;  // empty = auto-generated name
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
+    ActiveCommandList                                  m_commandList;
     Microsoft::WRL::ComPtr<ID3D12Resource>             m_readbackBuffer;
     uint64_t m_readbackBufferSize = 0;
 

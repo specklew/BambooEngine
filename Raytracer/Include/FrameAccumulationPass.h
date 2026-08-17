@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandContext.h"
 
 #include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
@@ -28,7 +29,7 @@ private:
     void CreatePSO();
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
+    ActiveCommandList                                  m_commandList;
     std::unique_ptr<Texture>                           m_accumulationBuffer;
     std::unique_ptr<Texture>                           m_displayBuffer;
     RootSignature                                      m_rootSignature;

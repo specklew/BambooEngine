@@ -1,4 +1,5 @@
 #pragma once
+#include "CommandContext.h"
 #include "Resources/StructuredBuffer.h"
 #include "Resources/Texture.h"
 #include "RootSignatureLibrary.h"
@@ -56,7 +57,7 @@ protected:
 
     // Shared device/command interfaces
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> m_commandList;
+    ActiveCommandList                                  m_commandList;
 
     // Compiled shader blobs — parallel to m_techniqueDesc.shaders, populated in CreateRootSignatures()
     std::vector<Microsoft::WRL::ComPtr<IDxcBlob>>      m_shaderBlobs;

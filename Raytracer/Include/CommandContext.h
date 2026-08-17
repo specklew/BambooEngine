@@ -5,6 +5,25 @@
 
 class Resource;
 
+// Stands in for the command list a pass used to cache at Initialize. Which list a
+// pass records into stopped being knowable up front in ADR 0017 phase 6c: the
+// frame is a run per queue, each on its own list, so the answer is "whichever one
+// the render graph has bound for the run this node belongs to". Assigning a list
+// to it is deliberately a no-op — the parameter is kept only so a pass's
+// Initialize signature still reads the same on both sides of the change.
+//
+// Every accessor routes through CommandContext::GetCommandList(), which also
+// flushes pending barriers, so a pass can never record ahead of its own barriers.
+class ActiveCommandList
+{
+public:
+    ActiveCommandList& operator=(const Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4>&) { return *this; }
+
+    [[nodiscard]] ID3D12GraphicsCommandList4* Get() const;
+    ID3D12GraphicsCommandList4* operator->() const { return Get(); }
+    operator ID3D12GraphicsCommandList4*() const { return Get(); }
+};
+
 // ADR 0017 L3: the only thing that submits work to the direct command list.
 // Barriers are queued rather than emitted one at a time and flushed as a single
 // ResourceBarrier call right before the work that needs them — which is also the

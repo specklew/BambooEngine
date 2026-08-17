@@ -11,6 +11,11 @@ CommandContext& CommandContext::Get()
     return s_directQueueContext;
 }
 
+ID3D12GraphicsCommandList4* ActiveCommandList::Get() const
+{
+    return CommandContext::Get().GetCommandList();
+}
+
 void CommandContext::Bind(ID3D12GraphicsCommandList4* commandList)
 {
     assert(m_pendingBarriers.empty() && "Barriers queued against the previous command list were never flushed");
