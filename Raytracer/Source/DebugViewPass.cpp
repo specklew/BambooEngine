@@ -6,7 +6,9 @@
 #include "PassRegisters.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
+#include "VoxelGuidingBuildPass.h"
 #include "VoxelizationPass.h"
+#include "VxpgClusterPass.h"
 #include "Window.h"
 #include "ResourceManager/ResourceManager.h"
 
@@ -37,12 +39,24 @@ constexpr BindingSlot kSuperpixelCenter = Accesses(
     PassTableEntry("gSuperpixelCenter", BindingKind::Uav, DEBUG_VIEW_REG_SUPERPIXEL_CENTER, GlobalDescriptor::SuperpixelCenter),
     GraphAccess::UnorderedAccessRead);
 
+// The cluster products are structured buffers rather than global-heap views, so
+// they bind as root UAVs — the same way the guided technique reads them.
+constexpr BindingSlot kInverseIndex = Accesses(
+    PassUav("gVoxInverseIndex", DEBUG_VIEW_REG_INVERSE_INDEX), GraphAccess::UnorderedAccessRead);
+constexpr BindingSlot kCounters = Accesses(
+    PassUav("gVoxCounters", DEBUG_VIEW_REG_COUNTERS), GraphAccess::UnorderedAccessRead);
+constexpr BindingSlot kClusterAssignments = Accesses(
+    PassUav("gVoxelClusterAssignments", DEBUG_VIEW_REG_CLUSTER_ASSIGN), GraphAccess::UnorderedAccessRead);
+constexpr BindingSlot kClusterSeeds = Accesses(
+    PassUav("gClusterSeedCompactIds", DEBUG_VIEW_REG_CLUSTER_SEEDS), GraphAccess::UnorderedAccessRead);
+
 constexpr BindingSlot kVoxelGridConstants = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
 constexpr BindingSlot kDebugViewConstants = PassRootConstants("DebugViewCB", DEBUG_VIEW_REG_CB, 4);
 
 constexpr BindingSlot kDebugViewSlots[] = {
     kDebugOutput,     kShadingPoints,    kVoxelOccupancy,      kVoxelIrradiance,
-    kVoxelVplCount,   kSuperpixelIndex,  kSuperpixelCenter,    kVoxelGridConstants,
+    kVoxelVplCount,   kSuperpixelIndex,  kSuperpixelCenter,    kInverseIndex,
+    kCounters,        kClusterAssignments, kClusterSeeds,      kVoxelGridConstants,
     kDebugViewConstants};
 } // namespace
 
@@ -104,9 +118,18 @@ void DebugViewPass::DeclareGraphResources(RenderGraphPassBuilder& pass, GraphRes
     switch (g_bufferDebugView.Get())
     {
     case BufferDebugView::VoxelOccupancy:
-    case BufferDebugView::Supervoxels:
         pass.Declare(kShadingPoints, vxpg.shadingPoints);
         pass.Declare(kVoxelOccupancy, vxpg.voxelOccupancy);
+        break;
+    // Keeps the whole world-space chain alive through culling — fingerprint,
+    // cluster seeding and assignment all have to run for this view to say
+    // anything.
+    case BufferDebugView::VoxelClusters:
+        pass.Declare(kShadingPoints, vxpg.shadingPoints);
+        pass.Declare(kInverseIndex, vxpg.inverseIndex);
+        pass.Declare(kCounters, vxpg.counters);
+        pass.Declare(kClusterAssignments, vxpg.clusterAssignments);
+        pass.Declare(kClusterSeeds, vxpg.clusterSeedCompactIds);
         break;
     case BufferDebugView::VoxelIrradiance:
         pass.Declare(kShadingPoints, vxpg.shadingPoints);
@@ -143,6 +166,21 @@ void DebugViewPass::Dispatch()
     if (m_voxelPass)
         m_rootSignature.Set(m_commandList.Get(), kVoxelGridConstants,
                             m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
+
+    // Root descriptors are not bounds-checked, so a view that does not read them
+    // must still be given something legal to point at. Only the cluster view
+    // declares them, and it cannot run without both producers present.
+    if (m_buildPass && m_clusterPass)
+    {
+        m_rootSignature.Set(m_commandList.Get(), kInverseIndex,
+                            m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
+        m_rootSignature.Set(m_commandList.Get(), kCounters,
+                            m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
+        m_rootSignature.Set(m_commandList.Get(), kClusterAssignments,
+                            m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
+        m_rootSignature.Set(m_commandList.Get(), kClusterSeeds,
+                            m_clusterPass->GetClusterSeedCompactIdsBuffer()->GetGPUVirtualAddress());
+    }
 
     const uint32_t width  = Window::Get().GetWidth();
     const uint32_t height = Window::Get().GetHeight();

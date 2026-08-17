@@ -38,6 +38,11 @@
 #define DEBUG_VIEW_REG_VOXEL_VPL_COUNT    4 // u
 #define DEBUG_VIEW_REG_SUPERPIXEL_INDEX   5 // u
 #define DEBUG_VIEW_REG_SUPERPIXEL_CENTER  6 // u
+// Root UAVs: the cluster products are structured buffers, not global-heap views.
+#define DEBUG_VIEW_REG_INVERSE_INDEX      7 // u (root)
+#define DEBUG_VIEW_REG_COUNTERS           8 // u (root)
+#define DEBUG_VIEW_REG_CLUSTER_ASSIGN     9 // u (root)
+#define DEBUG_VIEW_REG_CLUSTER_SEEDS     10 // u (root)
 
 // ---------------------------------------------------------------------------
 // FrameAccumulationPass — accumulation.hlsl
@@ -117,6 +122,9 @@
 #define CLUSTER_REG_COMPACT_IDS         4 // u
 #define CLUSTER_REG_PREMUL_IRRADIANCE   5 // u
 #define CLUSTER_REG_ASSIGNMENTS         6 // u
+// Diagnostic only: per-cluster population and the two distance terms, written
+// while vxpg.cluster.dumpStats is armed and idle otherwise.
+#define CLUSTER_REG_STATS               7 // u
 
 // ---------------------------------------------------------------------------
 // VxpgClusterVisibilityPass — vxpgClusterVisibility.hlsl

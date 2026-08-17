@@ -22,14 +22,6 @@ namespace Constants
         constexpr int LIGHT_TREE_MAX_LEAVES = 32768;
         // Bitonic sort-key buffer capacity (SIByL element_count = 65536).
         constexpr int LIGHT_TREE_SORT_CAPACITY = 65536;
-        // VXPG V2 supervoxels: coarse grid cell = voxelCoord / clusterFactor. The
-        // factor is a FLOOR (SUPERVOXEL_GRID_FACTOR) that adapts upward so svDim
-        // never exceeds SUPERVOXEL_DIM_CAP, keeping the supervoxel count within
-        // MAX_SUPERVOXELS for any grid resolution (the Stage C matrix-width budget).
-        // SUPERVOXEL_DIM_CAP = cbrt(MAX_SUPERVOXELS): 8^3 = 512.
-        constexpr int SUPERVOXEL_GRID_FACTOR = 16;
-        constexpr int MAX_SUPERVOXELS = 512;
-        constexpr int SUPERVOXEL_DIM_CAP = 8;
         // VXPG V2 Stage B superpixels (SLIC over the ShadingPoints G-buffer).
         // map_size = ceil(screen / SUPERPIXEL_SIZE); gather cap = SUPERPIXEL_SIZE^2.
         constexpr int SUPERPIXEL_SIZE = 32;

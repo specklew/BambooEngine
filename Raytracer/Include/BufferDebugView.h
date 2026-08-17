@@ -17,7 +17,7 @@ enum class BufferDebugView : int
 	None = 0,
 	VoxelOccupancy = 1,
 	VoxelIrradiance = 2,
-	Supervoxels = 3,
+	VoxelClusters = 3,
 	ShadingPointsNormal = 4,
 	ShadingPointsPos = 5,
 	SuperpixelId = 6,
@@ -31,8 +31,9 @@ inline constexpr DebugViewDoc kBufferDebugViewDocs[] = {
 	 "shades surfaces whose voxel is occupied"},
 	{"LightInjectionPass irradiance", "heat ramp bright on lit surfaces, dark in shadow",
 	 "reads injected voxel irradiance at the surface voxel"},
-	{"grid-cell supervoxels (analytic)", "coarse colored blocks over geometry",
-	 "hash-colors voxelCoord / supervoxelFactor at the surface voxel"},
+	{"VxpgClusterPass assignments", "up to 32 saturated hues in patches that follow shadowing rather than the grid; "
+	 "white = a cluster seed voxel, magenta = unassigned or bad inverse index, dark blue = unlit voxel",
+	 "voxel -> inverseIndex -> compactId -> clusterAssignments, hue-wheeled by cluster id"},
 	{"LightInjectionPass ShadingPoints G-buffer", "smooth RGB direction colors, black where the primary ray missed",
 	 "decodes the octahedral normal from the ShadingPoints texture"},
 	{"LightInjectionPass ShadingPoints G-buffer", "world-position gradient, black where the primary ray missed",
@@ -52,7 +53,7 @@ inline AutoCVarEnum g_bufferDebugView("renderer.bufferDebugView", "Buffer debug 
 
 #define BUFFER_VIEW_VOXEL_OCCUPANCY   1
 #define BUFFER_VIEW_VOXEL_IRRADIANCE  2
-#define BUFFER_VIEW_SUPERVOXELS       3
+#define BUFFER_VIEW_VOXEL_CLUSTERS    3
 #define BUFFER_VIEW_SHADING_NORMAL    4
 #define BUFFER_VIEW_SHADING_POS       5
 #define BUFFER_VIEW_SUPERPIXEL_ID     6

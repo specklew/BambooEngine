@@ -8,7 +8,9 @@
 #include "Resources/Texture.h"
 #include "VxpgGraphHandles.h"
 
+class VoxelGuidingBuildPass;
 class VoxelizationPass;
+class VxpgClusterPass;
 
 // Paints one buffer-debug view from the VXPG products (ADR 0017 phase 5b). It is
 // a node rather than a branch inside three shaders, so the same view renders
@@ -20,6 +22,14 @@ public:
     void Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList);
     void SetVoxelizationPass(const std::shared_ptr<VoxelizationPass>& voxelPass) { m_voxelPass = voxelPass; }
+    // Producers of the cluster view's buffers; without both, that view has
+    // nothing to read and is not offered.
+    void SetGuidingPasses(const std::shared_ptr<VoxelGuidingBuildPass>& buildPass,
+                          const std::shared_ptr<VxpgClusterPass>& clusterPass)
+    {
+        m_buildPass   = buildPass;
+        m_clusterPass = clusterPass;
+    }
 
     void OnResize();
 
@@ -45,4 +55,6 @@ private:
     RootSignature                                      m_rootSignature;
     ComputeProgram*                                    m_program = nullptr;
     std::shared_ptr<VoxelizationPass>                  m_voxelPass;
+    std::shared_ptr<VoxelGuidingBuildPass>             m_buildPass;
+    std::shared_ptr<VxpgClusterPass>                   m_clusterPass;
 };

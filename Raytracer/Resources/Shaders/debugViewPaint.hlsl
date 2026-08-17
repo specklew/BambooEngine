@@ -16,16 +16,22 @@ RWTexture3D<uint>   gVoxelVplCount  : BAMBOO_PASS_UAV(DEBUG_VIEW_REG_VOXEL_VPL_C
 RWTexture2D<int>    gSuperpixelIndex : BAMBOO_PASS_UAV(DEBUG_VIEW_REG_SUPERPIXEL_INDEX);
 RWTexture2D<float4> gSuperpixelCenter: BAMBOO_PASS_UAV(DEBUG_VIEW_REG_SUPERPIXEL_CENTER);
 
+// Root UAVs, matching how the guided technique binds the same buffers.
+RWStructuredBuffer<int>  gVoxInverseIndex         : BAMBOO_PASS_UAV(DEBUG_VIEW_REG_INVERSE_INDEX);
+RWStructuredBuffer<uint> gVoxCounters             : BAMBOO_PASS_UAV(DEBUG_VIEW_REG_COUNTERS);
+RWStructuredBuffer<int>  gVoxelClusterAssignments : BAMBOO_PASS_UAV(DEBUG_VIEW_REG_CLUSTER_ASSIGN);
+RWStructuredBuffer<int>  gClusterSeedCompactIds   : BAMBOO_PASS_UAV(DEBUG_VIEW_REG_CLUSTER_SEEDS);
+
 cbuffer VoxelGridCB : BAMBOO_PASS_CBV(REG_VOXEL_GRID_CB)
 {
     float3 voxGridMin;
     float  voxVoxelSize;
     float3 voxGridMax;
     uint   voxGridDim;
-    // Order matches VoxelGridConstants exactly; injectUseAvg comes before
-    // supervoxelFactor, and swapping them silently mis-sizes the supervoxels.
+    // Order matches VoxelGridConstants exactly, and nothing checks that it does —
+    // a swapped pair here is a silent wrong-value read, not a compile error.
     uint   voxInjectUseAvg;
-    uint   voxSupervoxelFactor;
+    uint   _voxReserved0;
     float  voxHeatScale;
     uint   voxReuseGiVpl;
 };
@@ -62,28 +68,35 @@ float3 PaintVoxelViews(float3 posW)
     if (any(voxelCoord < 0) || any(voxelCoord >= int(voxGridDim)))
         return float3(0.05, 0.05, 0.05);
 
-    if (gDebugView == BUFFER_VIEW_SUPERVOXELS)
+    // The MRCS column clustering: which of the 32 clusters this voxel landed in.
+    // Grouping is by 128-bit visibility fingerprint plus intensity, with the
+    // position term weighted zero (vxpgCluster.hlsl), so the patches follow what
+    // sees the same light rather than the grid — a view that looked like grid
+    // blocks would be the bug.
+    if (gDebugView == BUFFER_VIEW_VOXEL_CLUSTERS)
     {
-        const int voxelsPerSupervoxel = int(max(voxSupervoxelFactor, 1u));
-        // Search 3x3x3 for the nearest occupied voxel: a surface point near a
-        // boundary can floor into an empty neighbor.
-        int3 occupiedCoord = int3(-1, -1, -1);
-        [unroll] for (int dz = -1; dz <= 1; ++dz)
-        [unroll] for (int dy = -1; dy <= 1; ++dy)
-        [unroll] for (int dx = -1; dx <= 1; ++dx)
-        {
-            int3 neighborCoord = voxelCoord + int3(dx, dy, dz);
-            if (all(neighborCoord >= 0) && all(neighborCoord < int(voxGridDim)) &&
-                gVoxelOccupancy[neighborCoord] != 0u)
-                occupiedCoord = neighborCoord;
-        }
-        if (occupiedCoord.x < 0)
-            return float3(0.05, 0.05, 0.05);
+        const uint flatId = uint(voxelCoord.x) + uint(voxelCoord.y) * voxGridDim
+                          + uint(voxelCoord.z) * voxGridDim * voxGridDim;
+        const int compactId = gVoxInverseIndex[flatId];
+        if (compactId < 0)
+            return float3(0.0, 0.0, 0.15); // unlit voxel: never entered the compacted set
 
-        int3 supervoxelCoord = occupiedCoord / voxelsPerSupervoxel;
-        // Parity from the true surface cell so adjacent voxels always alternate.
-        float checker = ((voxelCoord.x + voxelCoord.y + voxelCoord.z) & 1) ? 1.0 : 0.85;
-        return HashColor(supervoxelCoord, uint3(131u, 197u, 53u)) * checker;
+        if (uint(compactId) >= gVoxCounters[0])
+            return float3(1.0, 0.0, 1.0); // compact id past the live count = corruption
+
+        [loop] for (uint seed = 0; seed < 32u; ++seed)
+            if (gClusterSeedCompactIds[seed] == compactId)
+                return float3(1.0, 1.0, 1.0);
+
+        const int cluster = gVoxelClusterAssignments[compactId];
+        if (cluster < 0 || cluster >= 32)
+            return float3(1.0, 0.0, 1.0);
+
+        // Same hue wheel as the guided technique's view 9, so the two agree:
+        // golden-ratio step puts neighbouring cluster ids far apart in hue.
+        const float hue = frac(float(cluster) * 0.618034);
+        const float h6  = hue * 6.0;
+        return saturate(float3(abs(h6 - 3.0) - 1.0, 2.0 - abs(h6 - 2.0), 2.0 - abs(h6 - 4.0)));
     }
 
     if (gDebugView == BUFFER_VIEW_VOXEL_IRRADIANCE)

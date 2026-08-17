@@ -15,7 +15,10 @@ struct VoxelGridConstants
     DirectX::XMFLOAT3 gridMax;
     uint32_t          gridDim;
     uint32_t          injectUseAvg;
-    uint32_t          supervoxelFactor; // SUPERVOXEL_GRID_FACTOR; supervoxel = voxelCoord / factor
+    // Held rather than removed: every shader mirroring this struct already names
+    // it _voxReserved0, and nothing checks the two layouts agree — closing the
+    // hole would be a four-file edit whose only failure mode is silent.
+    uint32_t          _reserved0;
     float             heatScale;
     uint32_t          reuseGiVpl; // 1 = VPL fitting samples come from last frame's guided-GI BSDF subtree (ADR 0009)
 };
