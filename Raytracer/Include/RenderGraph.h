@@ -10,6 +10,7 @@
 #include "GraphAccess.h"
 
 class CommandContext;
+class GraphicsDevice;
 class Resource;
 
 // ADR 0017 L5, step A: passes declare what they read and write; the graph culls
@@ -102,8 +103,20 @@ public:
     // every Compile() must be followed by exactly one Execute().
     void Compile();
 
-    // Submits the compiled plan: barriers, PIX event, pass body, in that order.
-    void Execute(CommandContext& context);
+    // Async compute (ADR 0017 phase 6c). Off means every node is forced onto the
+    // direct queue and the frame is one submission, exactly as before phase 6c.
+    void SetAsyncCompute(bool enabled) { m_asyncCompute = enabled; }
+
+    // Records the compiled plan — barriers, PIX event, pass body per node — and
+    // submits it. With one queue that is one command list and one
+    // ExecuteCommandLists; with two it is a run per queue, each on its own list,
+    // ordered by the cross-queue fences Compile() worked out.
+    //
+    // primaryDirectList is the frame's already-open direct list: it carries
+    // whatever was recorded before the graph ran, so it has to be the first
+    // submission rather than one the graph allocates.
+    void ExecuteAndSubmit(CommandContext& context, GraphicsDevice& device,
+                          ID3D12GraphicsCommandList4* primaryDirectList);
 
     // Drops passes and imports; the next frame declares itself from scratch.
     void Reset();
@@ -164,6 +177,11 @@ public:
     // passes. Text, so it renders in VS Code and GitHub with no dependency.
     [[nodiscard]] std::string DumpMermaid() const;
 
+    // The frame's submission plan: one line per run, with the queue it goes to,
+    // the nodes it covers and the cross-queue wait that precedes it. This is how
+    // you tell overlap from a plan that merely looks parallel.
+    [[nodiscard]] std::string DumpSchedule() const;
+
 private:
     struct ImportedResource
     {
@@ -213,10 +231,36 @@ private:
         std::vector<GraphBarrier> barriers;
     };
 
+    // A run of consecutive compiled passes on one queue: one command list, one
+    // ExecuteCommandLists. A direct run is split whenever a node inside it needs
+    // to wait on the compute queue — that split is the whole point, because it is
+    // what lets the direct work *before* the wait overlap the async chain.
+    struct Submission
+    {
+        GraphQueue queue          = GraphQueue::Direct;
+        uint32_t   firstCompiled  = 0;
+        uint32_t   count          = 0;
+        uint32_t   waitSubmission = kNoSlot; // cross-queue producer to wait for
+        bool       signals        = false;   // someone later waits on this run
+    };
+
     static D3D12_RESOURCE_STATES ToResourceState(GraphAccess access);
     static const char*           ToString(GraphAccess access);
 
     void Cull();
+
+    // Groups the compiled passes into per-queue runs and works out the cross-queue
+    // waits between them. Runs after barrier placement, on the compiled order.
+    void Schedule();
+
+    // Records one run into the given list, closing it. Timestamps and the query
+    // resolve stay on the direct queue.
+    void RecordSubmission(CommandContext& context, const Submission& submission, bool isLastSubmission);
+
+    // A reusable list for a run the graph allocates itself (everything but the
+    // first). Reset from this frame's allocator; several lists may share one
+    // allocator because only one of them records at a time.
+    ID3D12GraphicsCommandList4* AcquireList(GraphicsDevice& device, GraphQueue queue, uint32_t indexOnQueue);
 
     // Puts a synthesized transition into a slot's batch according to the placement
     // mode, and returns the slot it (or its BEGIN half) landed in.
@@ -248,9 +292,17 @@ private:
     // graph is rebuilt every frame.
     std::set<std::string>         m_disabledPasses;
     std::vector<CompiledPass>     m_compiled;
+    std::vector<Submission>       m_submissions;
     std::vector<std::string>      m_barrierLog;
     bool                          m_logBarriers = false;
+    bool                          m_asyncCompute = false;
     BarrierPlacement              m_barrierPlacement = BarrierPlacement::Consumer;
+
+    // Extra command lists the graph records runs into, kept across frames and
+    // reset on acquire. Index 0 of the direct pool is never used — the frame's
+    // primary list is supplied by the caller.
+    std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4>> m_directLists;
+    std::vector<Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4>> m_computeLists;
 
     Microsoft::WRL::ComPtr<ID3D12QueryHeap> m_timerQueryHeap;
     Microsoft::WRL::ComPtr<ID3D12Resource>  m_timerReadback;

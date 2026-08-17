@@ -10,6 +10,8 @@ public:
     // Debug layer + DRED + factory + adapter selection + device creation.
     void Initialize(bool enableDebugLayer);
 
+    // Both queues: the direct one the frame is built on, and an async compute one
+    // the render graph schedules independent chains onto (ADR 0017 phase 6c).
     void CreateCommandQueue();
     void CreateCommandAllocators();
     void CreateFence();
@@ -32,9 +34,18 @@ public:
     void SignalFrame();
     void WaitForCurrentFrame();
 
+    // Cross-queue ordering. One monotonic fence both queues signal and wait on:
+    // the value returned by a signal is what the other queue waits for, and the
+    // wait is a queue operation, so it must sit between two submissions rather
+    // than inside a command list.
+    UINT64 SignalCrossQueue(ID3D12CommandQueue* queue);
+    void   WaitCrossQueue(ID3D12CommandQueue* queue, UINT64 value);
+
     [[nodiscard]] Microsoft::WRL::ComPtr<ID3D12Device5>& GetDevice() { return m_device; }
     [[nodiscard]] Microsoft::WRL::ComPtr<ID3D12CommandQueue>& GetCommandQueue() { return m_commandQueue; }
+    [[nodiscard]] Microsoft::WRL::ComPtr<ID3D12CommandQueue>& GetComputeQueue() { return m_computeQueue; }
     [[nodiscard]] Microsoft::WRL::ComPtr<ID3D12CommandAllocator>& GetCommandAllocator(UINT frameIndex) { return m_commandAllocators[frameIndex]; }
+    [[nodiscard]] Microsoft::WRL::ComPtr<ID3D12CommandAllocator>& GetComputeCommandAllocator(UINT frameIndex) { return m_computeAllocators[frameIndex]; }
     [[nodiscard]] Microsoft::WRL::ComPtr<IDXGISwapChain3>& GetSwapChain() { return m_swapChain; }
     [[nodiscard]] UINT GetFrameIndex() const { return m_frameIndex; }
     [[nodiscard]] bool IsTearingSupported() const { return m_tearingSupport; }
@@ -51,10 +62,16 @@ private:
     DWORD m_debugMessageCallbackCookie = 0;
 
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_commandQueue;
+    Microsoft::WRL::ComPtr<ID3D12CommandQueue> m_computeQueue;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_commandAllocators[Constants::Graphics::NUM_FRAMES];
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> m_computeAllocators[Constants::Graphics::NUM_FRAMES];
 
     Microsoft::WRL::ComPtr<ID3D12Fence> m_fence;
     UINT64 m_fenceValue = 0;
+    // Separate from m_fence so a cross-queue handshake never perturbs the frame
+    // pacing values, which index by frame slot.
+    Microsoft::WRL::ComPtr<ID3D12Fence> m_crossQueueFence;
+    UINT64 m_crossQueueValue = 0;
     // Queue position of the last frame submitted from each slot; 0 means the slot
     // has never been used, so its first reuse waits for nothing.
     UINT64 m_frameFenceValues[Constants::Graphics::NUM_FRAMES] = {};

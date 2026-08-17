@@ -113,6 +113,12 @@ static AutoCVarInt   g_renderGraphTimings("rdg.timings", "Measure each render-gr
 static AutoCVarInt   g_barrierPlacement("rdg.barrierPlacement",
 	"Transition placement: 0 = at consumer, 1 = earliest legal, 2 = split begin/end", 0, CVarFlags::EditDrag, 0, 2);
 
+// ADR 0017 phase 6c. Off = one queue, one command list, one submission per frame.
+// On = nodes that asked for the compute queue get it, and the frame becomes a run
+// per queue ordered by cross-queue fences.
+static AutoCVarInt   g_asyncCompute("rdg.asyncCompute",
+	"Schedule nodes that declare the compute queue onto an async compute queue", 0, CVarFlags::EditCheckbox);
+
 // Restores the pre-phase-6a frame: a full GPU drain after every Present, so no
 // frame overlaps another. Kept as a debugging switch because it is the fastest
 // way to tell a cross-frame race from anything else — if a symptom disappears
@@ -540,6 +546,7 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	m_renderGraph.SetTimingEnabled(g_renderGraphTimings.Get() != 0);
 	m_renderGraph.SetBarrierPlacement(
 		static_cast<RenderGraph::BarrierPlacement>(std::clamp(g_barrierPlacement.Get(), 0, 2)));
+	m_renderGraph.SetAsyncCompute(g_asyncCompute.Get() != 0);
 	BuildVxpgGraph();
 
 	SetViewport();
@@ -622,14 +629,11 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		},
 		nullptr);
 
+	// The graph owns submission now: with async compute on, the frame is several
+	// command lists on two queues ordered by fences, and only the compiler knows
+	// where those cuts belong (ADR 0017 phase 6c).
 	m_renderGraph.Compile();
-	m_renderGraph.Execute(CommandContext::Get());
-
-	ID3D12CommandList* const commandLists[] = { m_d3d12CommandList.Get() };
-
-	CommandContext::Get().Close();
-
-	m_graphicsDevice->GetCommandQueue()->ExecuteCommandLists(_countof(commandLists), commandLists);
+	m_renderGraph.ExecuteAndSubmit(CommandContext::Get(), *m_graphicsDevice, m_d3d12CommandList.Get());
 	ResourceStateTracker::Get().OnExecuteCommandLists();
 	UINT presentFlags = m_graphicsDevice->IsTearingSupported() ? DXGI_PRESENT_ALLOW_TEARING : 0; // TODO: do not check every time
 
@@ -812,8 +816,13 @@ void Renderer::CreateCommandList()
 
 void Renderer::ResetCommandList() const
 {
-	auto& allocator = m_graphicsDevice->GetCommandAllocator(m_graphicsDevice->GetFrameIndex());
+	const UINT frameIndex = m_graphicsDevice->GetFrameIndex();
+	auto& allocator = m_graphicsDevice->GetCommandAllocator(frameIndex);
 	ThrowIfFailed(allocator->Reset());
+	// The async chain of the frame that last used this slot has completed too: the
+	// frame's last submission is on the direct queue and waited for it, and pacing
+	// waits on that.
+	ThrowIfFailed(m_graphicsDevice->GetComputeCommandAllocator(frameIndex)->Reset());
 	// No initial pipeline state: every node sets its own before it records, and
 	// the raster PSO this used to name now belongs to a technique that may not
 	// even be active.
@@ -1395,7 +1404,77 @@ void Renderer::BuildVxpgGraph()
 			[this]() { m_lightInjectionPass->Render(); });
 	}
 
-	// Stage 3: build the guiding distribution from the injected voxels. One node
+	// Stage 3: SLIC superpixel clustering over the ShadingPoints G-buffer, one node
+	// per kernel. The iteration count is a constant, so the loop is unrolled into
+	// nodes and each iteration gets its own timing row.
+	//
+	// Declared here, ahead of the world-space chain it is independent of, purely so
+	// the two can overlap: the scheduler submits in declaration order, so an async
+	// run placed *after* the work meant to hide it would hide nothing (phase 6c).
+	// The only resource shared with that chain is ShadingPoints, read-only on both
+	// sides, which is why no fence is needed between them.
+	if (m_superpixelBuildPass)
+	{
+		m_superpixelBuildPass->SetFrameInputs(g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
+
+		m_renderGraph.AddPass("VXPG Superpixel InitSeeds",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.SetQueue(GraphQueue::AsyncCompute);
+				pass.Read(m_vxpg.shadingPoints, kUavRead);
+				pass.Write(m_vxpg.superpixelCenter, kUavWrite);
+			},
+			[this]() { m_superpixelBuildPass->RunInitSeeds(); });
+
+		for (uint32_t iteration = 0; iteration < Constants::Graphics::SUPERPIXEL_ITERATIONS; ++iteration)
+		{
+			m_renderGraph.AddPass(("VXPG Superpixel Associate " + std::to_string(iteration)).c_str(),
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.SetQueue(GraphQueue::AsyncCompute);
+					pass.Read(m_vxpg.shadingPoints, kUavRead);
+					pass.Read(m_vxpg.superpixelCenter, kUavRead);
+					pass.Write(m_vxpg.superpixelIndex, kUavWrite);
+				},
+				[this]() { m_superpixelBuildPass->RunAssociate(/*writeGather*/ false); });
+
+			m_renderGraph.AddPass(("VXPG Superpixel SumCenters " + std::to_string(iteration)).c_str(),
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.SetQueue(GraphQueue::AsyncCompute);
+					pass.Read(m_vxpg.shadingPoints, kUavRead);
+					pass.Read(m_vxpg.superpixelIndex, kUavRead);
+					pass.Write(m_vxpg.superpixelCenter, kUavWrite);
+				},
+				[this]() { m_superpixelBuildPass->RunSumCenters(); });
+		}
+
+		m_renderGraph.AddPass("VXPG Superpixel ClearCounter",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.SetQueue(GraphQueue::AsyncCompute);
+				pass.Write(m_vxpg.superpixelCounter, kUavWrite);
+			},
+			[this]() { m_superpixelBuildPass->RunClearCounter(); });
+
+		// Final association against the converged centers, this one also emitting
+		// the per-superpixel pixel lists and the fuzzy 4-nearest blend.
+		m_renderGraph.AddPass("VXPG Superpixel Gather",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.SetQueue(GraphQueue::AsyncCompute);
+				pass.Read(m_vxpg.shadingPoints, kUavRead);
+				pass.Read(m_vxpg.superpixelCenter, kUavRead);
+				pass.Write(m_vxpg.superpixelIndex, kUavWrite);
+				pass.Write(m_vxpg.superpixelCounter, kUavWrite);
+				pass.Write(m_vxpg.superpixelGathered, kUavWrite);
+				pass.Write(m_vxpg.superpixelFuzzyWeight, kUavWrite);
+				pass.Write(m_vxpg.superpixelFuzzyIndex, kUavWrite);
+			},
+			[this]() { m_superpixelBuildPass->RunAssociate(/*writeGather*/ true); });
+	}
+
+	// Stage 4: build the guiding distribution from the injected voxels. One node
 	// per kernel (clear -> reload baked bounds -> compact), so the ordering
 	// between them comes from these declarations rather than hand-placed barriers.
 	if (m_voxelGuidingBuildPass)
@@ -1503,62 +1582,6 @@ void Renderer::BuildVxpgGraph()
 				pass.Write(m_vxpg.clusterAssignments, kUavWrite);
 			},
 			[this, frame]() { m_clusterPass->RunAssign(frame); });
-	}
-
-	// Stage 6: SLIC superpixel clustering over the ShadingPoints G-buffer, one node
-	// per kernel. The iteration count is a constant, so the loop is unrolled into
-	// nodes and each iteration gets its own timing row.
-	if (m_superpixelBuildPass)
-	{
-		m_superpixelBuildPass->SetFrameInputs(g_superpixelWeight.Get(), g_superpixelPosNormalizer.Get());
-
-		m_renderGraph.AddPass("VXPG Superpixel InitSeeds",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.Read(m_vxpg.shadingPoints, kUavRead);
-				pass.Write(m_vxpg.superpixelCenter, kUavWrite);
-			},
-			[this]() { m_superpixelBuildPass->RunInitSeeds(); });
-
-		for (uint32_t iteration = 0; iteration < Constants::Graphics::SUPERPIXEL_ITERATIONS; ++iteration)
-		{
-			m_renderGraph.AddPass(("VXPG Superpixel Associate " + std::to_string(iteration)).c_str(),
-				[&](RenderGraphPassBuilder& pass)
-				{
-					pass.Read(m_vxpg.shadingPoints, kUavRead);
-					pass.Read(m_vxpg.superpixelCenter, kUavRead);
-					pass.Write(m_vxpg.superpixelIndex, kUavWrite);
-				},
-				[this]() { m_superpixelBuildPass->RunAssociate(/*writeGather*/ false); });
-
-			m_renderGraph.AddPass(("VXPG Superpixel SumCenters " + std::to_string(iteration)).c_str(),
-				[&](RenderGraphPassBuilder& pass)
-				{
-					pass.Read(m_vxpg.shadingPoints, kUavRead);
-					pass.Read(m_vxpg.superpixelIndex, kUavRead);
-					pass.Write(m_vxpg.superpixelCenter, kUavWrite);
-				},
-				[this]() { m_superpixelBuildPass->RunSumCenters(); });
-		}
-
-		m_renderGraph.AddPass("VXPG Superpixel ClearCounter",
-			[&](RenderGraphPassBuilder& pass) { pass.Write(m_vxpg.superpixelCounter, kUavWrite); },
-			[this]() { m_superpixelBuildPass->RunClearCounter(); });
-
-		// Final association against the converged centers, this one also emitting
-		// the per-superpixel pixel lists and the fuzzy 4-nearest blend.
-		m_renderGraph.AddPass("VXPG Superpixel Gather",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.Read(m_vxpg.shadingPoints, kUavRead);
-				pass.Read(m_vxpg.superpixelCenter, kUavRead);
-				pass.Write(m_vxpg.superpixelIndex, kUavWrite);
-				pass.Write(m_vxpg.superpixelCounter, kUavWrite);
-				pass.Write(m_vxpg.superpixelGathered, kUavWrite);
-				pass.Write(m_vxpg.superpixelFuzzyWeight, kUavWrite);
-				pass.Write(m_vxpg.superpixelFuzzyIndex, kUavWrite);
-			},
-			[this]() { m_superpixelBuildPass->RunAssociate(/*writeGather*/ true); });
 	}
 
 	// Stage 7: per-superpixel x per-cluster soft visibility (cvis), one node per
@@ -1837,6 +1860,7 @@ void Renderer::DumpRenderGraphIfRequested()
 		return;
 
 	LogDumpBlock("[RDG] frame passes:", m_renderGraph.DumpPasses());
+	LogDumpBlock("[RDG] submission plan:", m_renderGraph.DumpSchedule());
 	LogDumpBlock("[RDG] synthesized barriers:", m_renderGraph.DumpBarriers());
 
 	// Node costs averaged over every timed frame since the last reset, most

@@ -1,10 +1,14 @@
 #include "pch.h"
 #include "RenderGraph.h"
 
+#include <array>
+
 #include "CommandContext.h"
+#include "GraphicsDevice.h"
 #include "Resources/Resource.h"
 #include "Resources/ResourceStateTracker.h"
 #include "Utils/GpuMarker.h"
+#include "Utils/Utils.h"
 
 void RenderGraphPassBuilder::Read(GraphResourceHandle resource, GraphAccess access)
 {
@@ -301,6 +305,95 @@ void RenderGraph::Compile()
             lastAccessSlot[declaration.resource] = slot;
         }
     }
+
+    Schedule();
+}
+
+// Cuts the compiled order into runs of one queue each and works out which
+// cross-queue fence each run has to wait on (ADR 0017 phase 6c).
+//
+// The rule that makes overlap possible: a run is also cut when a node inside it
+// first needs to wait on the other queue. Without that cut the wait would sit at
+// the head of the run and stall the independent direct work that was supposed to
+// hide the async chain.
+//
+// Read-after-read never creates a dependency, which is what lets both queues read
+// the ShadingPoints G-buffer at once — the only resource the two VXPG chains
+// share.
+void RenderGraph::Schedule()
+{
+    m_submissions.clear();
+
+    constexpr uint32_t kQueueCount = 2;
+    auto queueIndex = [](GraphQueue queue)
+    {
+        assert(queue != GraphQueue::Copy && "The scheduler models two queues; a copy queue needs its own list and allocator");
+        return queue == GraphQueue::AsyncCompute ? 1u : 0u;
+    };
+
+    // Last submission to write each resource, and the last to read it per queue.
+    std::vector<uint32_t> lastWrite(m_resources.size(), kNoSlot);
+    std::vector<std::array<uint32_t, kQueueCount>> lastRead(m_resources.size(), {kNoSlot, kNoSlot});
+
+    for (uint32_t slot = 0; slot < m_compiled.size(); ++slot)
+    {
+        const PassNode&  pass  = m_passes[m_compiled[slot].passIndex];
+        const GraphQueue queue = m_asyncCompute ? pass.queue : GraphQueue::Direct;
+        const uint32_t   other = 1u - queueIndex(queue);
+
+        uint32_t needsWaitOn = kNoSlot;
+        auto require = [&needsWaitOn](uint32_t submission)
+        {
+            if (submission != kNoSlot && (needsWaitOn == kNoSlot || submission > needsWaitOn))
+                needsWaitOn = submission;
+        };
+
+        for (const auto& declaration : pass.declarations)
+        {
+            const uint32_t writer = lastWrite[declaration.resource];
+            if (writer != kNoSlot && m_submissions[writer].queue != queue)
+                require(writer);
+
+            // A write also has to clear the other queue's readers.
+            if (declaration.isWrite)
+                require(lastRead[declaration.resource][other]);
+        }
+
+        const bool sameQueue = !m_submissions.empty() && m_submissions.back().queue == queue;
+        const bool waitCovered = sameQueue &&
+            (needsWaitOn == kNoSlot ||
+             (m_submissions.back().waitSubmission != kNoSlot && needsWaitOn <= m_submissions.back().waitSubmission));
+
+        if (!sameQueue || !waitCovered)
+        {
+            Submission submission;
+            submission.queue          = queue;
+            submission.firstCompiled  = slot;
+            submission.waitSubmission = needsWaitOn;
+            m_submissions.push_back(submission);
+
+            if (needsWaitOn != kNoSlot)
+                m_submissions[needsWaitOn].signals = true;
+        }
+
+        ++m_submissions.back().count;
+
+        const uint32_t current = static_cast<uint32_t>(m_submissions.size() - 1);
+        for (const auto& declaration : pass.declarations)
+        {
+            if (declaration.isWrite)
+                lastWrite[declaration.resource] = current;
+            else
+                lastRead[declaration.resource][queueIndex(queue)] = current;
+        }
+    }
+
+    // The frame's first run carries whatever was recorded before the graph, and
+    // its last one presents; both are direct by construction.
+    assert((m_submissions.empty() || m_submissions.front().queue == GraphQueue::Direct) &&
+           "The frame's first submission must be the direct one that already holds the pre-graph recording");
+    assert((m_submissions.empty() || m_submissions.back().queue == GraphQueue::Direct) &&
+           "The frame must end on the direct queue: frame pacing signals only that queue's fence");
 }
 
 // Returns the slot the barrier (or its BEGIN half) went to, for the log.
@@ -347,14 +440,12 @@ std::string RenderGraph::DescribePlacement(uint32_t placedSlot, uint32_t consume
         : " [hoisted to '" + producer + "', " + span + " nodes early]";
 }
 
-void RenderGraph::Execute(CommandContext& context)
+void RenderGraph::RecordSubmission(CommandContext& context, const Submission& submission, bool isLastSubmission)
 {
-    m_timedPassCount = 0;
-    m_timedPassNames.clear();
-
-    for (const CompiledPass& compiled : m_compiled)
+    for (uint32_t i = 0; i < submission.count; ++i)
     {
-        PassNode& pass = m_passes[compiled.passIndex];
+        const CompiledPass& compiled = m_compiled[submission.firstCompiled + i];
+        PassNode&           pass     = m_passes[compiled.passIndex];
 
         for (const GraphBarrier& barrier : compiled.barriers)
             context.EnqueueBarrier(barrier.barrier, barrier.resource);
@@ -388,11 +479,77 @@ void RenderGraph::Execute(CommandContext& context)
 
     context.FlushBarriers();
 
-    if (m_timedPassCount > 0)
+    // One resolve for the whole frame, on the last run: by then every queue's
+    // timestamps have been written, because the last run waits on the others.
+    if (isLastSubmission && m_timedPassCount > 0)
     {
         context.GetCommandListUnflushed()->ResolveQueryData(m_timerQueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0,
             m_timedPassCount * 2, m_timerReadback.Get(), 0);
     }
+
+    context.Close();
+}
+
+ID3D12GraphicsCommandList4* RenderGraph::AcquireList(GraphicsDevice& device, GraphQueue queue, uint32_t indexOnQueue)
+{
+    const bool isCompute = queue == GraphQueue::AsyncCompute;
+    auto&      pool      = isCompute ? m_computeLists : m_directLists;
+    const auto listType  = isCompute ? D3D12_COMMAND_LIST_TYPE_COMPUTE : D3D12_COMMAND_LIST_TYPE_DIRECT;
+    auto&      allocator = isCompute ? device.GetComputeCommandAllocator(device.GetFrameIndex())
+                                     : device.GetCommandAllocator(device.GetFrameIndex());
+
+    while (pool.size() <= indexOnQueue)
+    {
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> list;
+        ThrowIfFailed(device.GetDevice()->CreateCommandList(0, listType, allocator.Get(), nullptr, IID_PPV_ARGS(&list)));
+        ThrowIfFailed(list->Close());
+        list->SetName(isCompute ? L"RenderGraph Compute List" : L"RenderGraph Direct List");
+        pool.push_back(std::move(list));
+    }
+
+    // Safe to reset from an allocator that already backs submitted work: the
+    // allocator itself is only reset once the frame slot comes round again, and
+    // the graph records one list at a time.
+    ThrowIfFailed(pool[indexOnQueue]->Reset(allocator.Get(), nullptr));
+    return pool[indexOnQueue].Get();
+}
+
+void RenderGraph::ExecuteAndSubmit(CommandContext& context, GraphicsDevice& device,
+                                   ID3D12GraphicsCommandList4* primaryDirectList)
+{
+    m_timedPassCount = 0;
+    m_timedPassNames.clear();
+
+    std::vector<UINT64> signalValues(m_submissions.size(), 0);
+    uint32_t            directListsUsed  = 0;
+    uint32_t            computeListsUsed = 0;
+
+    for (uint32_t index = 0; index < m_submissions.size(); ++index)
+    {
+        const Submission& submission = m_submissions[index];
+        const bool        isCompute  = submission.queue == GraphQueue::AsyncCompute;
+
+        ID3D12GraphicsCommandList4* list = primaryDirectList;
+        if (index > 0)
+            list = AcquireList(device, submission.queue, isCompute ? computeListsUsed++ : directListsUsed++);
+
+        context.Bind(list);
+        RecordSubmission(context, submission, index + 1 == m_submissions.size());
+
+        ID3D12CommandQueue* queue = isCompute ? device.GetComputeQueue().Get() : device.GetCommandQueue().Get();
+        if (submission.waitSubmission != kNoSlot)
+            device.WaitCrossQueue(queue, signalValues[submission.waitSubmission]);
+
+        ID3D12CommandList* const lists[] = { list };
+        queue->ExecuteCommandLists(1, lists);
+
+        if (submission.signals)
+            signalValues[index] = device.SignalCrossQueue(queue);
+    }
+
+    // The caller's list is closed and submitted; leave the context on it so the
+    // next frame's reset-and-bind is unchanged.
+    context.Bind(primaryDirectList);
 }
 
 void RenderGraph::InitializeTimers(ID3D12Device* device, ID3D12CommandQueue* queue)
@@ -516,6 +673,28 @@ std::string RenderGraph::DumpBarriers() const
     {
         dump += entry;
         dump += '\n';
+    }
+    return dump;
+}
+
+std::string RenderGraph::DumpSchedule() const
+{
+    std::string dump;
+    for (uint32_t index = 0; index < m_submissions.size(); ++index)
+    {
+        const Submission& submission = m_submissions[index];
+
+        dump += "[" + std::to_string(index) + "] ";
+        dump += (submission.queue == GraphQueue::AsyncCompute) ? "compute" : "direct ";
+        dump += " " + std::to_string(submission.count) + " node(s)";
+        if (submission.waitSubmission != kNoSlot)
+            dump += ", waits on [" + std::to_string(submission.waitSubmission) + "]";
+        if (submission.signals)
+            dump += ", signals";
+        dump += '\n';
+
+        for (uint32_t i = 0; i < submission.count; ++i)
+            dump += "    " + m_passes[m_compiled[submission.firstCompiled + i].passIndex].name + '\n';
     }
     return dump;
 }

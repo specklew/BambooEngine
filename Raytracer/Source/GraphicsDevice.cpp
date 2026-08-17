@@ -91,6 +91,24 @@ void GraphicsDevice::CreateCommandQueue()
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
 	ThrowIfFailed(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
+	m_commandQueue->SetName(L"Direct Queue");
+
+	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+	ThrowIfFailed(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_computeQueue)));
+	m_computeQueue->SetName(L"Async Compute Queue");
+
+	// The render graph timestamps nodes on both queues into one query heap, which
+	// only reads correctly if both tick at the same rate. Every GPU this runs on
+	// does, but say so rather than assume it.
+	UINT64 directFrequency = 0;
+	UINT64 computeFrequency = 0;
+	if (SUCCEEDED(m_commandQueue->GetTimestampFrequency(&directFrequency)) &&
+	    SUCCEEDED(m_computeQueue->GetTimestampFrequency(&computeFrequency)) &&
+	    directFrequency != computeFrequency)
+	{
+		spdlog::warn("Direct and compute queue timestamp frequencies differ ({} vs {}); async node timings will be wrong",
+			directFrequency, computeFrequency);
+	}
 }
 
 void GraphicsDevice::CreateCommandAllocators()
@@ -98,12 +116,15 @@ void GraphicsDevice::CreateCommandAllocators()
 	for (UINT i = 0; i < Constants::Graphics::NUM_FRAMES; ++i)
 	{
 		ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[i])));
+		ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&m_computeAllocators[i])));
 	}
 }
 
 void GraphicsDevice::CreateFence()
 {
 	ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+	ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_crossQueueFence)));
+	m_crossQueueFence->SetName(L"Cross Queue Fence");
 
 	m_fenceValue++;
 
@@ -219,16 +240,33 @@ bool GraphicsDevice::CheckRayTracingSupport() const
 
 void GraphicsDevice::FlushCommandQueue()
 {
-	m_fenceValue++;
-	ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceValue));
-
-	if (m_fence->GetCompletedValue() < m_fenceValue)
+	// Both queues, or a resize could free a resource the async chain is still
+	// reading — the direct queue's fence says nothing about the compute one.
+	for (ID3D12CommandQueue* queue : { m_commandQueue.Get(), m_computeQueue.Get() })
 	{
-		ThrowIfFailed(m_fence->SetEventOnCompletion(m_fenceValue, m_fenceEvent));
-		WaitForSingleObject(m_fenceEvent, INFINITE);
+		m_fenceValue++;
+		ThrowIfFailed(queue->Signal(m_fence.Get(), m_fenceValue));
+
+		if (m_fence->GetCompletedValue() < m_fenceValue)
+		{
+			ThrowIfFailed(m_fence->SetEventOnCompletion(m_fenceValue, m_fenceEvent));
+			WaitForSingleObject(m_fenceEvent, INFINITE);
+		}
 	}
 
 	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+}
+
+UINT64 GraphicsDevice::SignalCrossQueue(ID3D12CommandQueue* queue)
+{
+	++m_crossQueueValue;
+	ThrowIfFailed(queue->Signal(m_crossQueueFence.Get(), m_crossQueueValue));
+	return m_crossQueueValue;
+}
+
+void GraphicsDevice::WaitCrossQueue(ID3D12CommandQueue* queue, UINT64 value)
+{
+	ThrowIfFailed(queue->Wait(m_crossQueueFence.Get(), value));
 }
 
 void GraphicsDevice::RefreshFrameIndex()
