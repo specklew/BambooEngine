@@ -42,8 +42,27 @@ namespace
     constexpr BindingSlot kVisibilityDispatchArgs = PassUav("gReadDispatchArgs", FINGERPRINT_VISIBILITY_REG_DISPATCH_ARGS);
     constexpr BindingSlot kVisibilityFingerprints = PassUav("gVoxelFingerprints", FINGERPRINT_VISIBILITY_REG_FINGERPRINTS);
 
+    constexpr BindingSlot kVisibilityConstants =
+        PassRootConstants("VisibilityCB", FINGERPRINT_VISIBILITY_REG_CB, 4);
+
     constexpr BindingSlot kVisibilitySlots[] = {kVisibilityTlas, kVisibilityRepresentatives, kVisibilityLightPoints,
-                                                kVisibilityDispatchArgs, kVisibilityFingerprints};
+                                                kVisibilityDispatchArgs, kVisibilityFingerprints,
+                                                kVisibilityConstants};
+
+    // Diagnostic decomposition of the visibility test, read out through
+    // vxpg.cluster.dumpStats' mean-popcount line. 0 = the real test, 1 = drop the
+    // facing gate, 2 = drop the occlusion ray, 3 = report only which
+    // representatives landed on a surface at all.
+    // A representative that lands on the sky is not a receiver: it contributes no
+    // bit to any voxel's fingerprint, so the 128-bit signature silently narrows.
+    // Off restores the ported shape (one blind pick per cell) for A/B.
+    AutoCVarInt g_fingerprintRetryPresample("vxpg.fingerprint.retryPresample",
+        "Resample a representative until it lands on a surface instead of spending it on the sky",
+        1, CVarFlags::EditCheckbox);
+
+    AutoCVarInt g_fingerprintProbe("vxpg.fingerprint.probe",
+        "Fingerprint visibility probe: 0 = normal, 1 = no facing gate, 2 = no occlusion, 3 = receiver validity",
+        0, CVarFlags::EditDrag, 0, 3);
 
     // PCG hash — matches Random.hlsl's pcg_hash so the CPU seed decorrelates
     // the per-frame stratified picks the same way the shader RNG expects.
@@ -162,7 +181,7 @@ void VxpgFingerprintPass::RunPresample(uint32_t frameIndex)
 
     cmd->SetComputeRootSignature(m_presampleRootSig.Get());
     uint32_t presampleConstants[4] = { m_width, m_height,
-        PcgHash(frameIndex), 0u };
+        PcgHash(frameIndex), g_fingerprintRetryPresample.Get() != 0 ? 1u : 0u };
     m_presampleRootSig.SetConstants(cmd, kPresampleConstants, presampleConstants, 4);
     m_presampleRootSig.SetTable(cmd, 0, globalHeap.GpuStart());
     m_presampleRootSig.Set(cmd, kPresampleRepresentatives, m_screenRepresentativePoints->GetGPUVirtualAddress());
@@ -191,6 +210,8 @@ void VxpgFingerprintPass::RunVisibility(D3D12_GPU_VIRTUAL_ADDRESS tlasVa)
     auto* cmd = m_commandList.Get();
 
     cmd->SetComputeRootSignature(m_visibilityRootSig.Get());
+    const uint32_t visibilityConstants[4] = { static_cast<uint32_t>(std::clamp(g_fingerprintProbe.Get(), 0, 3)), 0u, 0u, 0u };
+    m_visibilityRootSig.SetConstants(cmd, kVisibilityConstants, visibilityConstants, 4);
     m_visibilityRootSig.Set(cmd, kVisibilityTlas, tlasVa);
     m_visibilityRootSig.Set(cmd, kVisibilityRepresentatives, m_screenRepresentativePoints->GetGPUVirtualAddress());
     m_visibilityRootSig.Set(cmd, kVisibilityLightPoints, m_buildPass->GetCompactVoxelLightPointsBuffer()->GetGPUVirtualAddress());

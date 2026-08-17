@@ -1986,9 +1986,12 @@ void GuidedIntegratorMain()
 
     // View 8: voxel fingerprints. popcount(fingerprint)/128 as grayscale at the
     // primary hit's voxel (bright = sees many representatives). Green overlay =
-    // the 128 stratified representative pixels this frame (recomputed with the
-    // same hash the presample kernel used). magenta = inverse index points past
-    // the compacted count (corruption). dark blue = unlit voxel / sky.
+    // each cell's FIRST candidate pixel, recomputed with the presample's hash —
+    // the presample now retries within the cell until it lands on a surface, and
+    // this raygen has no ShadingPoints binding to follow that with, so the dots
+    // mark where sampling started rather than the representative it settled on.
+    // magenta = inverse index points past the compacted count (corruption).
+    // dark blue = unlit voxel / sky.
     if (debugView == 8u)
     {
         uint2 dims = gLaunchDims;

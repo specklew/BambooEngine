@@ -110,6 +110,7 @@
 #define FINGERPRINT_VISIBILITY_REG_LIGHT_POINTS       2 // u
 #define FINGERPRINT_VISIBILITY_REG_DISPATCH_ARGS      3 // u
 #define FINGERPRINT_VISIBILITY_REG_FINGERPRINTS       4 // u
+#define FINGERPRINT_VISIBILITY_REG_CB                 0 // b (probe mode, diagnostic)
 
 // ---------------------------------------------------------------------------
 // VxpgClusterPass — vxpgCluster.hlsl
