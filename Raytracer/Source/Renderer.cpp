@@ -1066,7 +1066,7 @@ void Renderer::InitializeEditorUI()
 	m_editorUI->SetOnDebugViewPicked([this](int index) { SetTechniqueDebugView(index); });
 }
 
-void Renderer::LoadScene(const std::wstring& path)
+void Renderer::LoadScene(const std::wstring& path, const std::string& statesKey)
 {
 	char pathUtf8[MAX_PATH];
 	WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, pathUtf8, sizeof(pathUtf8), nullptr, nullptr);
@@ -1090,7 +1090,7 @@ void Renderer::LoadScene(const std::wstring& path)
 		m_clusterVisibilityPass->SetScene(m_scene);
 	m_editorUI->SetScene(m_scene);
 	if (m_statesManager)
-		m_statesManager->OnSceneChanged(ExtractModelName(path));
+		m_statesManager->OnSceneChanged(statesKey.empty() ? ExtractModelName(path) : ToLowerAscii(statesKey));
 	if (m_voxelizationPass)
 		m_voxelizationPass->OnSceneLoaded(*m_scene);
 }

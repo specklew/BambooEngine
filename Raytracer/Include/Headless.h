@@ -81,6 +81,7 @@ struct HeadlessArgs
     bool headless = false;
 
     std::string              scene;       // glTF path, or a bare model name resolved under resources/models/
+    std::string              statesKey;   // --states-key: states.json key when the file name is not it
     std::vector<std::string> states;      // saved state names within the scene
     std::vector<std::string> techniques;  // raytracing technique registry names
 

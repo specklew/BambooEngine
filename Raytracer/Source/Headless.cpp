@@ -48,6 +48,7 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
         if (flag == "--headless")        args.headless = true;
         else if (flag == "--scene")      args.scene = valueOf(i);
         else if (flag == "--states")     args.states = SplitCsv(valueOf(i));
+        else if (flag == "--states-key") args.statesKey = valueOf(i);
         else if (flag == "--techniques") args.techniques = SplitCsv(valueOf(i));
         else if (flag == "--seconds")    args.seconds = std::stof(valueOf(i));
         else if (flag == "--out")        args.outDir = valueOf(i);

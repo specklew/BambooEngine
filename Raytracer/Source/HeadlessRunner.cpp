@@ -20,16 +20,44 @@ namespace
         return buf;
     }
 
+    bool LooksLikePath(const std::string& scene)
+    {
+        return scene.find('/')  != std::string::npos ||
+               scene.find('\\') != std::string::npos ||
+               scene.find(".gl") != std::string::npos ||
+               scene.find(".json") != std::string::npos; // Tungsten scene
+    }
+
     std::wstring ResolveScenePath(const std::string& scene)
     {
         std::string path = scene;
-        const bool looksLikePath = scene.find('/') != std::string::npos ||
-                                   scene.find('\\') != std::string::npos ||
-                                   scene.find(".gl") != std::string::npos ||
-                                   scene.find(".json") != std::string::npos; // Tungsten scene
-        if (!looksLikePath)
+        if (!LooksLikePath(scene))
+        {
             path = "resources/models/" + scene + ".glb";
+            if (!std::filesystem::exists(path))
+            {
+                // Research scenes sit one folder down and rewrite dashes: veach-ajar -> veach-ajar/veach_ajar_core.glb.
+                std::string fileStem = scene;
+                std::replace(fileStem.begin(), fileStem.end(), '-', '_');
+                const std::string research = "resources/models/gltf_research_scenes/" + scene + "/" + fileStem + "_core.glb";
+                if (std::filesystem::exists(research))
+                {
+                    spdlog::info("Scene '{}' resolved to research scene {}", scene, research);
+                    path = research;
+                }
+            }
+        }
         return std::wstring(path.begin(), path.end());
+    }
+
+    // A bare --scene name IS the scene's identity, so it keys states.json directly.
+    // That keeps research scenes (whose file is veach_ajar_core.glb) on the camera
+    // set saved as "veach-ajar", and is a no-op for flat models where the two agree.
+    std::string ResolveStatesKey(const HeadlessArgs& args)
+    {
+        if (!args.statesKey.empty())
+            return args.statesKey;
+        return LooksLikePath(args.scene) ? std::string{} : args.scene;
     }
 
     bool Contains(const std::vector<std::string>& haystack, const std::string& needle)
@@ -176,7 +204,7 @@ int HeadlessRunner::Run()
     m_renderer.SetHeadless(true);
     m_renderer.ApplyRenderConfig(m_config);
 
-    m_renderer.LoadScene(ResolveScenePath(m_args.scene));
+    m_renderer.LoadScene(ResolveScenePath(m_args.scene), ResolveStatesKey(m_args));
     ApplyConfiguredLights();
 
     if (!Validate())

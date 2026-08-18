@@ -71,7 +71,10 @@ public:
 	void ExecuteCommandsAndReset();
 
 	// Setup verbs shared by the interactive UI callbacks and the headless runner.
-	void LoadScene(const std::wstring& path);
+	// statesKey overrides the states.json key derived from the file name. Research
+	// scenes rename the file (veach-ajar/veach_ajar_core.glb) but share one camera
+	// set, so the folder- or user-supplied name is the scene's real identity.
+	void LoadScene(const std::wstring& path, const std::string& statesKey = {});
 	bool SetTechnique(const std::string& name);
 	void SetTechniqueByIndex(int index);
 	void SetHeadless(bool headless) { m_headless = headless; }
