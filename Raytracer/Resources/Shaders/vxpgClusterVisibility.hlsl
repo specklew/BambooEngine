@@ -248,10 +248,13 @@ void CheckClusterVisibility(uint3 dtid : SV_DispatchThreadID, uint gidx : SV_Gro
                 ray.TMin = 0.0;
                 ray.TMax = max(0.01, dist - 0.02);
 
-                RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
-                q.TraceRayInline(SceneBVH, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff, ray);
-                while (q.Proceed())
-                    q.CommitNonOpaqueTriangleHit();
+                // Alpha-cutout geometry counts as a full occluder, stated with the flag
+                // instead of committing every candidate. Same trade as the fingerprint
+                // pass: this feeds a guiding decision, so a foliage miss costs efficiency
+                // and not correctness.
+                RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
+                q.TraceRayInline(SceneBVH, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE, 0xff, ray);
+                q.Proceed();
                 visible = (q.CommittedStatus() == COMMITTED_NOTHING);
 
                 if (visible)

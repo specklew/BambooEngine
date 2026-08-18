@@ -202,12 +202,15 @@ void BuildVoxelFingerprints(uint3 tid : SV_DispatchThreadID)
         ray.TMin = 0.0;
         ray.TMax = max(FINGERPRINT_RAY_EPSILON, distance - 2.0 * FINGERPRINT_RAY_EPSILON);
 
-        RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> q;
-        q.TraceRayInline(gSceneBVH, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, 0xff, ray);
-        // Treat any geometry (opaque or alpha-cutout) as an occluder — a coarse
-        // clustering signal, matching SIByL's opaque-only visibility test.
-        while (q.Proceed())
-            q.CommitNonOpaqueTriangleHit();
+        // FORCE_OPAQUE states what this test already did: alpha-cutout geometry counts
+        // as a full occluder. Deliberate coarsening — the fingerprint only decides which
+        // voxels cluster together, so a miss through foliage costs guiding efficiency,
+        // never correctness, and alpha-testing it would drag the instance/geometry/texture
+        // bindings into this pass for a 128-representative inner loop. The shadow rays
+        // that DO carry radiance (raytracing.shadow.hlsl) alpha-test properly.
+        RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> q;
+        q.TraceRayInline(gSceneBVH, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE, 0xff, ray);
+        q.Proceed();
         if (q.CommittedStatus() != COMMITTED_NOTHING)
             visible = false;
     }
