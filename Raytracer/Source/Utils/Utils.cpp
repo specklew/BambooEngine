@@ -260,6 +260,64 @@ namespace RenderingUtils
 		return defaultBuffer;
 	}
 
+	// Tightly packed RGBA8 copy of a glTF image, so mip generation has one layout to work on.
+	static std::vector<uint8_t> ExpandToRgba8(const tinygltf::Image& image)
+	{
+		const size_t pixelCount = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
+		std::vector<uint8_t> rgba(pixelCount * 4, 255);
+
+		if (image.component == 4)
+		{
+			memcpy(rgba.data(), image.image.data(), pixelCount * 4);
+		}
+		else if (image.component == 3)
+		{
+			for (size_t px = 0; px < pixelCount; px++)
+			{
+				rgba[px * 4 + 0] = image.image[px * 3 + 0];
+				rgba[px * 4 + 1] = image.image[px * 3 + 1];
+				rgba[px * 4 + 2] = image.image[px * 3 + 2];
+			}
+		}
+		else
+		{
+			spdlog::error("Unsupported image component count: {}", image.component);
+		}
+
+		return rgba;
+	}
+
+	// 2x2 box filter. An odd level clamps its last row/column onto itself instead of
+	// reading past the level, which double-weights that one edge texel.
+	static std::vector<uint8_t> DownsampleRgba8(const std::vector<uint8_t>& src, uint32_t srcWidth, uint32_t srcHeight,
+		uint32_t dstWidth, uint32_t dstHeight)
+	{
+		std::vector<uint8_t> dst(static_cast<size_t>(dstWidth) * dstHeight * 4);
+
+		for (uint32_t y = 0; y < dstHeight; y++)
+		{
+			const uint32_t y0 = std::min(y * 2, srcHeight - 1);
+			const uint32_t y1 = std::min(y * 2 + 1, srcHeight - 1);
+
+			for (uint32_t x = 0; x < dstWidth; x++)
+			{
+				const uint32_t x0 = std::min(x * 2, srcWidth - 1);
+				const uint32_t x1 = std::min(x * 2 + 1, srcWidth - 1);
+
+				for (uint32_t channel = 0; channel < 4; channel++)
+				{
+					const uint32_t sum = src[(static_cast<size_t>(y0) * srcWidth + x0) * 4 + channel]
+					                   + src[(static_cast<size_t>(y0) * srcWidth + x1) * 4 + channel]
+					                   + src[(static_cast<size_t>(y1) * srcWidth + x0) * 4 + channel]
+					                   + src[(static_cast<size_t>(y1) * srcWidth + x1) * 4 + channel];
+					dst[(static_cast<size_t>(y) * dstWidth + x) * 4 + channel] = static_cast<uint8_t>((sum + 2) / 4);
+				}
+			}
+		}
+
+		return dst;
+	}
+
 	ComPtr<ID3D12Resource> CreateDefaultTexture(
 		ID3D12Device* device,
 		ID3D12GraphicsCommandList* commandList,
@@ -267,11 +325,29 @@ namespace RenderingUtils
 		ComPtr<ID3D12Resource>& uploadBuffer)
     {
 		spdlog::debug("Creating default texture resource.");
+
+		// Full mip chain, built once at load. Without it every sampler is pinned to mip 0
+		// and any pattern finer than a pixel aliases into large moire blocks - the
+		// veach-ajar floor checker (2 texels per check in v) being the loud case.
+		std::vector<std::vector<uint8_t>> mips{ ExpandToRgba8(image) };
+		std::vector<std::pair<uint32_t, uint32_t>> mipSizes{
+			{ static_cast<uint32_t>(image.width), static_cast<uint32_t>(image.height) } };
+		while (mipSizes.back().first > 1 || mipSizes.back().second > 1)
+		{
+			const uint32_t srcWidth  = mipSizes.back().first;
+			const uint32_t srcHeight = mipSizes.back().second;
+			const uint32_t dstWidth  = std::max(1u, srcWidth / 2);
+			const uint32_t dstHeight = std::max(1u, srcHeight / 2);
+
+			mips.push_back(DownsampleRgba8(mips.back(), srcWidth, srcHeight, dstWidth, dstHeight));
+			mipSizes.push_back({ dstWidth, dstHeight });
+		}
+		const UINT mipCount = static_cast<UINT>(mips.size());
     	
 	    ComPtr<ID3D12Resource> defaultTexture;
 	    {
 		    const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-	    	const auto textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, image.width, image.height, 1, 1);
+	    	const auto textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, image.width, image.height, 1, static_cast<UINT16>(mipCount));
 
 	    	ThrowIfFailed(device->CreateCommittedResource(
 				&heapProperties,
@@ -282,13 +358,13 @@ namespace RenderingUtils
 				IID_PPV_ARGS(&defaultTexture)));
 	    }
     	
-    	D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint;
-    	UINT rowCount;
-    	UINT64 rowSize;
+    	std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(mipCount);
+    	std::vector<UINT> rowCounts(mipCount);
+    	std::vector<UINT64> rowSizes(mipCount);
     	UINT64 size;
     	auto desc = defaultTexture->GetDesc();
 
-    	device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, &rowCount, &rowSize, &size);
+    	device->GetCopyableFootprints(&desc, 0, mipCount, 0, footprints.data(), rowCounts.data(), rowSizes.data(), &size);
 	    
 	    {
 		    const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
@@ -306,49 +382,33 @@ namespace RenderingUtils
     	void* pData;
     	ThrowIfFailed(uploadBuffer->Map(0, nullptr, &pData));
 
-    	const UINT dstRowPitch = footprint.Footprint.RowPitch;
-
-    	if (image.component == 4)
+    	for (UINT mip = 0; mip < mipCount; mip++)
     	{
-    		for (UINT i = 0; i < rowCount; i++)
+    		const UINT srcRowPitch = mipSizes[mip].first * 4;
+    		for (UINT row = 0; row < rowCounts[mip]; row++)
     		{
     			memcpy(
-    				static_cast<uint8_t*>(pData) + dstRowPitch * i,
-    				&image.image[0] + image.width * 4 * i,
-    				image.width * 4);
+    				static_cast<uint8_t*>(pData) + footprints[mip].Offset
+    					+ static_cast<UINT64>(footprints[mip].Footprint.RowPitch) * row,
+    				mips[mip].data() + static_cast<size_t>(srcRowPitch) * row,
+    				srcRowPitch);
     		}
     	}
-    	else if (image.component == 3)
+
+    	for (UINT mip = 0; mip < mipCount; mip++)
     	{
-    		for (UINT i = 0; i < rowCount; i++)
-    		{
-    			const uint8_t* srcRow = &image.image[0] + image.width * 3 * i;
-    			uint8_t* dstRow = static_cast<uint8_t*>(pData) + dstRowPitch * i;
-    			for (int px = 0; px < image.width; px++)
-    			{
-    				dstRow[px * 4 + 0] = srcRow[px * 3 + 0];
-    				dstRow[px * 4 + 1] = srcRow[px * 3 + 1];
-    				dstRow[px * 4 + 2] = srcRow[px * 3 + 2];
-    				dstRow[px * 4 + 3] = 255;
-    			}
-    		}
+    		D3D12_TEXTURE_COPY_LOCATION defaultCopyLocation = {};
+    		defaultCopyLocation.pResource = defaultTexture.Get();
+    		defaultCopyLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    		defaultCopyLocation.SubresourceIndex = mip;
+
+    		D3D12_TEXTURE_COPY_LOCATION uploadCopyLocation = {};
+    		uploadCopyLocation.pResource = uploadBuffer.Get();
+    		uploadCopyLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    		uploadCopyLocation.PlacedFootprint = footprints[mip];
+
+    		CommandContext::Get().GetCommandList()->CopyTextureRegion(&defaultCopyLocation, 0, 0, 0, &uploadCopyLocation, nullptr);
     	}
-    	else
-    	{
-    		spdlog::error("Unsupported image component count: {}", image.component);
-    	}
-
-    	D3D12_TEXTURE_COPY_LOCATION defaultCopyLocation = {};
-    	defaultCopyLocation.pResource = defaultTexture.Get();
-    	defaultCopyLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    	defaultCopyLocation.SubresourceIndex = 0;
-
-    	D3D12_TEXTURE_COPY_LOCATION uploadCopyLocation = {};
-    	uploadCopyLocation.pResource = uploadBuffer.Get();
-    	uploadCopyLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-    	uploadCopyLocation.PlacedFootprint = footprint;
-
-    	CommandContext::Get().GetCommandList()->CopyTextureRegion(&defaultCopyLocation, 0, 0, 0, &uploadCopyLocation, nullptr);
 
     	// PIXEL | NON_PIXEL (matches the skybox): scene textures are sampled by
     	// the raster PS, the RT passes AND compute kernels (inline-RayQuery
