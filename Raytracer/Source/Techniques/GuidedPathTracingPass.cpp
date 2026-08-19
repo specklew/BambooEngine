@@ -209,8 +209,8 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
 
 void GuidedPathTracingPass::EnsureAdaptiveQResources(uint32_t width, uint32_t height)
 {
-    const uint32_t tilesPerRow    = (width + 15) / 16;
-    const uint32_t tilesPerColumn = (height + 15) / 16;
+    const uint32_t tilesPerRow    = (width  + ONE_SAMPLE_TILE_SIZE - 1) / ONE_SAMPLE_TILE_SIZE;
+    const uint32_t tilesPerColumn = (height + ONE_SAMPLE_TILE_SIZE - 1) / ONE_SAMPLE_TILE_SIZE;
     if (m_tileGuideQ && tilesPerRow == m_tileGridWidth && tilesPerColumn == m_tileGridHeight)
         return;
     m_tileGridWidth  = tilesPerRow;

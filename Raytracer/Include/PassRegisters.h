@@ -245,6 +245,14 @@
 // Tile count for the adaptive-q update's bounds check. Root descriptors carry no
 // size, so GetDimensions on u21/u22 returns garbage — the count has to be told.
 #define GUIDED_REG_ADAPTIVE_Q_CB        1  // b
+// Strategy-tile granularity for one-sample MIS (ADR 0015) — the selection coin,
+// the adaptive q and the strategy stats all work per tile. 8 is a wave64 raygen
+// footprint: the smallest tile that still keeps a whole wave on one branch,
+// which is the only coherence the estimator needs. Larger tiles buy nothing and
+// make the coin's binomial per-tile imbalance read as square patches of
+// differing noise in an unaccumulated frame.
+#define ONE_SAMPLE_TILE_SHIFT 3
+#define ONE_SAMPLE_TILE_SIZE  (1 << ONE_SAMPLE_TILE_SHIFT)
 
 // ---------------------------------------------------------------------------
 // Rasterization — colorShader.hlsl. Its own layout, not the frame one: it needs

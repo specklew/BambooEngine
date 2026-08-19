@@ -1390,7 +1390,7 @@ float OneSampleMisScaleLe(float pdfSelected, float probSelected, float pdfOther,
 }
 
 // Fixed-point (x256) luminance accumulation for the adaptive-q share. The
-// per-sample clamp keeps 256 tile pixels x spp within 32 bits; a control
+// per-sample clamp keeps one tile's pixels x spp within 32 bits; a control
 // signal tolerates the distortion (both buckets clamp identically).
 void AccumulateTileStrategyStats(uint tileId, bool guideSelected, float3 contribution)
 {
@@ -1422,10 +1422,11 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
                                  float neePdfNee, float neePdfBsdf, float neePdfGuide,
                                  inout uint seed)
 {
-    // Everything one-sample works at 16x16-tile granularity: the selection
-    // coin (wave coherence), the adaptive q, and the strategy stats.
-    const uint tilesPerRow = (gLaunchDims.x + 15u) >> 4;
-    const uint tileId = (gLaunchIndex.x >> 4) + (gLaunchIndex.y >> 4) * tilesPerRow;
+    // Everything one-sample works at ONE_SAMPLE_TILE_SIZE granularity: the
+    // selection coin (wave coherence), the adaptive q, and the strategy stats.
+    const uint tilesPerRow = (gLaunchDims.x + (ONE_SAMPLE_TILE_SIZE - 1u)) >> ONE_SAMPLE_TILE_SHIFT;
+    const uint tileId = (gLaunchIndex.x >> ONE_SAMPLE_TILE_SHIFT)
+                      + (gLaunchIndex.y >> ONE_SAMPLE_TILE_SHIFT) * tilesPerRow;
     const bool adaptiveQ = ((guidingFlags >> 9) & 1u) != 0u;
 
     // Guide-selection probability: fixed fair coin, or the per-tile value
@@ -1446,6 +1447,11 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
     // doubled). Tile granularity keeps whole waves on one branch; the hash
     // decorrelates tiles and frames, and the selection stays independent of
     // the integrand (unbiased).
+    // The draws are independent per frame, so over a short window one tile can
+    // collect several times another's guided samples — that binomial spread is
+    // what makes an UNACCUMULATED frame look patchy (ADR 0015). It averages out
+    // with accumulation; the tile is kept at one wave so the patches are as
+    // small as the estimator allows.
     uint tileSeed = pcg_hash((tileId * 7919u) ^ (frameIndex * 805459861u));
     const bool chooseGuide = guideAlive && Random1D(tileSeed) < qGuide;
     const float probGuide = guideAlive ? qGuide : 0.0;

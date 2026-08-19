@@ -5,6 +5,9 @@
 // int(w_G f) / int(f) — the variance-aware q for the one-sample model).
 // EMA-damped, clamped so both strategies stay explored; stats cleared for the
 // next frame. Bound through the guided PT global root signature (u22/u23).
+// Measured 2026-08-19: on veach-ajar the guide carries well over half the
+// energy everywhere, so the target sits on ADAPTIVE_Q_MAX and q is a flat 0.5 —
+// adaptivity only bites where the guide's share drops below the cap.
 
 #include "PassRegisters.h"
 
