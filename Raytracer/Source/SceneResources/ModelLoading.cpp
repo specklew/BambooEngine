@@ -126,6 +126,98 @@ static void ExtractVertices(const tinygltf::Model& model, tinygltf::Primitive& p
     }
 }
 
+// KHR_texture_transform, baked into the primitive's UVs at load rather than carried
+// to the shaders. Bamboo stores one UV set per vertex and duplicates vertices per
+// primitive, so the material's transform is a property of exactly these vertices —
+// folding it here makes every sampling site (raster, DXR hit, VBuffer, alpha test)
+// transform-aware with no register, no material field and no shader branch. The one
+// thing it cannot express is a material whose texture slots disagree; that case warns.
+struct UvTransform
+{
+    float offset[2]{ 0.0f, 0.0f };
+    float rotation = 0.0f;
+    float scale[2]{ 1.0f, 1.0f };
+    bool  present = false;
+
+    bool IsIdentity() const
+    {
+        return offset[0] == 0.0f && offset[1] == 0.0f && rotation == 0.0f && scale[0] == 1.0f && scale[1] == 1.0f;
+    }
+    bool operator==(const UvTransform& other) const
+    {
+        return offset[0] == other.offset[0] && offset[1] == other.offset[1] && rotation == other.rotation
+            && scale[0] == other.scale[0] && scale[1] == other.scale[1];
+    }
+};
+
+static UvTransform ReadUvTransform(const tinygltf::ExtensionMap& extensions)
+{
+    UvTransform transform;
+    const auto it = extensions.find("KHR_texture_transform");
+    if (it == extensions.end())
+        return transform;
+
+    transform.present = true;
+    if (it->second.Has("offset"))
+    {
+        const auto& offset = it->second.Get("offset");
+        if (offset.ArrayLen() == 2)
+        {
+            transform.offset[0] = static_cast<float>(offset.Get(0).GetNumberAsDouble());
+            transform.offset[1] = static_cast<float>(offset.Get(1).GetNumberAsDouble());
+        }
+    }
+    if (it->second.Has("scale"))
+    {
+        const auto& scale = it->second.Get("scale");
+        if (scale.ArrayLen() == 2)
+        {
+            transform.scale[0] = static_cast<float>(scale.Get(0).GetNumberAsDouble());
+            transform.scale[1] = static_cast<float>(scale.Get(1).GetNumberAsDouble());
+        }
+    }
+    if (it->second.Has("rotation"))
+        transform.rotation = static_cast<float>(it->second.Get("rotation").GetNumberAsDouble());
+
+    return transform;
+}
+
+// The material's transform: base colour wins, the other slots only fill in when it
+// has none. A material that transforms its slots differently cannot be baked into a
+// single UV set, so it says so instead of silently rendering one slot wrong.
+static UvTransform ReadMaterialUvTransform(const tinygltf::Material& material)
+{
+    const UvTransform baseColor = ReadUvTransform(material.pbrMetallicRoughness.baseColorTexture.extensions);
+    const UvTransform normal    = ReadUvTransform(material.normalTexture.extensions);
+    const UvTransform roughness = ReadUvTransform(material.pbrMetallicRoughness.metallicRoughnessTexture.extensions);
+
+    const UvTransform* chosen = nullptr;
+    for (const UvTransform* candidate : { &baseColor, &normal, &roughness })
+    {
+        if (!candidate->present)
+            continue;
+        if (chosen == nullptr)
+            chosen = candidate;
+        else if (!(*candidate == *chosen))
+            spdlog::warn("Material '{}' gives its texture slots different KHR_texture_transforms; baking the first one", material.name);
+    }
+    return chosen != nullptr ? *chosen : UvTransform{};
+}
+
+// glTF's uv' = translate * rotate * scale * uv, with the rotation clockwise in UV space.
+static void ApplyUvTransform(const UvTransform& transform, std::vector<Vertex>& vertices)
+{
+    const float cosRotation = std::cos(transform.rotation);
+    const float sinRotation = std::sin(transform.rotation);
+    for (Vertex& vertex : vertices)
+    {
+        const float scaledU = vertex.Tex0.x * transform.scale[0];
+        const float scaledV = vertex.Tex0.y * transform.scale[1];
+        vertex.Tex0.x =  cosRotation * scaledU + sinRotation * scaledV + transform.offset[0];
+        vertex.Tex0.y = -sinRotation * scaledU + cosRotation * scaledV + transform.offset[1];
+    }
+}
+
 static void ExtractIndices(const tinygltf::Model& model, const tinygltf::Primitive& primitive, std::vector<uint32_t>& outIndices)
 {
     assert(primitive.indices >= 0 && "Failed loading glTF model. Mesh primitive must have indices");
@@ -226,6 +318,19 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     
     ExtractIndices(model, primitive, indices);
     ExtractVertices(model, primitive, vertices);
+
+    // Before ComputeTangents, which derives the tangent frame from these UVs.
+    if (primitive.material >= 0 && primitive.material < static_cast<int>(model.materials.size()))
+    {
+        const UvTransform uvTransform = ReadMaterialUvTransform(model.materials[primitive.material]);
+        if (uvTransform.present && !uvTransform.IsIdentity())
+        {
+            ApplyUvTransform(uvTransform, vertices);
+            spdlog::debug("Baked KHR_texture_transform (scale {} {}, offset {} {}, rotation {}) into '{}' UVs",
+                uvTransform.scale[0], uvTransform.scale[1], uvTransform.offset[0], uvTransform.offset[1],
+                uvTransform.rotation, model.materials[primitive.material].name);
+        }
+    }
 
     assert(vertices.size() < INT_MAX);
     assert(indices.size() < INT_MAX);
