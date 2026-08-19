@@ -1345,6 +1345,7 @@ void Renderer::BuildVxpgGraph()
 		m_vxpg.lightTreeClusterRoots  = importBuffer(m_lightTreePass->GetClusterRootsBuffer(), "VXPG LightTreeClusterRoots");
 		m_vxpg.lightTreeSortKeys      = importBuffer(m_lightTreePass->GetSortKeysBuffer(), "VXPG LightTreeSortKeys");
 		m_vxpg.lightTreeDispatchArgs  = importBuffer(m_lightTreePass->GetDispatchArgsBuffer(), "VXPG LightTreeDispatchArgs");
+		m_vxpg.lightTreeIndirectArgs  = importBuffer(m_lightTreePass->GetIndirectDispatchArgsBuffer(), "VXPG LightTreeIndirectArgs");
 		m_vxpg.lightTreeNodeVisited   = importBuffer(m_lightTreePass->GetNodeVisitedBuffer(), "VXPG LightTreeNodeVisited");
 		m_vxpg.superpixelClusterHeap  = importBuffer(m_lightTreePass->GetSuperpixelClusterHeapBuffer(), "VXPG SuperpixelClusterHeap");
 	}
@@ -1676,6 +1677,11 @@ void Renderer::BuildVxpgGraph()
 				pass.Read(m_vxpg.clusterAssignments, kUavRead);
 				pass.Write(m_vxpg.lightTreeSortKeys, kUavWrite);
 				pass.Write(m_vxpg.lightTreeDispatchArgs, kUavWrite);
+				// Every group count for the four stages below, sized from this
+				// frame's leaf count. Stays INDIRECT_ARGUMENT from here on, which
+				// is why it is a separate buffer from the args above: those keep
+				// being read as a root UAV by the same dispatches.
+				pass.Write(m_vxpg.lightTreeIndirectArgs, kUavWrite);
 			},
 			[this]() { m_lightTreePass->RunEncode(); });
 
@@ -1683,6 +1689,7 @@ void Renderer::BuildVxpgGraph()
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Read(m_vxpg.lightTreeDispatchArgs, kUavRead);
+				pass.Read(m_vxpg.lightTreeIndirectArgs, GraphAccess::IndirectArgument);
 				pass.Write(m_vxpg.lightTreeSortKeys, kUavWrite);
 			},
 			[this]() { m_lightTreePass->RunSort(); });
@@ -1694,6 +1701,7 @@ void Renderer::BuildVxpgGraph()
 				pass.Read(m_vxpg.compactIds, kUavRead);
 				pass.Read(m_vxpg.premulIrradiance, kUavRead);
 				pass.Read(m_vxpg.clusterAssignments, kUavRead);
+				pass.Read(m_vxpg.lightTreeIndirectArgs, GraphAccess::IndirectArgument);
 				pass.Write(m_vxpg.lightTreeNodes, kUavWrite);
 				pass.Write(m_vxpg.lightTreeCompactToLeaf, kUavWrite);
 				pass.Write(m_vxpg.lightTreeClusterRoots, kUavWrite);
@@ -1704,6 +1712,7 @@ void Renderer::BuildVxpgGraph()
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Read(m_vxpg.lightTreeSortKeys, kUavRead);
+				pass.Read(m_vxpg.lightTreeIndirectArgs, GraphAccess::IndirectArgument);
 				pass.Write(m_vxpg.lightTreeNodes, kUavWrite);
 			},
 			[this]() { m_lightTreePass->RunInternal(); });
@@ -1712,6 +1721,7 @@ void Renderer::BuildVxpgGraph()
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Read(m_vxpg.lightTreeNodeVisited, kUavRead);
+				pass.Read(m_vxpg.lightTreeIndirectArgs, GraphAccess::IndirectArgument);
 				pass.Write(m_vxpg.lightTreeNodes, kUavWrite);
 				pass.Write(m_vxpg.lightTreeClusterRoots, kUavWrite);
 			},

@@ -58,6 +58,11 @@ public:
         int32_t  drawRects[4];
     };
 
+    // One DISPATCH argument triple. The encode kernel fills the whole array from
+    // the live leaf count (three tree stages, then the bitonic ladder), so a frame
+    // that lit 1500 voxels stops paying the 32768-leaf / 65536-key worst case.
+    struct DispatchArgsGpu { uint32_t threadGroupCount[3]; };
+
     // Consumed by the guided integrator (later) + debug view 11.
     D3D12_GPU_VIRTUAL_ADDRESS GetNodesBufferVA() const { return m_nodes->GetGPUVirtualAddress(); }
     D3D12_GPU_VIRTUAL_ADDRESS GetCompactToLeafBufferVA() const { return m_compactToLeaf->GetGPUVirtualAddress(); }
@@ -71,6 +76,7 @@ public:
     RWStructuredBuffer<float>* GetSuperpixelClusterHeapBuffer() const { return m_spixelClusterHeap.get(); }
     RWStructuredBuffer<uint64_t>* GetSortKeysBuffer() const { return m_sortKeys.get(); }
     RWStructuredBuffer<TreeBuildDispatchArgsGpu>* GetDispatchArgsBuffer() const { return m_dispatchArgs.get(); }
+    RWStructuredBuffer<DispatchArgsGpu>* GetIndirectDispatchArgsBuffer() const { return m_indirectDispatchArgs.get(); }
     RWStructuredBuffer<uint32_t>* GetNodeVisitedBuffer() const { return m_nodeVisited.get(); }
 
 private:
@@ -80,6 +86,7 @@ private:
     void CreateBuffers();
     void CreateRootSignature();
     void CreatePSOs();
+    void CreateCommandSignature();
 
     Microsoft::WRL::ComPtr<ID3D12Device5>              m_device;
     ActiveCommandList                                  m_commandList;
@@ -96,10 +103,12 @@ private:
     std::unique_ptr<RWStructuredBuffer<int32_t>>                  m_compactToLeaf; // SIByL compact2leaf
     std::unique_ptr<RWStructuredBuffer<int32_t>>                  m_clusterRoots;  // SIByL cluster_roots
     std::unique_ptr<RWStructuredBuffer<TreeBuildDispatchArgsGpu>> m_dispatchArgs;  // SIByL u_ConstrIndirectArgs
+    std::unique_ptr<RWStructuredBuffer<DispatchArgsGpu>>          m_indirectDispatchArgs; // Bamboo: live-sized group counts
     std::unique_ptr<RWStructuredBuffer<uint32_t>>                 m_nodeVisited;   // merge sibling-gate (own scalar buffer)
     std::unique_ptr<RWStructuredBuffer<float>>                   m_spixelClusterHeap; // SIByL tltree (mapX*mapY*64)
 
     RootSignature m_rootSig;
+    Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_dispatchCommandSignature;
     ComputeProgram* m_clearProgram = nullptr;
     ComputeProgram* m_encodeProgram = nullptr;
     ComputeProgram* m_initialProgram = nullptr;

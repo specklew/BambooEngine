@@ -42,12 +42,18 @@ constexpr BindingSlot kTreeImportanceHeap = PassUav("gSpixelClusterImportanceHea
 constexpr BindingSlot kTreeVisibilityMask = PassTableEntry("gClusterVisibilityMask", BindingKind::Uav,
                                                        LIGHT_TREE_REG_VISIBILITY_MASK,
                                                        GlobalDescriptor::ClusterVisibilityMask);
+constexpr BindingSlot kTreeIndirectArgs = PassUav("gIndirectDispatchArgs", LIGHT_TREE_REG_INDIRECT_ARGS);
 
 constexpr BindingSlot kLightTreeSlots[] = {
     kTreeGridConstants,   kTreeSortKeys,        kTreeNodes,          kTreeLeafRanges,     kTreeCompactToLeaf,
     kTreeClusterRoots,    kTreeDispatchArgs,    kTreeCompactIds,     kTreeAssignments,    kTreePremulIrradiance,
     kTreeCounters,        kTreeNodeVisited,     kTreeTopLevelConstants, kTreeAvgVisibility, kTreeImportanceHeap,
-    kTreeVisibilityMask};
+    kTreeVisibilityMask,  kTreeIndirectArgs};
+
+constexpr uint64_t IndirectArgOffset(uint32_t slot)
+{
+    return static_cast<uint64_t>(slot) * sizeof(D3D12_DISPATCH_ARGUMENTS);
+}
 } // namespace
 
 // SIByL ships the top-level tree with visibility = 1 (Average / soft weighting).
@@ -98,6 +104,7 @@ void VxpgLightTreePass::Initialize(
     CreateBuffers();
     CreateRootSignature();
     CreatePSOs();
+    CreateCommandSignature();
 
     m_initialized = true;
 }
@@ -118,6 +125,23 @@ void VxpgLightTreePass::CreateBuffers()
         m_device, 1, L"LightTree DispatchArgs");
     m_nodeVisited = std::make_unique<RWStructuredBuffer<uint32_t>>(
         m_device, kNodeCapacity, L"LightTree NodeVisited");
+    m_indirectDispatchArgs = std::make_unique<RWStructuredBuffer<DispatchArgsGpu>>(
+        m_device, LIGHT_TREE_INDIRECT_SLOT_COUNT, L"LightTree IndirectDispatchArgs");
+}
+
+void VxpgLightTreePass::CreateCommandSignature()
+{
+    D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+    arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+
+    D3D12_COMMAND_SIGNATURE_DESC desc = {};
+    desc.ByteStride       = sizeof(D3D12_DISPATCH_ARGUMENTS);
+    desc.NumArgumentDescs = 1;
+    desc.pArgumentDescs   = &arg;
+
+    ThrowIfFailed(m_device->CreateCommandSignature(&desc, nullptr,
+        IID_PPV_ARGS(&m_dispatchCommandSignature)));
+    m_dispatchCommandSignature->SetName(L"VxpgLightTree DispatchCommandSignature");
 }
 
 void VxpgLightTreePass::CreateRootSignature()
@@ -182,12 +206,16 @@ bool VxpgLightTreePass::BindRoots()
     m_rootSig.Set(cmd, kTreePremulIrradiance, m_buildPass->GetPremulIrradianceBuffer()->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kTreeCounters, m_buildPass->GetCountersBuffer()->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kTreeNodeVisited, m_nodeVisited->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kTreeIndirectArgs, m_indirectDispatchArgs->GetGPUVirtualAddress());
 
     return true;
 }
 
-// Reset compact->leaf to -1 and NULL-pad the whole sort-key buffer (so the fixed
-// 65536 sort network's over-dispatch reads padding, not stale garbage).
+// Reset compact->leaf to -1 and NULL-pad the whole sort-key buffer. This one stays
+// a fixed worst-case dispatch on purpose: it is what guarantees every key past the
+// live count is padding, which is the precondition the shrunk sort ladder relies on
+// (the outer stage reads its partner index unguarded). Sizing this to the live
+// count too would make the two depend on each other's rounding.
 void VxpgLightTreePass::RunClear()
 {
     if (!BindRoots())
@@ -197,7 +225,10 @@ void VxpgLightTreePass::RunClear()
     CommandContext::Get().Dispatch((kCompactCapacity + 255) / 256, 1, 1);
 }
 
-// Encode leaf sort keys + dispatch args (+ overflow flag).
+// Encode leaf sort keys + dispatch args (+ overflow flag). Fixed dispatch: this is
+// the kernel that COMPUTES the indirect args, so it cannot be sized by them, and
+// the only pre-existing count (the unclamped lit-voxel total) would over-dispatch
+// it by 4x on an overflow frame rather than under-dispatch.
 void VxpgLightTreePass::RunEncode()
 {
     if (!BindRoots())
@@ -217,7 +248,10 @@ void VxpgLightTreePass::RunSort()
     m_sort.Sort(m_sortKeys->GetUnderlyingResource().Get(),
                 m_sortKeys->GetGPUVirtualAddress(),
                 m_dispatchArgs->GetGPUVirtualAddress(),
-                kCounterByteOffset);
+                kCounterByteOffset,
+                m_dispatchCommandSignature.Get(),
+                m_indirectDispatchArgs->GetUnderlyingResource().Get(),
+                IndirectArgOffset(LIGHT_TREE_INDIRECT_SLOT_SORT));
 }
 
 // Initialize the 2N-1 node array (leaves get AABB / intensity / cluster).
@@ -227,7 +261,8 @@ void VxpgLightTreePass::RunInitial()
         return;
 
     m_commandList->SetPipelineState(m_initialProgram->GetPipelineState());
-    CommandContext::Get().Dispatch((kNodeCapacity + 255) / 256, 1, 1);
+    CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
+        m_indirectDispatchArgs->GetUnderlyingResource().Get(), IndirectArgOffset(LIGHT_TREE_INDIRECT_SLOT_NODE));
 }
 
 // Build the Karras hierarchy (child + parent links).
@@ -237,7 +272,8 @@ void VxpgLightTreePass::RunInternal()
         return;
 
     m_commandList->SetPipelineState(m_internalProgram->GetPipelineState());
-    CommandContext::Get().Dispatch((kMaxLeaves - 1 + 255) / 256, 1, 1);
+    CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
+        m_indirectDispatchArgs->GetUnderlyingResource().Get(), IndirectArgOffset(LIGHT_TREE_INDIRECT_SLOT_INTERNAL));
 }
 
 // Merge bottom-up: AABB + intensity + per-cluster root detection.
@@ -247,7 +283,8 @@ void VxpgLightTreePass::RunMerge()
         return;
 
     m_commandList->SetPipelineState(m_mergeProgram->GetPipelineState());
-    CommandContext::Get().Dispatch((kMaxLeaves + 255) / 256, 1, 1);
+    CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
+        m_indirectDispatchArgs->GetUnderlyingResource().Get(), IndirectArgOffset(LIGHT_TREE_INDIRECT_SLOT_MERGE));
 }
 
 // Top-level tree: per-superpixel implicit heap of the 32 clusters' view-weighted

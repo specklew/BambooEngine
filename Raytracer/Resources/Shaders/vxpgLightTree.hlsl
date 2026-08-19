@@ -50,6 +50,11 @@ RWStructuredBuffer<uint> gCompactIds : BAMBOO_PASS_UAV(LIGHT_TREE_REG_COMPACT_ID
 RWStructuredBuffer<int> gClusterAssignments : BAMBOO_PASS_UAV(LIGHT_TREE_REG_CLUSTER_ASSIGNMENTS); // SIByL u_clusterIndex
 RWStructuredBuffer<float> gPremulIrradiance : BAMBOO_PASS_UAV(LIGHT_TREE_REG_PREMUL_IRRADIANCE); // SIByL u_vxIrradiance
 RWStructuredBuffer<uint> gVoxCounters : BAMBOO_PASS_UAV(LIGHT_TREE_REG_COUNTERS); // SIByL u_vxCounter ([0] = lit voxel count)
+// DISPATCH argument triples sized from this frame's leaf count: the three tree
+// stages, then the bitonic ladder. Separate from gDispatchArgs because those same
+// dispatches read gDispatchArgs as a UAV, and one resource cannot be
+// INDIRECT_ARGUMENT and UNORDERED_ACCESS at the same time (Bamboo addition).
+RWStructuredBuffer<uint3> gIndirectDispatchArgs : BAMBOO_PASS_UAV(LIGHT_TREE_REG_INDIRECT_ARGS);
 // DEVIATION from SIByL: the merge sibling-gate flag lives in its OWN scalar
 // buffer, not TreeNode.flag. DXC will not emit an atomic on a struct sub-member
 // (InterlockedCompareExchange on gNodes[i].flag silently compiles NON-atomic ->
@@ -157,6 +162,31 @@ void EncodeTreeLeaves(uint3 dtid : SV_DispatchThreadID)
         args.padding1 = 0u;
         args.drawRects = int4(6, numTotal, 0, 0);
         gDispatchArgs[0] = args;
+
+        // The same three triples again, in a buffer that stays INDIRECT_ARGUMENT.
+        gIndirectDispatchArgs[LIGHT_TREE_INDIRECT_SLOT_MERGE]    = uint3(uint(args.dispatchLeaf.x), 1u, 1u);
+        gIndirectDispatchArgs[LIGHT_TREE_INDIRECT_SLOT_INTERNAL] = uint3(uint(args.dispatchInternal.x), 1u, 1u);
+        gIndirectDispatchArgs[LIGHT_TREE_INDIRECT_SLOT_NODE]     = uint3(uint(args.dispatchNode.x), 1u, 1u);
+
+        // Bitonic ladder, sized to the live count instead of the 65536 worst case.
+        // The network needs a power-of-two element count and sorts 2048 elements
+        // per group, so pad up to the next power of two (never below one group). A
+        // stage whose k exceeds that padded count sorts nothing and gets zero
+        // groups — a zero-group ExecuteIndirect is legal and costs nothing.
+        uint paddedElements = 2048u;
+        [loop] while (paddedElements < uint(numVXs) && paddedElements < LIGHT_TREE_SORT_CAPACITY)
+            paddedElements *= 2u;
+        const uint sortGroups = paddedElements / 2048u;
+
+        uint stage = LIGHT_TREE_INDIRECT_SLOT_SORT;
+        gIndirectDispatchArgs[stage++] = uint3(sortGroups, 1u, 1u); // presort
+        [loop] for (uint k = 4096u; k <= LIGHT_TREE_SORT_CAPACITY; k *= 2u)
+        {
+            const uint activeGroups = (k <= paddedElements) ? sortGroups : 0u;
+            [loop] for (uint j = k / 2u; j >= 2048u; j /= 2u)
+                gIndirectDispatchArgs[stage++] = uint3(activeGroups, 1u, 1u); // outer
+            gIndirectDispatchArgs[stage++] = uint3(activeGroups, 1u, 1u);     // inner
+        }
     }
 
     if (tid >= numVXs)

@@ -163,6 +163,15 @@
 #define LIGHT_TREE_REG_AVG_VISIBILITY       11 // u
 #define LIGHT_TREE_REG_IMPORTANCE_HEAP      12 // u
 #define LIGHT_TREE_REG_VISIBILITY_MASK      13 // u
+#define LIGHT_TREE_REG_INDIRECT_ARGS        14 // u
+// Slots inside gIndirectDispatchArgs. This buffer exists SEPARATELY from
+// gDispatchArgs because the tree kernels read gDispatchArgs as a UAV (for
+// numValidVoxels) in the very dispatches whose group counts come from here, and
+// one resource cannot be INDIRECT_ARGUMENT and UNORDERED_ACCESS at once.
+#define LIGHT_TREE_INDIRECT_SLOT_MERGE      0 // ceil(N/256)
+#define LIGHT_TREE_INDIRECT_SLOT_INTERNAL   1 // ceil((N-1)/256)
+#define LIGHT_TREE_INDIRECT_SLOT_NODE       2 // ceil((2N-1)/256)
+#define LIGHT_TREE_INDIRECT_SLOT_SORT       3 // first of BITONIC_SORT_STAGE_COUNT
 
 // ---------------------------------------------------------------------------
 // BitonicSortPass — vxpgBitonicSort.hlsl. Swaps the root signature out from under
@@ -171,6 +180,12 @@
 #define BITONIC_REG_CB          0 // b
 #define BITONIC_REG_SORT_BUFFER 0 // u
 #define BITONIC_REG_COUNTER     1 // u
+// Ladder length of the 65536 network: 1 presort + 15 outer + 5 inner. The light
+// tree's encode kernel writes one DISPATCH argument triple per stage in this
+// order, and BitonicSortPass::Sort issues them in the same order — the two loops
+// must stay identical or a stage reads another stage's group count.
+#define BITONIC_SORT_STAGE_COUNT 21
+#define LIGHT_TREE_INDIRECT_SLOT_COUNT (LIGHT_TREE_INDIRECT_SLOT_SORT + BITONIC_SORT_STAGE_COUNT)
 
 // ---------------------------------------------------------------------------
 // SuperpixelBuildPass — superpixelBuild.hlsl (private heap table)

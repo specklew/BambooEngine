@@ -53,7 +53,10 @@ void BitonicSortPass::Sort(
     ID3D12Resource*           keyBuffer,
     D3D12_GPU_VIRTUAL_ADDRESS keyBufferVA,
     D3D12_GPU_VIRTUAL_ADDRESS counterBufferVA,
-    uint32_t                  counterByteOffset)
+    uint32_t                  counterByteOffset,
+    ID3D12CommandSignature*   dispatchSignature,
+    ID3D12Resource*           stageArgsBuffer,
+    uint64_t                  stageArgsByteOffset)
 {
     if (!m_initialized)
         return;
@@ -64,9 +67,14 @@ void BitonicSortPass::Sort(
     m_rootSig.Set(cmd, kSortBuffer, keyBufferVA);
     m_rootSig.Set(cmd, kSortCounter, counterBufferVA);
 
-    // 65536 elements: presort/inner sort 2048 per group, outer compares 1024
-    // pairs per group -> every stage is exactly 32 groups worst-case.
-    constexpr uint32_t kGroups = kCapacity / 2048; // 32
+    // Group counts come from the producer, one triple per stage in ladder order.
+    // This loop and the one that fills the buffer must stay identical.
+    uint32_t stage = 0;
+    auto dispatchStage = [&]()
+    {
+        CommandContext::Get().DispatchIndirect(dispatchSignature, stageArgsBuffer,
+            stageArgsByteOffset + static_cast<uint64_t>(stage++) * sizeof(D3D12_DISPATCH_ARGUMENTS));
+    };
 
     auto keyBarrier = [&]()
     {
@@ -81,7 +89,7 @@ void BitonicSortPass::Sort(
     // Presort: sort each 2048-block into bitonic order.
     cmd->SetPipelineState(m_presortProgram->GetPipelineState());
     setConstants(0, 0);
-    CommandContext::Get().Dispatch(kGroups, 1, 1);
+    dispatchStage();
     keyBarrier();
 
     // Outer/inner ladder: 1 presort + 15 outer + 5 inner = 21 dispatches.
@@ -91,12 +99,15 @@ void BitonicSortPass::Sort(
         {
             cmd->SetPipelineState(m_outerProgram->GetPipelineState());
             setConstants(k, j);
-            CommandContext::Get().Dispatch(kGroups, 1, 1);
+            dispatchStage();
             keyBarrier();
         }
         cmd->SetPipelineState(m_innerProgram->GetPipelineState());
         setConstants(k, 0);
-        CommandContext::Get().Dispatch(kGroups, 1, 1);
+        dispatchStage();
         keyBarrier();
     }
+
+    assert(stage == BITONIC_SORT_STAGE_COUNT &&
+           "ladder length drifted from the encode kernel's — stages would read the wrong group counts");
 }
