@@ -98,6 +98,9 @@ static AutoCVarInt g_raygenCleanVariant("renderer.raygenCleanVariant",
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);
+static AutoCVarInt   g_accumulationVariance("renderer.accumulation.variance",
+	"Track per-pixel Welford variance of the estimator; reduced and read back only when a capture is due", 0,
+	CVarFlags::EditCheckbox);
 // One-shot: set to 1 to log the next frame's graph (nodes, declarations, the
 // barriers they synthesized), then it clears itself.
 static AutoCVarInt   g_dumpRenderGraph("rdg.dump", "Log the next frame's render graph and its synthesized barriers", 0, CVarFlags::EditCheckbox);
@@ -523,10 +526,16 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		m_prevCameraRot = rot;
 	}
 
-	// Tick screenshot before advancing accumulatedTime so the check reads the pre-update value
-	m_screenshotManager->Tick(*m_accumulationPass, elapsedTime);
+	// The previous frame ended by writing a PNG, and this frame's delta is carrying
+	// that encode. It is not render time: leaving it in makes a checkpointed run
+	// report a third of the frames it actually rendered, and inflates the frame-cost
+	// number the capture stores.
+	const double renderElapsed = std::max(0.0, elapsedTime - m_screenshotManager->ConsumeLastCaptureCostSeconds());
 
-	m_accumulationPass->Update(elapsedTime);
+	// Tick screenshot before advancing accumulatedTime so the check reads the pre-update value
+	m_screenshotManager->Tick(*m_accumulationPass, renderElapsed);
+
+	m_accumulationPass->Update(renderElapsed);
 
 	if (m_statesManager)
 		m_statesManager->Tick();
@@ -665,7 +674,13 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	DumpRenderGraphIfRequested();
 
 	if (m_screenshotManager->IsCaptureDue())
+	{
+		// The frame that recorded the reduction has completed, so its readback is
+		// safe to map — and it belongs to the image this capture is about to write.
+		if (const VarianceReadout variance = m_accumulationPass->ReadVarianceResult(); variance.valid)
+			m_screenshotManager->SetMeasuredVariance(variance.mean, variance.relative);
 		m_screenshotManager->FinishCapture();
+	}
 }
 
 void Renderer::CleanUp()
@@ -1159,7 +1174,19 @@ void Renderer::ArmScreenshot(float seconds, const std::string& model, const std:
 {
 	m_screenshotManager->SetOutputTarget(outDir, stem);
 	ScreenshotMetadata meta = BuildScreenshotMetadata(model, place);
-	m_screenshotManager->Arm(*m_accumulationPass, seconds, std::move(meta));
+	m_screenshotManager->Arm(*m_accumulationPass, CaptureSchedule::AtEnd(CaptureBudget::Seconds(seconds)), std::move(meta));
+}
+
+void Renderer::ArmScreenshot(const CaptureSchedule& schedule, const std::string& model, const std::string& place,
+                             const std::string& outDir, const std::string& stem,
+                             uint32_t imageIndex, uint32_t imageCount, float warmupSeconds)
+{
+	m_screenshotManager->SetOutputTarget(outDir, stem);
+	ScreenshotMetadata meta = BuildScreenshotMetadata(model, place);
+	meta.imageIndex    = imageIndex;
+	meta.imageCount    = imageCount;
+	meta.warmupSeconds = warmupSeconds;
+	m_screenshotManager->Arm(*m_accumulationPass, schedule, std::move(meta));
 }
 
 bool Renderer::ScreenshotIdle() const
@@ -1776,13 +1803,43 @@ void Renderer::BuildDisplayChain(GraphResourceHandle techniqueOutput, Texture& t
 
 	if (accumulate)
 	{
+		m_accumulationPass->SetVarianceEnabled(g_accumulationVariance.Get() != 0);
+		const GraphResourceHandle varianceM2Handle =
+			m_renderGraph.Import(m_accumulationPass->GetVarianceM2(), "Accumulation VarianceM2");
+
 		m_renderGraph.AddPass("Accumulation",
 			[&](RenderGraphPassBuilder& pass)
 			{
 				pass.Read(techniqueOutput, GraphAccess::ComputeRead);
 				pass.Write(tonemapInputHandle, GraphAccess::ComputeWrite);
+				pass.Write(varianceM2Handle, GraphAccess::ComputeWrite);
 			},
 			[this, &techniqueOutputTexture]() { m_accumulationPass->Render(techniqueOutputTexture); });
+
+		// Only when an image is about to be written: the reduction ends in a
+		// readback, and a readback every frame is a stall every frame.
+		if (m_screenshotManager->IsCaptureDue() && m_accumulationPass->IsVarianceEnabled())
+		{
+			const GraphResourceHandle varianceResultHandle =
+				m_renderGraph.Import(m_accumulationPass->GetVarianceResult(), "Accumulation VarianceResult");
+
+			m_renderGraph.AddPass("Variance Reduce",
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.NeverCull();
+					pass.Read(varianceM2Handle, GraphAccess::UnorderedAccessRead);
+					pass.Write(varianceResultHandle, GraphAccess::ComputeWrite);
+				},
+				[this]() { m_accumulationPass->RecordVarianceReduction(); });
+
+			m_renderGraph.AddPass("Variance Readback",
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.NeverCull();
+					pass.Read(varianceResultHandle, GraphAccess::CopySource);
+				},
+				[this]() { m_accumulationPass->RecordVarianceCopy(); });
+		}
 	}
 
 	m_renderGraph.AddPass("PostProcess",

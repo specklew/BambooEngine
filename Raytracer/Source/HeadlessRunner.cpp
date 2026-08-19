@@ -4,9 +4,13 @@
 #include "Renderer.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <sstream>
 #include <unordered_map>
+#include <vector>
 
 namespace
 {
@@ -76,6 +80,123 @@ namespace
 HeadlessRunner::HeadlessRunner(Renderer& renderer, HeadlessArgs args, HeadlessConfig config)
     : m_renderer(renderer), m_args(std::move(args)), m_config(std::move(config))
 {
+}
+
+// Discards frames until the frame time settles, so a measurement reports the
+// technique rather than the GPU's clock ramp. Three things are being waited on at
+// once: boost clocks settling under sustained load, the one-time costs (PSO
+// creation, BVH build, first dispatch of every node), and — for VXPG — the guide
+// reaching steady state, since injection reuse (ADR 0009) makes it a frame-lagged
+// structure that is cold for the first frames after a technique switch.
+float HeadlessRunner::WarmUp()
+{
+    // Legacy path: a fixed pump, enough to keep a one-time stall out of a capture
+    // window but nothing like a thermal warm-up.
+    if (m_args.warmupSeconds <= 0.0f)
+    {
+        for (int i = 0; i < 16; ++i)
+            PumpFrame();
+        return 0.0f;
+    }
+
+    constexpr size_t kWindow      = 30;   // frames the stability test looks at
+    constexpr double kMaxVariation = 0.02; // coefficient of variation to call it settled
+    constexpr double kMinSeconds  = 1.0;  // never declare stability off a handful of frames
+
+    std::vector<double> window;
+    window.reserve(kWindow);
+    double elapsed = 0.0;
+    size_t next    = 0;
+
+    while (elapsed < m_args.warmupSeconds)
+    {
+        PumpFrame();
+        const double delta = m_clock.GetDeltaSeconds();
+        elapsed += delta;
+
+        if (window.size() < kWindow) window.push_back(delta);
+        else { window[next] = delta; next = (next + 1) % kWindow; }
+
+        if (window.size() < kWindow || elapsed < kMinSeconds)
+            continue;
+
+        double sum = 0.0;
+        for (double d : window) sum += d;
+        const double mean = sum / window.size();
+        double variance = 0.0;
+        for (double d : window) variance += (d - mean) * (d - mean);
+        const double coefficientOfVariation = mean > 0.0 ? std::sqrt(variance / window.size()) / mean : 0.0;
+
+        if (coefficientOfVariation < kMaxVariation)
+        {
+            spdlog::info("Warm-up settled after {:.2f}s at {:.3f} ms/frame (CV {:.3f})",
+                         elapsed, mean * 1000.0, coefficientOfVariation);
+            return static_cast<float>(elapsed);
+        }
+    }
+
+    spdlog::warn("Warm-up hit its {:.2f}s cap without settling — frame time is still moving",
+                 m_args.warmupSeconds);
+    return static_cast<float>(elapsed);
+}
+
+// --checkpoints log:K | every:N | list:a,b,c, in the budget's own unit. Always
+// ends at the budget, so the last image of a schedule is the one an unchecked run
+// would have produced — a curve run and a point run stay comparable.
+CaptureSchedule HeadlessRunner::BuildSchedule() const
+{
+    const CaptureBudget budget = m_args.budgetFrames > 0
+        ? CaptureBudget::Frames(m_args.budgetFrames)
+        : CaptureBudget::Seconds(m_args.seconds >= 0.0f ? m_args.seconds : m_config.defaultSeconds);
+
+    if (m_args.checkpoints.empty())
+        return CaptureSchedule::AtEnd(budget);
+
+    const size_t      colon = m_args.checkpoints.find(':');
+    const std::string kind  = m_args.checkpoints.substr(0, colon);
+    const std::string value = colon == std::string::npos ? std::string{} : m_args.checkpoints.substr(colon + 1);
+
+    std::vector<double> points;
+    if (kind == "log")
+    {
+        // Log spacing, because convergence goes as 1/sqrt(N): equal steps on a log
+        // axis are equal steps of visible improvement, where linear ones crowd
+        // every interesting point into the first tenth of the run.
+        const int count = std::max(2, std::atoi(value.c_str()));
+        const double first = budget.kind == CaptureBudget::Kind::Frames ? 1.0 : budget.value / 100.0;
+        for (int i = 0; i < count; ++i)
+        {
+            const double t = static_cast<double>(i) / (count - 1);
+            points.push_back(first * std::pow(budget.value / first, t));
+        }
+    }
+    else if (kind == "every")
+    {
+        const double step = std::max(1.0, std::atof(value.c_str()));
+        for (double p = step; p < budget.value; p += step)
+            points.push_back(p);
+        points.push_back(budget.value);
+    }
+    else if (kind == "list")
+    {
+        std::stringstream ss(value);
+        std::string item;
+        while (std::getline(ss, item, ','))
+            if (!item.empty())
+                points.push_back(std::atof(item.c_str()));
+    }
+    else
+    {
+        spdlog::error("--checkpoints expects log:K, every:N or list:a,b,c — got '{}'", m_args.checkpoints);
+        return CaptureSchedule::AtEnd(budget);
+    }
+
+    std::sort(points.begin(), points.end());
+    points.erase(std::unique(points.begin(), points.end()), points.end());
+    if (points.empty() || points.back() < budget.value)
+        points.push_back(budget.value);
+
+    return { budget, points };
 }
 
 void HeadlessRunner::PumpFrame()
@@ -210,13 +331,16 @@ int HeadlessRunner::Run()
     if (!Validate())
         return 2;
 
-    const float seconds = m_args.seconds >= 0.0f ? m_args.seconds : m_config.defaultSeconds;
+    const CaptureSchedule schedule = BuildSchedule();
     const std::string baseDir = m_args.outDir.empty() ? m_config.outputDir : m_args.outDir;
     const std::string runDir  = baseDir + "/run-" + RunFolderTimestamp();
     const std::string model   = std::filesystem::path(m_args.scene).stem().string();
 
-    spdlog::info("Headless run: {} captures into {} ({:.1f}s each)",
-                 m_args.states.size() * m_args.techniques.size(), runDir, seconds);
+    spdlog::info("Headless run: {} configuration(s) x {} image(s) into {} (budget {} {}, {} checkpoint(s))",
+                 m_args.states.size() * m_args.techniques.size(), m_args.images, runDir,
+                 schedule.budget.value,
+                 schedule.budget.kind == CaptureBudget::Kind::Frames ? "frames" : "seconds",
+                 schedule.checkpoints.size());
 
     for (const std::string& technique : m_args.techniques)
     {
@@ -237,27 +361,42 @@ int HeadlessRunner::Run()
             {
                 m_renderer.SetTechniqueDebugView(view.index);
 
-                // Warm up several frames before arming. One frame is NOT enough: a
-                // slow first frame (technique switch rebuilding the VXPG passes, PSO
-                // creation, first dispatch) costs seconds, and that cost lands in the
-                // NEXT frame's clock delta — so the first armed frame would read a
-                // huge delta and trigger an immediate single-frame capture (observed
-                // as frameIndex 0 for VXPG at --seconds 1). Pumping until frames are
-                // cheap keeps the one-time stall out of the timed capture window.
-                // A view switch can also swap the raygen variant, which rebuilds the
-                // pipeline — same reason, same warmup.
-                for (int warmup = 0; warmup < 16; ++warmup)
-                    PumpFrame();
+                // Warm up before arming. One frame is NOT enough: a slow first frame
+                // (technique switch rebuilding the VXPG passes, PSO creation, first
+                // dispatch) costs seconds, and that cost lands in the NEXT frame's
+                // clock delta — so the first armed frame would read a huge delta and
+                // trigger an immediate single-frame capture (observed as frameIndex 0
+                // for VXPG at --seconds 1). A view switch can also swap the raygen
+                // variant, which rebuilds the pipeline — same reason, same warm-up.
+                const float warmupSpent = WarmUp();
 
                 const std::string stem = m_args.debugViews.empty()
                     ? place + "-" + technique
                     : place + "-" + technique + "-" + view.name;
 
-                m_renderer.ArmScreenshot(seconds, model, place, runDir, stem);
-                while (!m_renderer.ScreenshotIdle())
-                    PumpFrame();
+                // Independent images, one process: accumulation resets between them
+                // while the frame counter — and so the per-pixel RNG stream — runs on,
+                // which is what makes their spread a real error bar.
+                for (uint32_t image = 0; image < m_args.images; ++image)
+                {
+                    // The frame after a capture pays for the PNG encode and the
+                    // readback map, and the clock hands that cost to the frame that
+                    // follows. Spend it on a throwaway frame, or every image after
+                    // the first reports a ~280 ms frame instead of a ~5 ms one.
+                    if (image > 0)
+                        PumpFrame();
 
-                spdlog::info("Captured {}", stem);
+                    const std::string imageStem = m_args.images > 1
+                        ? fmt::format("{}-i{:04}", stem, image)
+                        : stem;
+
+                    m_renderer.ArmScreenshot(schedule, model, place, runDir, imageStem,
+                                             image, m_args.images, warmupSpent);
+                    while (!m_renderer.ScreenshotIdle())
+                        PumpFrame();
+                }
+
+                spdlog::info("Captured {} ({} image(s))", stem, m_args.images);
             }
         }
 

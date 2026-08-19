@@ -51,6 +51,20 @@
 #define ACCUM_REG_ACCUM   0 // u
 #define ACCUM_REG_DISPLAY 1 // u
 #define ACCUM_REG_CB      0 // b
+// Welford's M2 (sum of squared deviations) per pixel, so the estimator's own
+// variance is measurable WITHOUT a reference image — the only way to separate
+// "still noisy" from "converged to the wrong answer" on a technique with a known
+// error floor. Behind renderer.accumulation.variance. A structured buffer rather
+// than a texture so it can be a root UAV (root descriptors are buffers only) and
+// so the reduction needs no descriptor table: xyz = M2 per channel, w = the
+// running mean's luminance, which is what makes a relative variance possible
+// without also binding the accumulation texture.
+#define ACCUM_REG_VARIANCE_M2 2 // u (root) — u0/u1 are the table's accum + display
+// Reduction of that buffer to one scalar pair, run at capture time only — never
+// per frame, because reading it back means waiting for the GPU.
+#define VARIANCE_REDUCE_REG_M2      0 // u (root)
+#define VARIANCE_REDUCE_REG_RESULT  1 // u (root)
+#define VARIANCE_REDUCE_REG_CB      0 // b
 
 // ---------------------------------------------------------------------------
 // PostProcessPass — postprocess.hlsl

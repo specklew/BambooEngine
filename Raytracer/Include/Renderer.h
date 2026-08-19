@@ -49,6 +49,7 @@ class AccelerationStructures;
 class ScreenshotManager;
 class StatesManager;
 struct ScreenshotMetadata;
+struct CaptureSchedule;
 class VoxelizationPass;
 
 
@@ -97,6 +98,11 @@ public:
 	// Arm a capture writing to dir/stem (empty => default screenshots dir / auto name).
 	void ArmScreenshot(float seconds, const std::string& model, const std::string& place,
 	                   const std::string& outDir, const std::string& stem);
+	// Benchmark form: a full schedule (frame or time budget, checkpoints) plus the
+	// provenance a measurement has to carry to be reproducible.
+	void ArmScreenshot(const CaptureSchedule& schedule, const std::string& model, const std::string& place,
+	                   const std::string& outDir, const std::string& stem,
+	                   uint32_t imageIndex, uint32_t imageCount, float warmupSeconds);
 	bool ScreenshotIdle() const;
 
 	std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> CreateSceneResources(

@@ -12,6 +12,7 @@
 #include "rapidjson/prettywriter.h"
 #include "rapidjson/stringbuffer.h"
 
+#include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -86,23 +87,43 @@ void ScreenshotManager::Initialize(
     m_commandList = commandList;
 }
 
-void ScreenshotManager::Arm(FrameAccumulationPass& accum, float seconds, ScreenshotMetadata metadata)
+float ScreenshotManager::GetTargetSeconds() const
+{
+    return m_schedule.budget.kind == CaptureBudget::Kind::Seconds
+        ? static_cast<float>(m_schedule.budget.value)
+        : 0.0f;
+}
+
+void ScreenshotManager::Arm(FrameAccumulationPass& accum, CaptureSchedule schedule, ScreenshotMetadata metadata)
 {
     if (m_state != State::Idle)
         return;
 
-    if (seconds >= FLT_EPSILON)
-    {
+    if (schedule.checkpoints.empty())
+        schedule.checkpoints.push_back(schedule.budget.value);
+
+    // A frame budget always starts from zero — "one frame" has to mean one frame.
+    // A zero-second budget is the interactive "grab what is on screen now" path,
+    // which deliberately keeps whatever has already accumulated.
+    if (schedule.budget.kind == CaptureBudget::Kind::Frames || schedule.budget.value >= FLT_EPSILON)
         accum.Reset();
-    }
 
     m_resetCountAtArm = accum.GetResetCount();
-    m_targetSeconds   = seconds;
+    m_schedule        = std::move(schedule);
+    m_nextCheckpoint  = 0;
+    m_frameMsSum      = 0.0;
+    m_frameMsCount    = 0;
     m_captureDue      = false;
     m_copyRecorded    = false;
     m_pendingMeta     = std::move(metadata);
     m_state           = State::Pending;
-    spdlog::info("Screenshot armed: accumulating for {:.2f}s", seconds);
+
+    if (m_schedule.budget.kind == CaptureBudget::Kind::Frames)
+        spdlog::info("Screenshot armed: {} frame(s), {} checkpoint(s)",
+                     static_cast<uint32_t>(m_schedule.budget.value), m_schedule.checkpoints.size());
+    else
+        spdlog::info("Screenshot armed: accumulating for {:.2f}s, {} checkpoint(s)",
+                     m_schedule.budget.value, m_schedule.checkpoints.size());
 }
 
 void ScreenshotManager::Tick(FrameAccumulationPass& accum, double elapsedTime)
@@ -118,19 +139,36 @@ void ScreenshotManager::Tick(FrameAccumulationPass& accum, double elapsedTime)
         return;
     }
 
-    const float t = static_cast<float>(accum.GetAccumulatedTime());
-    if (t + static_cast<float>(elapsedTime) > m_targetSeconds)
-    {
-        spdlog::info("Screenshot capture triggered at {:.3f}s (target {:.2f}s)", t, m_targetSeconds);
-        m_captureDue = true;
-        m_state      = State::Idle;
+    m_frameMsSum += elapsedTime * 1000.0;
+    ++m_frameMsCount;
 
-        m_pendingMeta.frameIndex      = accum.GetFrameCount();
-        m_pendingMeta.accumulatedTime = t;
+    // The frame about to be rendered is the one the capture will read, so both
+    // budgets are evaluated against the state INCLUDING it: frames already
+    // accumulated + 1, and time already accumulated + this frame's delta.
+    const uint32_t framesInImage = accum.GetFrameCount() + 1;
+    const double   timeInImage   = accum.GetAccumulatedTime() + elapsedTime;
+    const double   progress      = m_schedule.budget.kind == CaptureBudget::Kind::Frames
+                                 ? static_cast<double>(framesInImage)
+                                 : timeInImage;
 
-        if (t > m_targetSeconds)
-            spdlog::warn("Screenshot trigger after target time! The results might have better fidelity than in standard test.");
-    }
+    if (m_nextCheckpoint >= m_schedule.checkpoints.size() || progress < m_schedule.checkpoints[m_nextCheckpoint])
+        return;
+
+    // One image per frame: checkpoints closer together than a frame collapse onto
+    // the same one, so skip past every threshold this frame has already passed.
+    while (m_nextCheckpoint < m_schedule.checkpoints.size() && progress >= m_schedule.checkpoints[m_nextCheckpoint])
+        ++m_nextCheckpoint;
+
+    m_captureDue = true;
+    m_pendingMeta.checkpointIndex = static_cast<uint32_t>(m_nextCheckpoint - 1);
+    if (m_nextCheckpoint >= m_schedule.checkpoints.size())
+        m_state = State::Idle;
+
+    m_pendingMeta.frameIndex      = framesInImage;
+    m_pendingMeta.accumulatedTime = static_cast<float>(timeInImage);
+    m_pendingMeta.meanFrameMs     = m_frameMsCount > 0 ? static_cast<float>(m_frameMsSum / m_frameMsCount) : 0.0f;
+
+    spdlog::info("Screenshot capture triggered at {} frame(s) / {:.3f}s", framesInImage, timeInImage);
 }
 
 void ScreenshotManager::RecordCopy(const Microsoft::WRL::ComPtr<ID3D12Resource>& source)
@@ -184,10 +222,25 @@ void ScreenshotManager::SetOutputTarget(const std::string& dir, const std::strin
     m_outStem = stem;
 }
 
+void ScreenshotManager::SetMeasuredVariance(float mean, float relative)
+{
+    m_pendingMeta.varianceValid    = true;
+    m_pendingMeta.varianceMean     = mean;
+    m_pendingMeta.varianceRelative = relative;
+}
+
+double ScreenshotManager::ConsumeLastCaptureCostSeconds()
+{
+    const double cost = m_lastCaptureCost;
+    m_lastCaptureCost = 0.0;
+    return cost;
+}
+
 void ScreenshotManager::FinishCapture()
 {
     if (!m_captureDue)
         return;
+    const auto captureStart = std::chrono::steady_clock::now();
     m_captureDue   = false;
     if (!m_copyRecorded)
     {
@@ -216,7 +269,12 @@ void ScreenshotManager::FinishCapture()
     m_pendingMeta.renderWidth  = m_captureWidth;
     m_pendingMeta.renderHeight = m_captureHeight;
 
-    const std::string stem    = m_outStem.empty() ? MakeFilenameStem() : m_outStem;
+    // A multi-checkpoint schedule writes several images from one accumulation, so
+    // the frame count they were taken at is what tells them apart.
+    std::string stem = m_outStem.empty() ? MakeFilenameStem() : m_outStem;
+    if (m_schedule.checkpoints.size() > 1)
+        stem += fmt::format("-f{:06}", m_pendingMeta.frameIndex);
+
     const std::string pngPath = dir + "/" + stem + ".png";
     const std::string jsonPath = dir + "/" + stem + ".json";
 
@@ -235,6 +293,8 @@ void ScreenshotManager::FinishCapture()
     {
         spdlog::error("Failed to write screenshot: {}", pngPath);
     }
+
+    m_lastCaptureCost = std::chrono::duration<double>(std::chrono::steady_clock::now() - captureStart).count();
 }
 
 std::string ScreenshotManager::MakeFilenameStem() const
@@ -291,6 +351,26 @@ void ScreenshotManager::WriteSidecarJson(const std::string& jsonPath) const
         rd.AddMember("width",  m_pendingMeta.renderWidth,  a);
         rd.AddMember("height", m_pendingMeta.renderHeight, a);
         doc.AddMember("render", rd, a);
+    }
+    {
+        // What the aggregation script needs to group images and to state the
+        // protocol a number came from.
+        Value bench(kObjectType);
+        bench.AddMember("budgetKind",
+            MakeStr(m_schedule.budget.kind == CaptureBudget::Kind::Frames ? "frames" : "seconds", a), a);
+        bench.AddMember("budgetValue",   m_schedule.budget.value, a);
+        bench.AddMember("checkpoints",     static_cast<uint32_t>(m_schedule.checkpoints.size()), a);
+        bench.AddMember("checkpointIndex", m_pendingMeta.checkpointIndex, a);
+        bench.AddMember("imageIndex",    m_pendingMeta.imageIndex, a);
+        bench.AddMember("imageCount",    m_pendingMeta.imageCount, a);
+        bench.AddMember("meanFrameMs",   m_pendingMeta.meanFrameMs, a);
+        bench.AddMember("warmupSeconds", m_pendingMeta.warmupSeconds, a);
+        if (m_pendingMeta.varianceValid)
+        {
+            bench.AddMember("varianceMean",     m_pendingMeta.varianceMean,     a);
+            bench.AddMember("varianceRelative", m_pendingMeta.varianceRelative, a);
+        }
+        doc.AddMember("benchmark", bench, a);
     }
     {
         Value cap(kObjectType);

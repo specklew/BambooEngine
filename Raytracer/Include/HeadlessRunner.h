@@ -3,6 +3,7 @@
 #include "Headless.h"
 #include "HighResolutionClock.h"
 #include "RenderTechnique.h"
+#include "ScreenshotManager.h"
 
 class Renderer;
 
@@ -22,6 +23,14 @@ private:
     void ApplyConfiguredLights();
     bool Validate() const;
     std::vector<RenderTechnique::DebugView> ResolveDebugViews() const;
+
+    // Renders the real workload and throws the result away until the frame time
+    // stops moving. Returns the seconds actually spent, which goes into the
+    // sidecar — a warm-up nobody can see the length of is not a protocol.
+    float WarmUp();
+
+    // The capture budget plus the checkpoints inside it, resolved from the flags.
+    CaptureSchedule BuildSchedule() const;
 
     Renderer&      m_renderer;
     HeadlessArgs   m_args;

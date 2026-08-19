@@ -51,6 +51,19 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
         else if (flag == "--states-key") args.statesKey = valueOf(i);
         else if (flag == "--techniques") args.techniques = SplitCsv(valueOf(i));
         else if (flag == "--seconds")    args.seconds = std::stof(valueOf(i));
+        else if (flag == "--budget")
+        {
+            const std::string budget = valueOf(i);
+            const size_t      colon  = budget.find(':');
+            const std::string kind   = budget.substr(0, colon);
+            const std::string value  = colon == std::string::npos ? std::string{} : budget.substr(colon + 1);
+            if (kind == "frames")       args.budgetFrames = static_cast<uint32_t>(std::stoul(value));
+            else if (kind == "seconds") args.seconds      = std::stof(value);
+            else spdlog::error("--budget expects frames:N or seconds:T, got '{}'", budget);
+        }
+        else if (flag == "--images")      args.images = static_cast<uint32_t>(std::stoul(valueOf(i)));
+        else if (flag == "--checkpoints") args.checkpoints = valueOf(i);
+        else if (flag == "--warmup")      args.warmupSeconds = std::stof(valueOf(i));
         else if (flag == "--out")        args.outDir = valueOf(i);
         else if (flag == "--debug-views") args.debugViews = SplitCsv(valueOf(i));
         else if (flag == "--debug-layer") args.debugLayer = true;

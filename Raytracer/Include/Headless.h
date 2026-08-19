@@ -88,6 +88,29 @@ struct HeadlessArgs
     float       seconds = -1.0f;          // < 0 => use config default
     std::string outDir;                   // empty => use config output dir
 
+    // --budget frames:N | seconds:T. Overrides --seconds; a frame budget is the
+    // equal-sample-count axis, a time budget the equal-time one.
+    uint32_t budgetFrames = 0;            // 0 => the budget is in seconds
+
+    // --images M: M INDEPENDENT images in one process, accumulation reset between
+    // them while the frame counter (and so the RNG stream) runs on. The spread
+    // across them is the measurement's error bar, which a single capture cannot
+    // give. The guide is deliberately NOT reset: VXPG carries temporal state
+    // (ADR 0009 injection reuse, adaptive q, superpixels) and we measure it in
+    // steady state, so images share a guide and are not fully independent.
+    uint32_t images = 1;
+
+    // --checkpoints log:K | every:N | list:a,b,c. Images written DURING one
+    // accumulation, in the budget's unit — a convergence curve from a single run,
+    // orthogonal to --images. Empty => one image at the end of the budget.
+    std::string checkpoints;
+
+    // --warmup T: render and discard the real workload for up to T seconds before
+    // the first capture, stopping early once the frame time stops moving. Covers
+    // the GPU clock ramp, PSO/BVH one-time costs, and the guide reaching steady
+    // state. 0 => the legacy fixed 16-frame pump.
+    float warmupSeconds = 0.0f;
+
     // --debug-views: capture each listed view of the active technique instead of
     // the plain render. Indices belong to that technique's own enumeration ("all"
     // takes every view it declares). Empty => one normal capture per technique.
