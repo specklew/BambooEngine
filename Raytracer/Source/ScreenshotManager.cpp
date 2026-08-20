@@ -79,12 +79,88 @@ namespace
     }
 }
 
+namespace
+{
+    // Each queued image is width*height*4 bytes (8.3 MB at 1080p). The cap turns a
+    // burst of checkpoints into back-pressure on the render thread instead of
+    // unbounded memory growth — and back-pressure is just the old synchronous
+    // behaviour, so the worst case is what we had before.
+    constexpr uint32_t kMaxQueuedWrites = 24;
+    constexpr uint32_t kMaxWriterThreads = 4;
+}
+
 void ScreenshotManager::Initialize(
     Microsoft::WRL::ComPtr<ID3D12Device5>              device,
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList)
 {
     m_device      = device;
     m_commandList = commandList;
+    StartWriters();
+}
+
+void ScreenshotManager::StartWriters()
+{
+    if (!m_writers.empty())
+        return;
+
+    const unsigned hardware = std::thread::hardware_concurrency();
+    const unsigned count = std::max(1u, std::min(kMaxWriterThreads, hardware > 2 ? hardware / 2 : 1u));
+    for (unsigned i = 0; i < count; ++i)
+        m_writers.emplace_back([this]() { WriterLoop(); });
+    spdlog::info("Screenshot encoder: {} writer thread(s)", count);
+}
+
+void ScreenshotManager::WriterLoop()
+{
+    for (;;)
+    {
+        PendingWrite job;
+        {
+            std::unique_lock<std::mutex> lock(m_writeMutex);
+            m_writeReady.wait(lock, [this]() { return m_stopWriters || !m_writeQueue.empty(); });
+            if (m_writeQueue.empty())
+                return; // stopping, and nothing left to drain
+            job = std::move(m_writeQueue.front());
+            m_writeQueue.pop_front();
+        }
+        m_writeDrained.notify_all(); // a slot opened for a blocked producer
+
+        const int rowBytes = static_cast<int>(job.width) * 4;
+        if (stbi_write_png(job.pngPath.c_str(), static_cast<int>(job.width), static_cast<int>(job.height),
+                           4, job.pixels.data(), rowBytes))
+            spdlog::info("Screenshot saved: {}", job.pngPath);
+        else
+            spdlog::error("Failed to write screenshot: {}", job.pngPath);
+
+        {
+            std::lock_guard<std::mutex> lock(m_writeMutex);
+            --m_writesInFlight;
+        }
+        m_writeDrained.notify_all();
+    }
+}
+
+void ScreenshotManager::WaitForPendingWrites()
+{
+    std::unique_lock<std::mutex> lock(m_writeMutex);
+    m_writeDrained.wait(lock, [this]() { return m_writesInFlight == 0; });
+}
+
+void ScreenshotManager::Shutdown()
+{
+    if (m_writers.empty())
+        return;
+
+    WaitForPendingWrites();
+    {
+        std::lock_guard<std::mutex> lock(m_writeMutex);
+        m_stopWriters = true;
+    }
+    m_writeReady.notify_all();
+    for (std::thread& writer : m_writers)
+        if (writer.joinable())
+            writer.join();
+    m_writers.clear();
 }
 
 float ScreenshotManager::GetTargetSeconds() const
@@ -278,22 +354,26 @@ void ScreenshotManager::FinishCapture()
     const std::string pngPath = dir + "/" + stem + ".png";
     const std::string jsonPath = dir + "/" + stem + ".json";
 
-    if (stbi_write_png(
-            pngPath.c_str(),
-            static_cast<int>(m_captureWidth),
-            static_cast<int>(m_captureHeight),
-            4,
-            pixels.data(),
-            static_cast<int>(tightRowBytes)))
-    {
-        spdlog::info("Screenshot saved: {}", pngPath);
-        WriteSidecarJson(jsonPath);
-    }
-    else
-    {
-        spdlog::error("Failed to write screenshot: {}", pngPath);
-    }
+    // The sidecar stays on this thread: it is a few hundred bytes, and writing it
+    // here keeps every field it reads (schedule, metadata) single-threaded.
+    WriteSidecarJson(jsonPath);
 
+    PendingWrite job;
+    job.pixels  = std::move(pixels);
+    job.width   = m_captureWidth;
+    job.height  = m_captureHeight;
+    job.pngPath = pngPath;
+    {
+        std::unique_lock<std::mutex> lock(m_writeMutex);
+        m_writeDrained.wait(lock, [this]() { return m_writeQueue.size() < kMaxQueuedWrites; });
+        m_writeQueue.push_back(std::move(job));
+        ++m_writesInFlight;
+    }
+    m_writeReady.notify_one();
+
+    // Now only the map and the row copy — a couple of milliseconds instead of a
+    // couple of hundred. Still subtracted from the next frame's delta, because it
+    // is still not render time.
     m_lastCaptureCost = std::chrono::duration<double>(std::chrono::steady_clock::now() - captureStart).count();
 }
 

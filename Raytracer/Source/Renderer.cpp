@@ -687,6 +687,11 @@ void Renderer::CleanUp()
 {
 	FlushCommandQueue();
 
+	// Before anything else tears down: the encoder threads still hold images that
+	// only exist in their queue, and the process exiting would take them with it.
+	if (m_screenshotManager)
+		m_screenshotManager->Shutdown();
+
 	m_editorUI->Shutdown();
 }
 
@@ -1192,6 +1197,11 @@ void Renderer::ArmScreenshot(const CaptureSchedule& schedule, const std::string&
 bool Renderer::ScreenshotIdle() const
 {
 	return m_screenshotManager->IsIdle();
+}
+
+void Renderer::WaitForScreenshotWrites() const
+{
+	m_screenshotManager->WaitForPendingWrites();
 }
 
 void Renderer::ApplyRenderConfig(const HeadlessConfig& config)

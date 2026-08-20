@@ -411,6 +411,10 @@ int HeadlessRunner::Run()
         }
     }
 
+    // The last images are still in the encoder queue; the run is not complete until
+    // they are files.
+    m_renderer.WaitForScreenshotWrites();
+
     spdlog::info("Headless run complete");
     return 0;
 }

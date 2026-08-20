@@ -1,6 +1,10 @@
 #pragma once
 #include "CommandContext.h"
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 #include <DirectXMath.h>
 
@@ -92,8 +96,14 @@ public:
     // Issue CopyTextureRegion into the readback buffer.
     void RecordCopy(const Microsoft::WRL::ComPtr<ID3D12Resource>& source);
 
-    // Map readback buffer and write PNG + sidecar JSON.
+    // Map the readback buffer, write the sidecar JSON, and hand the pixels to the
+    // encoder threads. Returns as soon as the copy out of the mapped buffer is done.
     void FinishCapture();
+
+    // Block until every queued PNG has hit disk. Must be called before the process
+    // exits or the last images of a run are simply missing.
+    void WaitForPendingWrites();
+    void Shutdown();
 
     // Measured just before FinishCapture, once the frame that recorded it is done.
     void SetMeasuredVariance(float mean, float relative);
@@ -117,9 +127,35 @@ public:
     bool IsIdle()       const { return m_state == State::Idle && !m_captureDue && !m_copyRecorded; }
     float GetTargetSeconds() const;
 
+    ~ScreenshotManager() { Shutdown(); }
+
 private:
     std::string MakeFilenameStem() const;
     void        WriteSidecarJson(const std::string& jsonPath) const;
+
+    // A PNG encode costs ~90-280 ms against a ~5 ms frame, so doing it on the render
+    // thread does not just stall the frame — it pushes the whole capture window's
+    // pacing around, which is what made time-spaced checkpoints collapse (ADR 0022).
+    // Only the map-and-copy stays synchronous, because it touches a GPU resource
+    // that the next capture reuses.
+    struct PendingWrite
+    {
+        std::vector<uint8_t> pixels;
+        uint32_t             width  = 0;
+        uint32_t             height = 0;
+        std::string          pngPath;
+    };
+
+    void StartWriters();
+    void WriterLoop();
+
+    std::vector<std::thread>  m_writers;
+    std::deque<PendingWrite>  m_writeQueue;
+    std::mutex                m_writeMutex;
+    std::condition_variable   m_writeReady;   // queue gained work, or is stopping
+    std::condition_variable   m_writeDrained; // an entry finished, or space appeared
+    uint32_t                  m_writesInFlight = 0; // queued + being encoded
+    bool                      m_stopWriters    = false;
 
     enum class State { Idle, Pending };
     State m_state      = State::Idle;

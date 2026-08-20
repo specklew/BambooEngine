@@ -104,6 +104,9 @@ public:
 	                   const std::string& outDir, const std::string& stem,
 	                   uint32_t imageIndex, uint32_t imageCount, float warmupSeconds);
 	bool ScreenshotIdle() const;
+	// Idle means the accumulation window is over, not that the PNG is on disk —
+	// encoding is asynchronous. A run must drain the queue before it exits.
+	void WaitForScreenshotWrites() const;
 
 	std::pair<std::shared_ptr<VertexBuffer>, std::shared_ptr<IndexBuffer>> CreateSceneResources(
 		const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
