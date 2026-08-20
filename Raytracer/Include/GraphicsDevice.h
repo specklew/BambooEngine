@@ -20,6 +20,11 @@ public:
     bool CheckTearingSupport();
     bool CheckRayTracingSupport() const;
 
+    // Asked before a lever raises a shader target (ADR 0020 R7): a profile the
+    // driver cannot run must be refused while it is still a CVar, not discovered
+    // as a state-object creation failure in the middle of a timed run.
+    bool SupportsShaderModel(D3D_SHADER_MODEL model) const;
+
     // Signal + CPU-wait until the queue drains, then refresh the frame index. For
     // structural changes only (resize, scene switch, shader reload, a readback):
     // the steady-state frame paces itself with the pair below instead.

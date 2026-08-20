@@ -29,6 +29,17 @@ struct VendorLever
     // A lever whose stripped code an active debug view needs. Forced off while one
     // is selected, because the alternative is a view that renders nothing.
     bool        suppressedByDebugView;
+    // false = the raygen carries this lever alone (the default: that is the kernel
+    // whose codegen shape moves, and recompiling the rest buys nothing). true = every
+    // shader in the state object gets it, for levers that change a SHARED declaration
+    // — payload qualifiers must match across raygen, closest hit and miss or the
+    // libraries disagree about the payload they pass each other.
+    bool        allShaders;
+    // Shader target this lever requires, or nullptr to keep each shader's own. A
+    // lever needs this when the feature it turns on is gated by the profile rather
+    // than by a define — payload qualifiers are mandatory at lib_6_7, so the base
+    // shaders stay at lib_6_5 and the variant raises the target with the annotations.
+    const char* targetOverride;
     // Name of a lever that cannot be on at the same time (wave32 vs wave64 set the
     // same define). Both on drops BOTH and logs — an impossible request must not
     // quietly measure as if it were one of the two.
@@ -51,6 +62,16 @@ public:
     // Empty when none are on, which is what keeps the default build addressing the
     // plain, unsuffixed shader asset.
     std::string VariantKey(bool debugViewActive) const;
+
+    // The part of a key that every shader in the state object must be built with.
+    // Empty for the common case, which leaves the non-raygen shaders on their plain
+    // asset ids and their existing blobs.
+    static std::string AllShaderSubsetKey(const std::string& key);
+
+    // Target a key's levers demand ("lib_6_7"), or empty to keep the shader's own.
+    // Two levers in one key demanding different targets is a configuration error and
+    // is logged; the first one wins so the build stays deterministic.
+    static std::string TargetForKey(const std::string& key);
 
     // "-D GUIDING_DEBUG_VIEWS=0 -D ONE_SAMPLE_MIS=1" for a key produced above.
     // Static because the shader loader resolves a key long after the frame that

@@ -63,12 +63,13 @@ uint2 SwizzleLaunchToPixel(uint2 launchIndex)
 // Minimal hit-ID payload (ADR 0007): the closest hit reports WHAT was hit,
 // raygen reconstructs the surface and shades in the bounce loop. The shared
 // RaytracingUtils Payload stays for the AO technique.
-struct PtPayload
+struct BAMBOO_RAYPAYLOAD PtPayload
 {
-    uint   instanceId;
-    uint   primitiveId;
-    float2 barycentrics;
-    uint   hitFlag;  // 1 = ray hit geometry
+    uint   instanceId   BAMBOO_PAQ(read(caller) : write(closesthit));
+    uint   primitiveId  BAMBOO_PAQ(read(caller) : write(closesthit));
+    float2 barycentrics BAMBOO_PAQ(read(caller) : write(closesthit));
+    // The only field a miss writes, and the only one read on a missed ray.
+    uint   hitFlag      BAMBOO_PAQ(read(caller) : write(closesthit, miss));
 };
 
 // Sky along a ray. Primary rays (vertex 0) keep the directly-viewed sky at
@@ -310,11 +311,17 @@ void RayGen()
             ray.TMin = RAY_TMIN;
             ray.TMax = RAY_TMAX;
 
+            // Nothing here needs a caller-side value: the closest hit writes every
+            // field and the miss writes hitFlag, which is what gates reading the rest.
+            // Under PAQ the zeroing would also force the payload to be carried INTO
+            // the trace, which is the cost the qualifiers exist to remove.
             PtPayload p;
+#if !PAYLOAD_QUALIFIERS
             p.instanceId = 0;
             p.primitiveId = 0;
             p.barycentrics = float2(0, 0);
             p.hitFlag = 0;
+#endif
             TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, p);
 
             if (p.hitFlag == 0u)

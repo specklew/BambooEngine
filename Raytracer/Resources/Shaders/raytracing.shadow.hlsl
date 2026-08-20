@@ -4,9 +4,14 @@
 #include "consts.hlsl"
 #include "RaytracingUtils.hlsl"
 
-struct ShadowPayload
+struct BAMBOO_RAYPAYLOAD ShadowPayload
 {
-    float visibility; // 0 = in shadow, 1 = fully lit
+    // write(caller) is NOT redundant, and dropping it produced garbage shadows: with
+    // RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH an OPAQUE hit ends traversal without
+    // running any shader at all — no any-hit (opaque geometry skips it), no miss — so
+    // the shadowed case is the one path where nothing writes the payload. The caller's
+    // 0 IS the result there.
+    float visibility BAMBOO_PAQ(read(caller) : write(caller, anyhit, miss)); // 0 = in shadow, 1 = fully lit
 };
 
 float3 GetShadowRayDirection(float3 shadingPoint, LightData light)
@@ -103,7 +108,8 @@ float TraceShadow(float3 shadingPoint, LightData light)
     shadowRay.TMin = RAY_TMIN;
     shadowRay.TMax = GetShadowRayTMax(shadingPoint, light);
 
-    ShadowPayload payload = { 0.0 }; // Start fully lit
+    ShadowPayload payload;
+    payload.visibility = 0.0; // stands as the result when an opaque hit ends traversal
     TraceRay(SceneBVH, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, ~0, 1, 1, 1, shadowRay, payload);
 
     return payload.visibility;
@@ -139,7 +145,8 @@ float TraceShadowSegment(float3 origin, float3 direction, float maxT)
     shadowRay.TMin = RAY_TMIN;
     shadowRay.TMax = max(RAY_TMIN, maxT - 2 * RAY_TMIN);
 
-    ShadowPayload payload = { 0.0 }; // Start fully lit
+    ShadowPayload payload;
+    payload.visibility = 0.0; // stands as the result when an opaque hit ends traversal
     TraceRay(SceneBVH, RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH, ~0, 1, 1, 1, shadowRay, payload);
 
     return payload.visibility;

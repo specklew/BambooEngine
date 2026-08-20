@@ -129,6 +129,18 @@ ShaderHandle ResourceManager::LoadShader(const AssetId& assetId)
 
     if (!variantKey.empty())
     {
+        // A lever may need a profile, not just a define: payload access qualifiers
+        // are mandatory at lib_6_7, so the base shaders stay at the target they were
+        // authored with and the variant raises it (ADR 0020 R7).
+        const std::string target = VendorLevers::TargetForKey(variantKey);
+        if (!target.empty() && target != meta.szTarget)
+        {
+            if (target.size() >= sizeof(meta.szTarget))
+                spdlog::error("Shader variant target too long for '{}': {}", full, target);
+            else
+                strcpy_s(meta.szTarget, target.c_str());
+        }
+
         const std::string extra = VendorLevers::DefinesForKey(variantKey);
         std::string combined = meta.szDefines;
         if (!combined.empty() && !extra.empty())
@@ -138,7 +150,7 @@ ShaderHandle ResourceManager::LoadShader(const AssetId& assetId)
             spdlog::error("Shader variant defines too long for '{}': {}", full, combined);
         else
             strcpy_s(meta.szDefines, combined.c_str());
-        spdlog::info("Compiling shader variant {} ({})", full, meta.szDefines);
+        spdlog::info("Compiling shader variant {} [{}] ({})", full, meta.szTarget, meta.szDefines);
     }
 
     Shader shader(CreateNewResourceId(assetId));

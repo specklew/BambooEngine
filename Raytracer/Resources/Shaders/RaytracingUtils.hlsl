@@ -10,6 +10,26 @@ static const float MIN_ROUGHNESS = 0.04;
 static const float RAY_TMIN = 0.001;
 static const float RAY_TMAX = 100.0;
 
+// ---- Payload access qualifiers (ADR 0020 R7) ----
+// Tell the driver which stages read and write each payload field, so the ones a
+// stage cannot see stay out of the live set across a trace. Compile-time only, and
+// a WRONG qualifier is a correctness bug rather than a slow path — every qualifier
+// below states what the shaders actually do, so check the shader before editing one.
+// lib_6_7+ (lib_6_6 needs -enable-payload-qualifiers; older targets warn and ignore).
+// Excluded from the inline-RayQuery build: there the payload structs are ordinary
+// local return values, and [raypayload] has no meaning in a compute shader.
+#ifndef PAYLOAD_QUALIFIERS
+#define PAYLOAD_QUALIFIERS 0
+#endif
+
+#if PAYLOAD_QUALIFIERS && !defined(GUIDED_TRACE_RQ)
+#define BAMBOO_RAYPAYLOAD [raypayload]
+#define BAMBOO_PAQ(qualifiers) : qualifiers
+#else
+#define BAMBOO_RAYPAYLOAD
+#define BAMBOO_PAQ(qualifiers)
+#endif
+
 // ---- Struct definitions ----
 
 struct Payload

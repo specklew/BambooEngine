@@ -143,12 +143,13 @@ uint PackIrradiance(float unpacked)
 // Minimal hit-ID payload (ADR 0007): the closest hit reports WHAT was hit,
 // raygen reconstructs the surface and shades in the bounce loop. No RNG seed
 // crosses the payload — no shader outside raygen consumes randoms.
-struct GuidedPayload
+struct BAMBOO_RAYPAYLOAD GuidedPayload
 {
-    uint   instanceId;
-    uint   primitiveId;
-    float2 barycentrics;
-    uint   hitFlag;  // 1 = ray hit geometry
+    uint   instanceId   BAMBOO_PAQ(read(caller) : write(closesthit));
+    uint   primitiveId  BAMBOO_PAQ(read(caller) : write(closesthit));
+    float2 barycentrics BAMBOO_PAQ(read(caller) : write(closesthit));
+    // The only field a miss writes, and the only one read on a missed ray.
+    uint   hitFlag      BAMBOO_PAQ(read(caller) : write(closesthit, miss));
 };
 
 // ---- BSDF pdf evaluation ----
@@ -751,11 +752,15 @@ GuidedPayload TraceBounceRay(RayDesc ray)
 
 GuidedPayload TraceBounceRay(RayDesc ray)
 {
+    // See PtPayload's trace: the hit writes every field, the miss writes hitFlag,
+    // and under PAQ a caller-side zeroing would carry the payload into the trace.
     GuidedPayload p;
+#if !PAYLOAD_QUALIFIERS
     p.instanceId = 0;
     p.primitiveId = 0;
     p.barycentrics = float2(0, 0);
     p.hitFlag = 0;
+#endif
     TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, p);
     return p;
 }

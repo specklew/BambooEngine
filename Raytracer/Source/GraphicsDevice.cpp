@@ -184,6 +184,16 @@ bool GraphicsDevice::CheckTearingSupport()
 	return tearingAllowed;
 }
 
+bool GraphicsDevice::SupportsShaderModel(D3D_SHADER_MODEL model) const
+{
+	// The struct is in/out: it is capped to what we ask for, so ask for the model
+	// in question and compare against what comes back.
+	D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { model };
+	if (FAILED(m_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel))))
+		return false;
+	return shaderModel.HighestShaderModel >= model;
+}
+
 bool GraphicsDevice::CheckRayTracingSupport() const
 {
 	spdlog::info("Checking ray tracing support...");
@@ -198,8 +208,13 @@ bool GraphicsDevice::CheckRayTracingSupport() const
 
 	// VXPG fingerprint / cvis visibility kernels use inline RayQuery (Tier 1.1,
 	// above) plus [WaveSize(32)] ballot packing, which needs shader model 6.6.
-	D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { D3D_SHADER_MODEL_6_6 };
+	// CheckFeatureSupport clamps its answer to the model we ask about, so ask for
+	// the highest a lever can demand (lib_6_7, payload qualifiers — ADR 0020 R7) and
+	// log what came back: a lever that needs more than the driver has must be caught
+	// here, not by a state-object creation failure three seconds into a benchmark.
+	D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { D3D_SHADER_MODEL_6_7 };
 	ThrowIfFailed(m_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
+	spdlog::info("Highest supported shader model: 6.{}", static_cast<int>(shaderModel.HighestShaderModel) & 0xF);
 	if (shaderModel.HighestShaderModel < D3D_SHADER_MODEL_6_6)
 	{
 		spdlog::error("Shader model 6.6 not supported (required by VXPG wave-intrinsic passes)!");

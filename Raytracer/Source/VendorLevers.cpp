@@ -20,23 +20,34 @@ VendorLevers::VendorLevers()
     // generic path reproduces what the measured one did.
     m_levers = {
         { "noviews", "renderer.raygenCleanVariant",
-          "GUIDING_DEBUG_VIEWS=0 RT_DEBUG_VIEWS=0", LeverScope::ShaderVariant, true, nullptr,
+          "GUIDING_DEBUG_VIEWS=0 RT_DEBUG_VIEWS=0", LeverScope::ShaderVariant, true, false, nullptr, nullptr,
           "Compile the raygen without debug-view code. Measured SLOWER on this RDNA driver (ADR 0014)." },
         { "onesample", "vxpg.oneSampleMis",
-          "ONE_SAMPLE_MIS=1", LeverScope::ShaderVariant, false, nullptr,
+          "ONE_SAMPLE_MIS=1", LeverScope::ShaderVariant, false, false, nullptr, nullptr,
           "One-sample MIS at the first vertex (ADR 0015). Default off; two-sample is what benchmarks measure." },
         { "swizzle", "renderer.raygenSwizzle",
-          "RAYGEN_SWIZZLE=1", LeverScope::ShaderVariant, false, nullptr,
+          "RAYGEN_SWIZZLE=1", LeverScope::ShaderVariant, false, false, nullptr, nullptr,
           "Morton launch-to-pixel swizzle inside a 32x32 tile (ADR 0020 R2). Pads the dispatch; bit-exact." },
         // Wave size reaches the inline-RayQuery integrator only: [WaveSize] is a
         // compute/node attribute in HLSL, so the DXR pipeline raygen cannot take it
         // (ADR 0020 R10). Inert unless vxpg.integrator.inlineRq selects that backend.
         { "wave32", "renderer.forceWave32",
-          "FORCED_WAVE_SIZE=32", LeverScope::ShaderVariant, false, "wave64",
+          "FORCED_WAVE_SIZE=32", LeverScope::ShaderVariant, false, false, nullptr, "wave64",
           "Force wave32 on the inline-RayQuery integrator (ADR 0020 R10)." },
         { "wave64", "renderer.forceWave64",
-          "FORCED_WAVE_SIZE=64", LeverScope::ShaderVariant, false, "wave32",
+          "FORCED_WAVE_SIZE=64", LeverScope::ShaderVariant, false, false, nullptr, "wave32",
           "Force wave64 on the inline-RayQuery integrator (ADR 0020 R10)." },
+        // allShaders: the payload declaration is shared, so raygen, closest hit and
+        // miss must agree on it (ADR 0020 R7).
+        { "payloadqual", "renderer.payloadQualifiers",
+          "PAYLOAD_QUALIFIERS=1", LeverScope::ShaderVariant, false, true, "lib_6_7", nullptr,
+          "Payload access qualifiers on the trace payloads (ADR 0020 R7). Needs lib_6_7." },
+        // The control for the one above: same profile bump, no qualifiers, so the two
+        // arms together separate "the profile costs this" from "the qualifiers cost
+        // this". lib_6_6 rather than lib_6_7 because 6_7 makes the annotation mandatory.
+        { "lib66", "renderer.forceLib66",
+          "", LeverScope::ShaderVariant, false, true, "lib_6_6", "payloadqual",
+          "Compile the DXR libraries as lib_6_6 with no payload qualifiers (ADR 0020 R7 control)." },
     };
 }
 
@@ -94,6 +105,49 @@ std::string VendorLevers::VariantKey(bool debugViewActive) const
         key += name;
     }
     return key;
+}
+
+std::string VendorLevers::AllShaderSubsetKey(const std::string& key)
+{
+    if (key.empty())
+        return {};
+
+    const VendorLevers& levers = Get();
+    std::string subset;
+    std::stringstream stream(key);
+    std::string name;
+    while (std::getline(stream, name, '+'))
+    {
+        const VendorLever* lever = levers.Find(name);
+        if (lever == nullptr || !lever->allShaders)
+            continue;
+        if (!subset.empty())
+            subset += '+';
+        subset += name;
+    }
+    return subset;
+}
+
+std::string VendorLevers::TargetForKey(const std::string& key)
+{
+    if (key.empty())
+        return {};
+
+    const VendorLevers& levers = Get();
+    std::string target;
+    std::stringstream stream(key);
+    std::string name;
+    while (std::getline(stream, name, '+'))
+    {
+        const VendorLever* lever = levers.Find(name);
+        if (lever == nullptr || lever->targetOverride == nullptr)
+            continue;
+        if (target.empty())
+            target = lever->targetOverride;
+        else if (target != lever->targetOverride)
+            spdlog::error("Levers in key '{}' demand different targets ('{}' kept)", key, target);
+    }
+    return target;
 }
 
 std::string VendorLevers::DefinesForKey(const std::string& key)

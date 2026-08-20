@@ -108,6 +108,13 @@ static AutoCVarInt g_forceWave32("renderer.forceWave32",
 	"1 = force wave32 on the inline-RayQuery integrator", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_forceWave64("renderer.forceWave64",
 	"1 = force wave64 on the inline-RayQuery integrator", 0, CVarFlags::EditCheckbox);
+// Payload access qualifiers (ADR 0020 R7). Rebuilds every shader in the state
+// object, not just the raygen: the payload declaration is shared.
+static AutoCVarInt g_payloadQualifiers("renderer.payloadQualifiers",
+	"1 = compile the trace payloads with access qualifiers", 0, CVarFlags::EditCheckbox);
+// Control arm for the one above: the profile bump without the qualifiers.
+static AutoCVarInt g_forceLib66("renderer.forceLib66",
+	"1 = compile the DXR libraries as lib_6_6 (no payload qualifiers)", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);
@@ -214,6 +221,36 @@ static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp",
 static AutoCVarInt   g_skyLighting("pathtracing.skyLighting",
 	"Skybox radiance lights surfaces via indirect rays; 0 = sky is background-only (benchmark isolation: the VXPG guide only targets direct-lit surfaces)",
 	1, CVarFlags::EditCheckbox);
+
+// A lever may demand a shader profile (ADR 0020 R7). Refuse one the driver cannot
+// run while it is still a CVar: the alternative is a state-object creation failure
+// several seconds into a run, on a machine that is not the one that wrote the
+// command line. Returns true when it turned something off and the key needs redoing.
+static bool DropLeversTheDriverCannotRun(const GraphicsDevice& device, const std::string& variantKey)
+{
+	const std::string target = VendorLevers::TargetForKey(variantKey);
+	if (target.empty())
+		return false;
+
+	// "lib_6_7" -> D3D_SHADER_MODEL_6_7. Only the minor digit varies across every
+	// profile a lever can ask for.
+	const int minor = target.back() - '0';
+	const auto model = static_cast<D3D_SHADER_MODEL>(0x60 | minor);
+	if (device.SupportsShaderModel(model))
+		return false;
+
+	bool dropped = false;
+	for (const VendorLever& lever : VendorLevers::Get().All())
+	{
+		if (lever.targetOverride == nullptr || target != lever.targetOverride || !VendorLevers::Get().IsEnabled(lever))
+			continue;
+		spdlog::error("Lever '{}' needs shader model 6.{}, which this driver does not support — turning it off", lever.name, minor);
+		VendorLevers::Get().SetEnabled(lever.name, false);
+		dropped = true;
+	}
+	return dropped;
+}
+
 void Renderer::Initialize()
 {
 	spdlog::info("Initializing renderer...");
@@ -455,7 +492,9 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		// branch on here — the guided override reads guiding.debugView itself.
 		// The lever registry turns the enabled compile-time levers into one key;
 		// a technique that has been built with a different one owes a rebuild.
-		const std::string variantKey = VendorLevers::Get().VariantKey(m_technique->HasActiveDebugView());
+		std::string variantKey = VendorLevers::Get().VariantKey(m_technique->HasActiveDebugView());
+		if (DropLeversTheDriverCannotRun(*m_graphicsDevice, variantKey))
+			variantKey = VendorLevers::Get().VariantKey(m_technique->HasActiveDebugView());
 		if (m_technique->SetShaderVariantKey(variantKey))
 			OnShaderReload();
 	}

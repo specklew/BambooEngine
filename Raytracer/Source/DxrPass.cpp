@@ -170,13 +170,19 @@ void DxrPass::InitializeRaytracingPipeline()
 
     m_techniqueDesc = GetTechniqueDesc();
 
-    // Compile-time vendor levers rewrite the RAYGEN asset only: that is the kernel
-    // whose codegen shape moves 6-11 % from changes this size (ADR 0014/0015), and
-    // the hit/miss shaders carry none of the code the levers gate. Applied here
-    // rather than in each technique's descriptor so a new technique inherits it.
+    // Compile-time vendor levers rewrite the RAYGEN asset: that is the kernel whose
+    // codegen shape moves 6-11 % from changes this size (ADR 0014/0015), and the
+    // hit/miss shaders carry none of the code most levers gate. The exception is a
+    // lever that changes a declaration the libraries SHARE — payload qualifiers —
+    // which every shader in the state object must be built with or they disagree
+    // about the payload they hand each other. Applied here rather than in each
+    // technique's descriptor so a new technique inherits it.
+    const std::string sharedKey = VendorLevers::AllShaderSubsetKey(m_shaderVariantKey);
     for (ShaderDesc& shader : m_techniqueDesc.shaders)
-        if (shader.role == ShaderRole::RayGen)
-            shader.shaderPath = VendorLevers::VariantAsset(shader.shaderPath, m_shaderVariantKey);
+    {
+        const std::string& key = shader.role == ShaderRole::RayGen ? m_shaderVariantKey : sharedKey;
+        shader.shaderPath = VendorLevers::VariantAsset(shader.shaderPath, key);
+    }
 
     // Load + compile all shaders listed in the descriptor
     LoadShaders();
