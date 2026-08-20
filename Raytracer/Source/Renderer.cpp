@@ -2383,6 +2383,7 @@ ScreenshotMetadata Renderer::BuildScreenshotMetadata(const std::string& modelNam
     m.samplesPerPixel = static_cast<uint32_t>(g_numSamplesPerPixel.Get());
     m.bounces         = static_cast<uint32_t>(g_numBounces.Get());
     m.activeLevers    = VendorLevers::Get().ActiveNames();
+    m.settings        = m_settingsTag;
     if (m_technique)
         m.shaderVariant = m_technique->GetShaderVariantKey();
 

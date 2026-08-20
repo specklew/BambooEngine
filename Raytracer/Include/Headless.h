@@ -139,7 +139,18 @@ struct HeadlessArgs
     // of a lever matrix from inheriting the previous row's state.
     std::vector<std::string> levers;
     bool                     leversSpecified = false;
+
+    // --cvar-matrix "renderer.numBounces=1,2,4;vxpg.oneSampleMis=0,1": a sweep over
+    // the CROSS PRODUCT of these, measured inside ONE process. These are runtime
+    // CVars — no shader recompile, no pipeline rebuild — so a settings point costs a
+    // re-arm rather than a process launch, and at short budgets the launch was 95% of
+    // the wall clock. Each capture records the point it belongs to in its sidecar.
+    std::string cvarMatrix;
 };
+
+// One "renderer.numBounces=2" assignment, applied to whichever CVar type exists.
+// Shared by --cvar and the matrix sweep so both resolve types the same way.
+void ApplyCVarAssignment(const std::string& name, const std::string& value);
 
 // Applies --cvar and --levers. Called once at startup and again by a headless run
 // after its config file has been read, because the config writes CVars too.

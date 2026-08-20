@@ -104,6 +104,10 @@ public:
 	                   const std::string& outDir, const std::string& stem,
 	                   uint32_t imageIndex, uint32_t imageCount, float warmupSeconds);
 	bool ScreenshotIdle() const;
+	// The settings point every subsequent capture belongs to (--cvar-matrix). Held on
+	// the renderer rather than passed per capture because it is provenance, not an
+	// argument: whatever is set here is what the sidecar reports it measured.
+	void SetSettingsTag(const std::string& tag) { m_settingsTag = tag; }
 	// Idle means the accumulation window is over, not that the PNG is on disk —
 	// encoding is asynchronous. A run must drain the queue before it exits.
 	void WaitForScreenshotWrites() const;
@@ -197,6 +201,7 @@ private:
 
 	bool m_headless = false;
 	int  m_activeTechniqueIndex = 0;
+	std::string m_settingsTag; // --cvar-matrix point the next captures belong to
 
 	std::unique_ptr<GraphicsDevice> m_graphicsDevice;
 	RenderGraph                     m_renderGraph;

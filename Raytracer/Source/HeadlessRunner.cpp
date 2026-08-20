@@ -203,6 +203,60 @@ CaptureSchedule HeadlessRunner::BuildSchedule() const
     return { budget, points };
 }
 
+// "renderer.numBounces=1,2,4;vxpg.oneSampleMis=0,1" -> 6 points, first dimension
+// varying slowest. Order matters for more than tidiness: the slowest-varying axis is
+// the one whose neighbours share a reference image, so a sweep can be scored without
+// re-rendering ground truth for every point.
+std::vector<HeadlessRunner::SettingsPoint> HeadlessRunner::ExpandSettingsMatrix() const
+{
+    std::vector<SettingsPoint> points{ SettingsPoint{} };
+    if (m_args.cvarMatrix.empty())
+        return points;
+
+    std::stringstream dimensions(m_args.cvarMatrix);
+    std::string dimension;
+    while (std::getline(dimensions, dimension, ';'))
+    {
+        if (dimension.empty())
+            continue;
+
+        const size_t equals = dimension.find('=');
+        if (equals == std::string::npos)
+        {
+            spdlog::error("--cvar-matrix dimension '{}' is not name=v1,v2", dimension);
+            continue;
+        }
+
+        const std::string name = dimension.substr(0, equals);
+        std::vector<std::string> values;
+        std::stringstream valueList(dimension.substr(equals + 1));
+        std::string value;
+        while (std::getline(valueList, value, ','))
+            if (!value.empty())
+                values.push_back(value);
+
+        if (values.empty())
+        {
+            spdlog::error("--cvar-matrix dimension '{}' lists no values", name);
+            continue;
+        }
+
+        std::vector<SettingsPoint> expanded;
+        expanded.reserve(points.size() * values.size());
+        for (const SettingsPoint& point : points)
+            for (const std::string& one : values)
+            {
+                SettingsPoint next = point;
+                next.assignments.emplace_back(name, one);
+                next.tag += (next.tag.empty() ? "" : ";") + name + "=" + one;
+                expanded.push_back(std::move(next));
+            }
+        points.swap(expanded);
+    }
+
+    return points;
+}
+
 void HeadlessRunner::PumpFrame()
 {
     MSG msg = {};
@@ -339,12 +393,13 @@ int HeadlessRunner::Run()
         return 2;
 
     const CaptureSchedule schedule = BuildSchedule();
+    const std::vector<SettingsPoint> settingsPoints = ExpandSettingsMatrix();
     const std::string baseDir = m_args.outDir.empty() ? m_config.outputDir : m_args.outDir;
     const std::string runDir  = baseDir + "/run-" + RunFolderTimestamp();
     const std::string model   = std::filesystem::path(m_args.scene).stem().string();
 
     spdlog::info("Headless run: {} configuration(s) x {} image(s) into {} (budget {} {}, {} checkpoint(s))",
-                 m_args.states.size() * m_args.techniques.size(), m_args.images, runDir,
+                 m_args.states.size() * m_args.techniques.size() * settingsPoints.size(), m_args.images, runDir,
                  schedule.budget.value,
                  schedule.budget.kind == CaptureBudget::Kind::Frames ? "frames" : "seconds",
                  schedule.checkpoints.size());
@@ -368,6 +423,16 @@ int HeadlessRunner::Run()
             {
                 m_renderer.SetTechniqueDebugView(view.index);
 
+              size_t pointIndex = 0;
+              for (const SettingsPoint& point : settingsPoints)
+              {
+                // Runtime CVars only, so a settings point costs a re-warm rather than
+                // a process launch; anything needing a pipeline rebuild belongs in
+                // --levers, which is a separate axis for exactly that reason.
+                for (const auto& [name, value] : point.assignments)
+                    ApplyCVarAssignment(name, value);
+                m_renderer.SetSettingsTag(point.tag);
+
                 // Warm up before arming. One frame is NOT enough: a slow first frame
                 // (technique switch rebuilding the VXPG passes, PSO creation, first
                 // dispatch) costs seconds, and that cost lands in the NEXT frame's
@@ -377,9 +442,15 @@ int HeadlessRunner::Run()
                 // variant, which rebuilds the pipeline — same reason, same warm-up.
                 const float warmupSpent = WarmUp();
 
-                const std::string stem = m_args.debugViews.empty()
+                // A sweep writes several points into one run folder, so the point's
+                // index joins the name. The index alone is not the record of what was
+                // measured — the sidecar's settings string is — but two points must
+                // not write the same file.
+                std::string stem = m_args.debugViews.empty()
                     ? place + "-" + technique
                     : place + "-" + technique + "-" + view.name;
+                if (settingsPoints.size() > 1)
+                    stem += fmt::format("-c{:03}", pointIndex);
 
                 // Independent images, one process: accumulation resets between them
                 // while the frame counter — and so the per-pixel RNG stream — runs on,
@@ -403,7 +474,10 @@ int HeadlessRunner::Run()
                         PumpFrame();
                 }
 
-                spdlog::info("Captured {} ({} image(s))", stem, m_args.images);
+                spdlog::info("Captured {} ({} image(s)){}", stem, m_args.images,
+                             point.tag.empty() ? std::string{} : " [" + point.tag + "]");
+                ++pointIndex;
+              }
             }
         }
 

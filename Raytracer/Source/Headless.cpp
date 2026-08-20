@@ -72,6 +72,7 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
         else if (flag == "--rdg-dump")    args.rdgDump = true;
         else if (flag == "--rdg-timings") args.rdgTimings = true;
         else if (flag == "--cvar")        args.cvarAssignments.push_back(valueOf(i));
+        else if (flag == "--cvar-matrix") args.cvarMatrix = valueOf(i);
         else if (flag == "--levers")
         {
             // "--levers none" is how a matrix row asks for the baseline: an empty
@@ -91,6 +92,22 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
 // Float or int is decided by which one the CVar system already knows the name as,
 // so nothing has to state a type on the command line; an unknown name is a typo
 // and says so rather than being ignored.
+void ApplyCVarAssignment(const std::string& name, const std::string& value)
+{
+    const StringId id(name.c_str());
+
+    if (CVarSystem::Get()->GetFloatCVar(id))
+        CVarSystem::Get()->SetCVarFloat(id, std::stof(value));
+    else if (CVarSystem::Get()->GetIntCVar(id))
+        CVarSystem::Get()->SetCVarInt(id, std::stoi(value));
+    else
+    {
+        spdlog::error("CVar '{}' is not a float or int CVar", name);
+        return;
+    }
+    spdlog::info("cvar {} = {}", name, value);
+}
+
 void ApplyCommandLineOverrides(const HeadlessArgs& args)
 {
     for (const std::string& assignment : args.cvarAssignments)
@@ -101,21 +118,7 @@ void ApplyCommandLineOverrides(const HeadlessArgs& args)
             spdlog::error("--cvar expects name=value, got '{}'", assignment);
             continue;
         }
-
-        const std::string name  = assignment.substr(0, separator);
-        const std::string value = assignment.substr(separator + 1);
-        const StringId    id(name.c_str());
-
-        if (CVarSystem::Get()->GetFloatCVar(id))
-            CVarSystem::Get()->SetCVarFloat(id, std::stof(value));
-        else if (CVarSystem::Get()->GetIntCVar(id))
-            CVarSystem::Get()->SetCVarInt(id, std::stoi(value));
-        else
-        {
-            spdlog::error("--cvar '{}' is not a float or int CVar", name);
-            continue;
-        }
-        spdlog::info("--cvar {} = {}", name, value);
+        ApplyCVarAssignment(assignment.substr(0, separator), assignment.substr(separator + 1));
     }
 
     if (!args.leversSpecified)

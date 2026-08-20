@@ -32,6 +32,18 @@ private:
     // The capture budget plus the checkpoints inside it, resolved from the flags.
     CaptureSchedule BuildSchedule() const;
 
+    // One point of a --cvar-matrix sweep: the assignments to apply, and the tag that
+    // identifies them in the sidecar.
+    struct SettingsPoint
+    {
+        std::vector<std::pair<std::string, std::string>> assignments;
+        std::string tag;
+    };
+
+    // The cross product of the matrix, or a single empty point when none was given —
+    // so the run loop has no special case for "no sweep".
+    std::vector<SettingsPoint> ExpandSettingsMatrix() const;
+
     Renderer&      m_renderer;
     HeadlessArgs   m_args;
     HeadlessConfig m_config;
