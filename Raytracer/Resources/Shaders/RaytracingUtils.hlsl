@@ -30,6 +30,16 @@ static const float RAY_TMAX = 100.0;
 #define BAMBOO_PAQ(qualifiers)
 #endif
 
+// Shader execution reordering (ADR 0020 R1): split TraceRay into traversal, a
+// reorder point, and shading, so a wave that scattered across materials during
+// traversal is regrouped before it shades. SM 6.9, and the DRIVER decides whether
+// the hint does anything at all — D3D12_FEATURE_DATA_D3D12_OPTIONS22 answers that,
+// logged at startup. The estimator is untouched either way: reordering changes who
+// shades next to whom, not what is traced.
+#ifndef RAYGEN_SER
+#define RAYGEN_SER 0
+#endif
+
 // ---- Struct definitions ----
 
 struct Payload

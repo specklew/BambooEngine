@@ -32,22 +32,32 @@ VendorLevers::VendorLevers()
         // compute/node attribute in HLSL, so the DXR pipeline raygen cannot take it
         // (ADR 0020 R10). Inert unless vxpg.integrator.inlineRq selects that backend.
         { "wave32", "renderer.forceWave32",
-          "FORCED_WAVE_SIZE=32", LeverScope::ShaderVariant, false, false, nullptr, "wave64",
+          "FORCED_WAVE_SIZE=32", LeverScope::ShaderVariant, false, false, nullptr, "wavesize",
           "Force wave32 on the inline-RayQuery integrator (ADR 0020 R10)." },
         { "wave64", "renderer.forceWave64",
-          "FORCED_WAVE_SIZE=64", LeverScope::ShaderVariant, false, false, nullptr, "wave32",
+          "FORCED_WAVE_SIZE=64", LeverScope::ShaderVariant, false, false, nullptr, "wavesize",
           "Force wave64 on the inline-RayQuery integrator (ADR 0020 R10)." },
-        // allShaders: the payload declaration is shared, so raygen, closest hit and
-        // miss must agree on it (ADR 0020 R7).
+        // The "dxrprofile" group: each of these compiles the DXR libraries at a
+        // different shader profile, and a state object has exactly one. allShaders
+        // because the payload declaration they change is shared (ADR 0020 R7).
         { "payloadqual", "renderer.payloadQualifiers",
-          "PAYLOAD_QUALIFIERS=1", LeverScope::ShaderVariant, false, true, "lib_6_7", nullptr,
+          "PAYLOAD_QUALIFIERS=1", LeverScope::ShaderVariant, false, true, "lib_6_7", "dxrprofile",
           "Payload access qualifiers on the trace payloads (ADR 0020 R7). Needs lib_6_7." },
         // The control for the one above: same profile bump, no qualifiers, so the two
         // arms together separate "the profile costs this" from "the qualifiers cost
         // this". lib_6_6 rather than lib_6_7 because 6_7 makes the annotation mandatory.
         { "lib66", "renderer.forceLib66",
-          "", LeverScope::ShaderVariant, false, true, "lib_6_6", "payloadqual",
+          "", LeverScope::ShaderVariant, false, true, "lib_6_6", "dxrprofile",
           "Compile the DXR libraries as lib_6_6 with no payload qualifiers (ADR 0020 R7 control)." },
+        // SER (ADR 0020 R1). lib_6_9 makes the payload annotation mandatory, so this
+        // necessarily carries payloadqual's define too — which is why the lever below
+        // exists as its control: lib_6_9 WITHOUT the reorder call.
+        { "ser", "renderer.shaderExecutionReordering",
+          "PAYLOAD_QUALIFIERS=1 RAYGEN_SER=1", LeverScope::ShaderVariant, false, true, "lib_6_9", "dxrprofile",
+          "dx::MaybeReorderThread between traversal and shading (ADR 0020 R1). Needs SM 6.9." },
+        { "lib69", "renderer.forceLib69",
+          "PAYLOAD_QUALIFIERS=1", LeverScope::ShaderVariant, false, true, "lib_6_9", "dxrprofile",
+          "Compile the DXR libraries as lib_6_9 without the reorder call (ADR 0020 R1 control)." },
     };
 }
 
@@ -84,12 +94,16 @@ std::string VendorLevers::VariantKey(bool debugViewActive) const
             continue;
         if (debugViewActive && lever.suppressedByDebugView)
             continue;
-        if (lever.conflictsWith != nullptr)
+        if (lever.exclusiveGroup != nullptr)
         {
-            const VendorLever* other = Find(lever.conflictsWith);
-            if (other != nullptr && IsEnabled(*other))
+            const auto sameGroupAndOn = [&](const VendorLever& other) {
+                return &other != &lever && other.exclusiveGroup != nullptr &&
+                       std::string(other.exclusiveGroup) == lever.exclusiveGroup && IsEnabled(other);
+            };
+            const auto clash = std::find_if(m_levers.begin(), m_levers.end(), sameGroupAndOn);
+            if (clash != m_levers.end())
             {
-                spdlog::error("Levers '{}' and '{}' conflict; both dropped", lever.name, other->name);
+                spdlog::error("Levers '{}' and '{}' are both '{}'; both dropped", lever.name, clash->name, lever.exclusiveGroup);
                 continue;
             }
         }

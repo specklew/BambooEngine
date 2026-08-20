@@ -115,6 +115,12 @@ static AutoCVarInt g_payloadQualifiers("renderer.payloadQualifiers",
 // Control arm for the one above: the profile bump without the qualifiers.
 static AutoCVarInt g_forceLib66("renderer.forceLib66",
 	"1 = compile the DXR libraries as lib_6_6 (no payload qualifiers)", 0, CVarFlags::EditCheckbox);
+// SER (ADR 0020 R1) and its control. The startup log says whether this driver
+// reorders at all; where it does not, both arms measure the lib_6_9 profile.
+static AutoCVarInt g_shaderExecutionReordering("renderer.shaderExecutionReordering",
+	"1 = dx::MaybeReorderThread between traversal and shading (needs SM 6.9)", 0, CVarFlags::EditCheckbox);
+static AutoCVarInt g_forceLib69("renderer.forceLib69",
+	"1 = compile the DXR libraries as lib_6_9 without the reorder call", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);
@@ -228,6 +234,18 @@ static AutoCVarInt   g_skyLighting("pathtracing.skyLighting",
 // command line. Returns true when it turned something off and the key needs redoing.
 static bool DropLeversTheDriverCannotRun(const GraphicsDevice& device, const std::string& variantKey)
 {
+	// SER first: it is gated on a capability, not a profile. A driver that answers
+	// "does not reorder" does not merely ignore dx::HitObject — the one measured here
+	// takes CreateStateObject down with an access violation on any state object
+	// containing it (ADR 0020 R1), so this check is what stands between a lever flip
+	// and a crash. The lib69 control lever stays available: SM 6.9 itself is fine.
+	if (variantKey.find("ser") != std::string::npos && !device.ReordersShaderExecution())
+	{
+		spdlog::error("Lever 'ser' needs a driver that reorders shader execution; this one reports it does not — turning it off");
+		VendorLevers::Get().SetEnabled("ser", false);
+		return true;
+	}
+
 	const std::string target = VendorLevers::TargetForKey(variantKey);
 	if (target.empty())
 		return false;

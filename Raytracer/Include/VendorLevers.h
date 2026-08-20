@@ -40,10 +40,11 @@ struct VendorLever
     // than by a define — payload qualifiers are mandatory at lib_6_7, so the base
     // shaders stay at lib_6_5 and the variant raises the target with the annotations.
     const char* targetOverride;
-    // Name of a lever that cannot be on at the same time (wave32 vs wave64 set the
-    // same define). Both on drops BOTH and logs — an impossible request must not
-    // quietly measure as if it were one of the two.
-    const char* conflictsWith;
+    // Levers sharing a group name are mutually exclusive: they set the same define
+    // or the same shader profile, so two of them at once is not a combination, it is
+    // a contradiction. All of them are dropped and it is logged — an impossible
+    // request must not quietly measure as if it were one of its halves.
+    const char* exclusiveGroup;
     const char* description;
 };
 

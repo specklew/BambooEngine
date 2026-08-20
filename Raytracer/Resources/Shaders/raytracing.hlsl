@@ -322,7 +322,13 @@ void RayGen()
             p.barycentrics = float2(0, 0);
             p.hitFlag = 0;
 #endif
+#if RAYGEN_SER
+            dx::HitObject hitObject = dx::HitObject::TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, p);
+            dx::MaybeReorderThread(hitObject);
+            dx::HitObject::Invoke(hitObject, p);
+#else
             TraceRay(SceneBVH, 0, ~0, 0, 1, 0, ray, p);
+#endif
 
             if (p.hitFlag == 0u)
             {

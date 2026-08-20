@@ -25,6 +25,12 @@ public:
     // as a state-object creation failure in the middle of a timed run.
     bool SupportsShaderModel(D3D_SHADER_MODEL model) const;
 
+    // Whether dx::MaybeReorderThread does anything on this device. Asked before the
+    // SER lever compiles: on a driver that answers no, this one measured worse than
+    // "no effect" — CreateStateObject dies with an access violation on a state object
+    // holding dx::HitObject at all (ADR 0020 R1).
+    bool ReordersShaderExecution() const;
+
     // Signal + CPU-wait until the queue drains, then refresh the frame index. For
     // structural changes only (resize, scene switch, shader reload, a readback):
     // the steady-state frame paces itself with the pair below instead.

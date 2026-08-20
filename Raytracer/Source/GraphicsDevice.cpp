@@ -194,6 +194,14 @@ bool GraphicsDevice::SupportsShaderModel(D3D_SHADER_MODEL model) const
 	return shaderModel.HighestShaderModel >= model;
 }
 
+bool GraphicsDevice::ReordersShaderExecution() const
+{
+	D3D12_FEATURE_DATA_D3D12_OPTIONS22 options22 = {};
+	if (FAILED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS22, &options22, sizeof(options22))))
+		return false;
+	return options22.ShaderExecutionReorderingActuallyReorders != FALSE;
+}
+
 bool GraphicsDevice::CheckRayTracingSupport() const
 {
 	spdlog::info("Checking ray tracing support...");
@@ -203,6 +211,17 @@ bool GraphicsDevice::CheckRayTracingSupport() const
 	// Logged numerically because the interesting value is past this SDK's enum: tier
 	// 12 is DXR 1.2 (SER + opacity micromaps, ADR 0020 R1/OMM), 11 is 1.1, 10 is 1.0.
 	spdlog::info("Raytracing tier: {}", static_cast<int>(options5.RaytracingTier));
+
+	// SER (ADR 0020 R1) is a shader-model 6.9 feature, not a raytracing-tier one:
+	// dx::MaybeReorderThread compiles and runs anywhere SM 6.9 does, and is simply a
+	// hint the driver may ignore. This bool is the only thing that says whether the
+	// hint moves anything — a measurement that ignores it cannot tell "SER does not
+	// help this workload" from "this GPU never reordered in the first place".
+	D3D12_FEATURE_DATA_D3D12_OPTIONS22 options22 = {};
+	if (SUCCEEDED(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS22, &options22, sizeof(options22))))
+		spdlog::info("Shader execution reordering actually reorders: {}", options22.ShaderExecutionReorderingActuallyReorders ? "yes" : "no");
+	else
+		spdlog::info("Shader execution reordering: not queryable on this runtime");
 	if (options5.RaytracingTier < D3D12_RAYTRACING_TIER_1_1)
 	{
 		spdlog::error("Ray tracing not supported!");
