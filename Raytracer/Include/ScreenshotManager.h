@@ -50,6 +50,11 @@ struct ScreenshotMetadata
     bool  varianceValid    = false;
     float varianceMean     = 0.0f;
     float varianceRelative = 0.0f;
+
+    // Which vendor levers were on (ADR 0020). A frame count and a FLIP without
+    // this are not a reproducible measurement.
+    std::string activeLevers;
+    std::string shaderVariant; // what the pipeline was built with, not what was asked for
 };
 
 // A capture's stopping condition. Seconds is the equal-time axis, frames the

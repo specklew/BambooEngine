@@ -7,8 +7,9 @@ struct ShaderMetadata
     char szPathWithinResources[64]; // e.g. "Shaders/MyShader.hlsl"
     char szEntrypoint[32]; // e.g. "VS"
     char szTarget[32]; // e.g. "vs_6_0"
-    // Optional, may be nullptr
-    char szDefines[64]; // e.g. "-D MyDefine=1 -D another=2"
+    // Optional, may be empty. Sized for a base sidecar's defines plus every
+    // compile-time vendor lever's, since a variant concatenates the two.
+    char szDefines[256]; // e.g. "-D MyDefine=1 -D another=2"
 
     std::filesystem::file_time_type lastCompilationTime = {}; // Remember to set this after compiling the shader. TODO : can we do this automatically?
 

@@ -53,19 +53,11 @@ void DxrTechnique::OnResize()
     DxrPass::OnResize();
 }
 
-bool DxrTechnique::SetDebugViewsCompiled(bool enabled)
+bool DxrTechnique::SetShaderVariantKey(const std::string& key)
 {
-    if (m_compileDebugViews == enabled)
+    if (m_shaderVariantKey == key)
         return false;
-    m_compileDebugViews = enabled;
-    return true;
-}
-
-bool DxrTechnique::SetOneSampleMisCompiled(bool enabled)
-{
-    if (m_compileOneSampleMis == enabled)
-        return false;
-    m_compileOneSampleMis = enabled;
+    m_shaderVariantKey = key;
     return true;
 }
 

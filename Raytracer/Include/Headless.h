@@ -133,7 +133,17 @@ struct HeadlessArgs
     // line rather than a source edit and a rebuild — which matters because only
     // a same-session alternating A/B survives the GPU's thermal drift.
     std::vector<std::string> cvarAssignments;
+
+    // --levers a,b (or "none"): the complete set of vendor levers to enable
+    // (ADR 0020). Stating the whole set rather than a delta is what keeps one row
+    // of a lever matrix from inheriting the previous row's state.
+    std::vector<std::string> levers;
+    bool                     leversSpecified = false;
 };
+
+// Applies --cvar and --levers. Called once at startup and again by a headless run
+// after its config file has been read, because the config writes CVars too.
+void ApplyCommandLineOverrides(const HeadlessArgs& args);
 
 HeadlessArgs   ParseHeadlessArgs(int argc, wchar_t** argv);
 HeadlessConfig LoadHeadlessConfig(const std::string& path);

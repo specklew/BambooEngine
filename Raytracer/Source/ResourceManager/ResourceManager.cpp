@@ -4,6 +4,7 @@
 #include "Utils/Utils.h"
 #include "Shader.h"
 #include "ShaderCompilation.h"
+#include "VendorLevers.h"
 
 ResourceManager& ResourceManager::Get()
 {
@@ -102,9 +103,43 @@ ShaderHandle ResourceManager::LoadShader(const AssetId& assetId)
 {
     ASSERT_VALID_ASSET_ID(assetId);
 
-    const char* buffer = LoadAssetFile(assetId);
-    const ShaderMetadata meta = ShaderMetadata::Deserialize(buffer);
+    // A variant asset id is "<base .shader path>|<lever key>". The base file still
+    // supplies source, entry point and target; the key names levers whose defines
+    // are appended. Variants are ordinary entries in this table, so the hot-reload
+    // walk below already covers every one of them — and the key carries lever
+    // NAMES rather than raw defines because AssetId lowercases what it is given,
+    // and DXC define names are case-sensitive.
+    const std::string full = assetId.AsString();
+    const size_t      bar  = full.find('|');
+
+    std::string baseString = full;
+    std::string variantKey;
+    if (bar != std::string::npos)
+    {
+        // "path/x.rg|onesample.shader" -> base "path/x.rg.shader", key "onesample".
+        const size_t dot = full.find('.', bar);
+        variantKey = full.substr(bar + 1, dot == std::string::npos ? std::string::npos : dot - bar - 1);
+        baseString = full.substr(0, bar) + (dot == std::string::npos ? std::string{} : full.substr(dot));
+    }
+    const AssetId baseAsset(baseString);
+
+    const char* buffer = LoadAssetFile(baseAsset);
+    ShaderMetadata meta = ShaderMetadata::Deserialize(buffer);
     delete[] buffer;
+
+    if (!variantKey.empty())
+    {
+        const std::string extra = VendorLevers::DefinesForKey(variantKey);
+        std::string combined = meta.szDefines;
+        if (!combined.empty() && !extra.empty())
+            combined += ' ';
+        combined += extra;
+        if (combined.size() >= sizeof(meta.szDefines))
+            spdlog::error("Shader variant defines too long for '{}': {}", full, combined);
+        else
+            strcpy_s(meta.szDefines, combined.c_str());
+        spdlog::info("Compiling shader variant {} ({})", full, meta.szDefines);
+    }
 
     Shader shader(CreateNewResourceId(assetId));
     shader.bytecode = CompileShader(meta, &shader.reflection);

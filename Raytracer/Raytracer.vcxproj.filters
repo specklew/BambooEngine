@@ -782,6 +782,9 @@
     <ClCompile Include="Source\ScreenshotManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Source\VendorLevers.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Source\StatesManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

@@ -103,6 +103,7 @@
     <ClInclude Include="Include\Application.h" />
     <ClInclude Include="Include\Headless.h" />
     <ClInclude Include="Include\HeadlessRunner.h" />
+    <ClInclude Include="Include\VendorLevers.h" />
     <ClInclude Include="Include\Camera.h" />
     <ClInclude Include="Include\Constants.h" />
     <ClInclude Include="Include\DescriptorAllocator.h" />
@@ -411,6 +412,7 @@
     <ClCompile Include="Source\Techniques\PathTracingPass.cpp" />
     <ClCompile Include="Source\Techniques\AmbientOcclusionPass.cpp" />
     <ClCompile Include="Source\ScreenshotManager.cpp" />
+    <ClCompile Include="Source\VendorLevers.cpp" />
     <ClCompile Include="Source\StatesManager.cpp" />
     <ClCompile Include="Source\StatesPanel.cpp" />
     <ClCompile Include="Source\VoxelizationPass.cpp" />

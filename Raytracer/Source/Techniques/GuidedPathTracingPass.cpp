@@ -167,11 +167,10 @@ void GuidedPathTracingPass::EnsureInlineRayQueryPso()
 TechniqueDesc GuidedPathTracingPass::GetTechniqueDesc() const
 {
     TechniqueDesc desc;
+    // One raygen asset: the compile-time levers suffix it (DxrPass), so a variant
+    // no longer needs a sidecar file of its own.
     desc.shaders = {
-            {m_compileOneSampleMis ? "resources/shaders/guidedPathTracing.rg.onesample.shader"
-             : m_compileDebugViews ? "resources/shaders/guidedPathTracing.rg.shader"
-                                   : "resources/shaders/guidedPathTracing.rg.clean.shader",
-                                                                L"GuidedRayGen", ShaderRole::RayGen},
+            {"resources/shaders/guidedPathTracing.rg.shader",    L"GuidedRayGen", ShaderRole::RayGen},
             {"resources/shaders/guidedPathTracing.ms.shader",   L"GuidedMiss",   ShaderRole::Miss},
             {"resources/shaders/raytracing.shadowmiss.shader",  L"ShadowMiss",   ShaderRole::Miss},
             {"resources/shaders/guidedPathTracing.ch.shader",   L"GuidedHit",    ShaderRole::ClosestHit},
@@ -238,7 +237,7 @@ void GuidedPathTracingPass::DeclareDispatchResources(RenderGraph& graph, RenderG
 {
     DeclareVoxelGuidingReads(dispatchPass);
 
-    if (!m_compileOneSampleMis)
+    if (!CompilesLever("onesample"))
         return;
 
     // The dispatch reads last frame's q and accumulates this frame's stats; the
@@ -274,7 +273,7 @@ void GuidedPathTracingPass::DeclareVoxelGuidingReads(RenderGraphPassBuilder& pas
 
 void GuidedPathTracingPass::AppendPostDispatchNodes(RenderGraph& graph)
 {
-    if (!m_compileOneSampleMis)
+    if (!CompilesLever("onesample"))
         return;
 
     // Folds this frame's per-tile strategy stats into the guide-selection

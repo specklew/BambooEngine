@@ -90,14 +90,18 @@ HeadlessRunner::HeadlessRunner(Renderer& renderer, HeadlessArgs args, HeadlessCo
 // structure that is cold for the first frames after a technique switch.
 float HeadlessRunner::WarmUp()
 {
-    // Legacy path: a fixed pump, enough to keep a one-time stall out of a capture
-    // window but nothing like a thermal warm-up.
+    // Always spend the one-time costs first, and spend them OUTSIDE the timed part
+    // below. A compile-time vendor lever swaps the raygen variant, which routes
+    // through the full OnShaderReload (DXC + state object + SBT) and can cost
+    // seconds; counted as elapsed warm-up it blows straight through the cap, the
+    // loop exits without ever settling, and the reload's cost then lands in the
+    // first armed frame — which was measured as a one-frame capture on every
+    // lever combination.
+    for (int i = 0; i < 16; ++i)
+        PumpFrame();
+
     if (m_args.warmupSeconds <= 0.0f)
-    {
-        for (int i = 0; i < 16; ++i)
-            PumpFrame();
         return 0.0f;
-    }
 
     constexpr size_t kWindow      = 30;   // frames the stability test looks at
     constexpr double kMaxVariation = 0.02; // coefficient of variation to call it settled
@@ -324,6 +328,9 @@ int HeadlessRunner::Run()
 {
     m_renderer.SetHeadless(true);
     m_renderer.ApplyRenderConfig(m_config);
+    // After the config, not before: it writes the same CVars, so a command line
+    // that lost to it would be a silent misconfiguration of a measurement.
+    ApplyCommandLineOverrides(m_args);
 
     m_renderer.LoadScene(ResolveScenePath(m_args.scene), ResolveStatesKey(m_args));
     ApplyConfiguredLights();

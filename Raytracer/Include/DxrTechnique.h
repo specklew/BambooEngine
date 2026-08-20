@@ -21,8 +21,8 @@ public:
     void OnShaderReload() override { DxrPass::OnShaderReload(); }
     void OnSceneChange(std::shared_ptr<Scene> scene) override { DxrPass::OnSceneChange(scene); }
 
-    bool SetDebugViewsCompiled(bool enabled) override;
-    bool SetOneSampleMisCompiled(bool enabled) override;
+    bool SetShaderVariantKey(const std::string& key) override;
+    std::string GetShaderVariantKey() const override { return m_shaderVariantKey; }
 
     int  GetDebugMode() const override;
     bool HasActiveDebugView() const override;

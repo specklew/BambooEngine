@@ -47,6 +47,7 @@
 #include "SceneResources/Scene.h"
 #include "ResourceManager/ResourceManager.h"
 #include "Shader.h"
+#include "VendorLevers.h"
 #include "Window.h"
 #include "Resources/ConstantBuffer.h"
 #include "Resources/IndexBuffer.h"
@@ -440,10 +441,10 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	{
 		// Each technique answers for its own view enum, so there is nothing to
 		// branch on here — the guided override reads guiding.debugView itself.
-		const bool wantsDebugViews = m_technique->HasActiveDebugView() || g_raygenCleanVariant.Get() == 0;
-		bool needsReload = m_technique->SetDebugViewsCompiled(wantsDebugViews);
-		needsReload |= m_technique->SetOneSampleMisCompiled(g_guidingOneSampleMis.Get() != 0);
-		if (needsReload)
+		// The lever registry turns the enabled compile-time levers into one key;
+		// a technique that has been built with a different one owes a rebuild.
+		const std::string variantKey = VendorLevers::Get().VariantKey(m_technique->HasActiveDebugView());
+		if (m_technique->SetShaderVariantKey(variantKey))
 			OnShaderReload();
 	}
 
@@ -2312,6 +2313,9 @@ ScreenshotMetadata Renderer::BuildScreenshotMetadata(const std::string& modelNam
 
     m.samplesPerPixel = static_cast<uint32_t>(g_numSamplesPerPixel.Get());
     m.bounces         = static_cast<uint32_t>(g_numBounces.Get());
+    m.activeLevers    = VendorLevers::Get().ActiveNames();
+    if (m_technique)
+        m.shaderVariant = m_technique->GetShaderVariantKey();
 
     return m;
 }

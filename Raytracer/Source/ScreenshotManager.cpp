@@ -445,6 +445,8 @@ void ScreenshotManager::WriteSidecarJson(const std::string& jsonPath) const
         bench.AddMember("imageCount",    m_pendingMeta.imageCount, a);
         bench.AddMember("meanFrameMs",   m_pendingMeta.meanFrameMs, a);
         bench.AddMember("warmupSeconds", m_pendingMeta.warmupSeconds, a);
+        bench.AddMember("levers",        MakeStr(m_pendingMeta.activeLevers, a), a);
+        bench.AddMember("shaderVariant", MakeStr(m_pendingMeta.shaderVariant, a), a);
         if (m_pendingMeta.varianceValid)
         {
             bench.AddMember("varianceMean",     m_pendingMeta.varianceMean,     a);

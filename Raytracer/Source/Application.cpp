@@ -53,33 +53,9 @@ int Application::Run()
 	if (headlessArgs.rdgDump && !headlessArgs.headless)
 		CVarSystem::Get()->SetCVarInt(StringId("rdg.dump"), 1);
 
-	// --cvar name=value. Float or int is decided by which one the CVar system
-	// already knows the name as, so nothing has to state the type on the command
-	// line; an unknown name is a typo and says so rather than being ignored.
-	for (const std::string& assignment : headlessArgs.cvarAssignments)
-	{
-		const size_t separator = assignment.find('=');
-		if (separator == std::string::npos)
-		{
-			spdlog::error("--cvar expects name=value, got '{}'", assignment);
-			continue;
-		}
-
-		const std::string name  = assignment.substr(0, separator);
-		const std::string value = assignment.substr(separator + 1);
-		const StringId     id(name.c_str());
-
-		if (CVarSystem::Get()->GetFloatCVar(id))
-			CVarSystem::Get()->SetCVarFloat(id, std::stof(value));
-		else if (CVarSystem::Get()->GetIntCVar(id))
-			CVarSystem::Get()->SetCVarInt(id, std::stoi(value));
-		else
-		{
-			spdlog::error("--cvar '{}' is not a float or int CVar", name);
-			continue;
-		}
-		spdlog::info("--cvar {} = {}", name, value);
-	}
+	// A headless run applies these again after its config file has been read,
+	// because the config also writes CVars and would otherwise silently win.
+	ApplyCommandLineOverrides(headlessArgs);
 
 	int exitCode = 0;
 	if (headlessArgs.headless)

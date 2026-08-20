@@ -99,12 +99,16 @@ public:
     virtual void OnShaderReload() {}
     virtual void OnSceneChange(std::shared_ptr<Scene> scene) {}
 
-    // Shader-variant switches (ADR 0014 / ADR 0015). Return true when the value
-    // changed — the caller then owes a pipeline rebuild. A technique that
-    // compiles no variants reports "nothing changed", so the renderer's sync
-    // block needs no branch on what kind of technique is active.
-    virtual bool SetDebugViewsCompiled(bool enabled) { return false; }
-    virtual bool SetOneSampleMisCompiled(bool enabled) { return false; }
+    // Which compile-time vendor levers this technique should be built with
+    // (ADR 0020's registry produces the key). Returns true when it changed — the
+    // caller then owes a pipeline rebuild. A technique that compiles no variants
+    // reports "nothing changed", so the renderer's sync block needs no branch on
+    // what kind of technique is active.
+    virtual bool SetShaderVariantKey(const std::string& key) { return false; }
+    // What the live pipeline was actually BUILT with. Recorded next to every
+    // capture: the lever CVars say what was asked for, this says what compiled,
+    // and a measurement needs the second one.
+    virtual std::string GetShaderVariantKey() const { return {}; }
 
     // Registry — populated via REGISTER_TECHNIQUE before main().
     struct Entry

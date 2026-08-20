@@ -6,6 +6,7 @@
 
 #include "AccelerationStructures.h"
 #include "Constants.h"
+#include "VendorLevers.h"
 #include "DXRHelper.h"
 #include "FrameBindingLayout.h"
 #include "GlobalDescriptorHeap.h"
@@ -155,6 +156,14 @@ void DxrPass::InitializeRaytracingPipeline()
     spdlog::debug("Initializing raytracing pipeline");
 
     m_techniqueDesc = GetTechniqueDesc();
+
+    // Compile-time vendor levers rewrite the RAYGEN asset only: that is the kernel
+    // whose codegen shape moves 6-11 % from changes this size (ADR 0014/0015), and
+    // the hit/miss shaders carry none of the code the levers gate. Applied here
+    // rather than in each technique's descriptor so a new technique inherits it.
+    for (ShaderDesc& shader : m_techniqueDesc.shaders)
+        if (shader.role == ShaderRole::RayGen)
+            shader.shaderPath = VendorLevers::VariantAsset(shader.shaderPath, m_shaderVariantKey);
 
     // Load + compile all shaders listed in the descriptor
     LoadShaders();

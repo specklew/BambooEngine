@@ -82,12 +82,16 @@ protected:
     std::shared_ptr<ShaderBindingTable> m_shaderBindingTable;
     std::shared_ptr<Scene>              m_currentScene;
 
-    // Default true = views-in raygen, matching renderer.raygenCleanVariant's
-    // default 0 so startup skips a rebuild. Views-in measured FASTER on the
-    // current RDNA driver (Renderer variant-sync block has the numbers);
-    // GetTechniqueDesc overrides pick the rg sidecar off this flag.
-    bool m_compileDebugViews = true;
-    bool m_compileOneSampleMis = false; // matches vxpg.oneSampleMis default 0
+    // Which compile-time vendor levers this pipeline was BUILT with (ADR 0020).
+    // Frozen at build time so a CVar flipped mid-frame cannot desync the state
+    // object from the blobs it was made of; the Renderer compares it against the
+    // live key and asks for a rebuild when they differ. Empty = the plain shaders.
+    std::string m_shaderVariantKey;
+
+    bool CompilesLever(const char* leverName) const
+    {
+        return m_shaderVariantKey.find(leverName) != std::string::npos;
+    }
 
     D3D12_CPU_DESCRIPTOR_HANDLE m_geometryInfoHandle = {};
 
