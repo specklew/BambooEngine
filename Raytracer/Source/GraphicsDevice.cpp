@@ -200,6 +200,9 @@ bool GraphicsDevice::CheckRayTracingSupport() const
 
 	D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
 	ThrowIfFailed(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5)));
+	// Logged numerically because the interesting value is past this SDK's enum: tier
+	// 12 is DXR 1.2 (SER + opacity micromaps, ADR 0020 R1/OMM), 11 is 1.1, 10 is 1.0.
+	spdlog::info("Raytracing tier: {}", static_cast<int>(options5.RaytracingTier));
 	if (options5.RaytracingTier < D3D12_RAYTRACING_TIER_1_1)
 	{
 		spdlog::error("Ray tracing not supported!");
@@ -212,8 +215,15 @@ bool GraphicsDevice::CheckRayTracingSupport() const
 	// the highest a lever can demand (lib_6_7, payload qualifiers — ADR 0020 R7) and
 	// log what came back: a lever that needs more than the driver has must be caught
 	// here, not by a state-object creation failure three seconds into a benchmark.
-	D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { D3D_SHADER_MODEL_6_7 };
-	ThrowIfFailed(m_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
+	// Ask HIGH, not for what we use: the struct is capped to the value passed in, so
+	// asking for 6.7 can only ever answer "6.7" and says nothing about the driver.
+	// 0x69 is SM 6.9 (SER / DXR 1.2), which is past this Agility SDK's enum.
+	D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { static_cast<D3D_SHADER_MODEL>(0x69) };
+	if (FAILED(m_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel))))
+	{
+		shaderModel.HighestShaderModel = D3D_SHADER_MODEL_6_8;
+		ThrowIfFailed(m_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel)));
+	}
 	spdlog::info("Highest supported shader model: 6.{}", static_cast<int>(shaderModel.HighestShaderModel) & 0xF);
 	if (shaderModel.HighestShaderModel < D3D_SHADER_MODEL_6_6)
 	{
