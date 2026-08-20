@@ -10,6 +10,7 @@
 #include "DXRHelper.h"
 #include "FrameBindingLayout.h"
 #include "GlobalDescriptorHeap.h"
+#include "PassRegisters.h"
 #include "Renderer.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
@@ -68,6 +69,19 @@ void DxrPass::OnSceneChange(std::shared_ptr<Scene> scene)
 // Render
 // ---------------------------------------------------------------------------
 
+void DxrPass::GetLaunchExtent(uint32_t& width, uint32_t& height) const
+{
+    width  = Window::Get().GetWidth();
+    height = Window::Get().GetHeight();
+
+    if (!CompilesLever("swizzle"))
+        return;
+
+    constexpr uint32_t tile = RAYGEN_SWIZZLE_TILE_SIZE;
+    width  = ((width  + tile - 1) / tile) * tile;
+    height = ((height + tile - 1) / tile) * tile;
+}
+
 void DxrPass::Render()
 {
     m_commandList->SetComputeRootSignature(m_globalRootSignature.Get());
@@ -87,8 +101,7 @@ void DxrPass::Render()
     desc.HitGroupTable.StrideInBytes = m_shaderBindingTable->GetHitEntrySize();
     desc.HitGroupTable.SizeInBytes   = m_shaderBindingTable->GetHitSectionSize();
 
-    desc.Width  = Window::Get().GetWidth();
-    desc.Height = Window::Get().GetHeight();
+    GetLaunchExtent(desc.Width, desc.Height);
     desc.Depth  = 1;
 
     m_commandList->SetPipelineState1(m_rtStateObject.Get());

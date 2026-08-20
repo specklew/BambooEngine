@@ -2335,9 +2335,14 @@ void GuidedRqMain(uint3 dtid : SV_DispatchThreadID)
 {
     uint width, height;
     gOutput.GetDimensions(width, height);
-    if (dtid.x >= width || dtid.y >= height)
+#if RAYGEN_SWIZZLE
+    const uint2 pixel = SwizzleLaunchToPixel(dtid.xy);
+#else
+    const uint2 pixel = dtid.xy;
+#endif
+    if (pixel.x >= width || pixel.y >= height)
         return;
-    gLaunchIndex = dtid.xy;
+    gLaunchIndex = pixel;
     gLaunchDims = uint2(width, height);
     GuidedIntegratorMain();
 }
@@ -2347,8 +2352,20 @@ void GuidedRqMain(uint3 dtid : SV_DispatchThreadID)
 [shader("raygeneration")]
 void GuidedRayGen()
 {
+#if RAYGEN_SWIZZLE
+    // Padded launch grid (ADR 0020 R2): dims must come from the image, not from
+    // DispatchRaysDimensions, and slots swizzled past the edge have no pixel.
+    uint imageWidth, imageHeight;
+    gOutput.GetDimensions(imageWidth, imageHeight);
+    const uint2 pixel = SwizzleLaunchToPixel(DispatchRaysIndex().xy);
+    if (pixel.x >= imageWidth || pixel.y >= imageHeight)
+        return;
+    gLaunchIndex = pixel;
+    gLaunchDims  = uint2(imageWidth, imageHeight);
+#else
     gLaunchIndex = DispatchRaysIndex().xy;
     gLaunchDims = DispatchRaysDimensions().xy;
+#endif
     GuidedIntegratorMain();
 }
 

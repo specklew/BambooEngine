@@ -93,6 +93,11 @@ protected:
         return m_shaderVariantKey.find(leverName) != std::string::npos;
     }
 
+    // Launch grid for the integrator dispatch. Equals the image except under the
+    // "swizzle" lever, whose Morton remap is a bijection only over whole tiles —
+    // a short grid there would drop pixels and shade others twice (ADR 0020 R2).
+    void GetLaunchExtent(uint32_t& width, uint32_t& height) const;
+
     D3D12_CPU_DESCRIPTOR_HANDLE m_geometryInfoHandle = {};
 
     std::shared_ptr<PassConstants> m_passConstants;

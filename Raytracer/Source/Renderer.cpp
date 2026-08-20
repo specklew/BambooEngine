@@ -96,6 +96,11 @@ static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (
 // A/Bs on other vendors/drivers where the dead-code footprint may win.
 static AutoCVarInt g_raygenCleanVariant("renderer.raygenCleanVariant",
 	"1 = compile raygen without debug-view code (measured slower on RDNA)", 0, CVarFlags::EditCheckbox);
+// Thread-coherence swizzle (ADR 0020 R2): remaps launch index to pixel in Morton
+// order inside a tile so a wave shades a compact block. Bit-exact — the mapping is
+// a bijection — so a quality change under this lever means the remap is broken.
+static AutoCVarInt g_raygenSwizzle("renderer.raygenSwizzle",
+	"1 = Morton launch-to-pixel swizzle in the raygen (pads the dispatch)", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);

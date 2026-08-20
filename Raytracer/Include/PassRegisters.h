@@ -268,6 +268,15 @@
 #define ONE_SAMPLE_TILE_SHIFT 3
 #define ONE_SAMPLE_TILE_SIZE  (1 << ONE_SAMPLE_TILE_SHIFT)
 
+// Tile edge for the "swizzle" vendor lever (ADR 0020 R2): launch indices are
+// remapped to pixels in Morton order inside a tile of this size, so a wave's
+// pixels form a compact block instead of a 32- or 64-wide scanline strip. Must
+// be a power of two (the Morton decode assumes it) and shared with the C++ side,
+// which pads the dispatch up to whole tiles — without that padding the remap
+// stops being a bijection and pixels get dropped or shaded twice.
+#define RAYGEN_SWIZZLE_TILE_SHIFT 5
+#define RAYGEN_SWIZZLE_TILE_SIZE  (1 << RAYGEN_SWIZZLE_TILE_SHIFT)
+
 // ---------------------------------------------------------------------------
 // Rasterization — colorShader.hlsl. Its own layout, not the frame one: it needs
 // none of the raytracing frame bindings, so adopting them would only cost root

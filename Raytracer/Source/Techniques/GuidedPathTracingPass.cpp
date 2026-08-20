@@ -12,6 +12,7 @@
 #include "ResourceManager/ResourceManager.h"
 #include "RootSignatureLibrary.h"
 #include "Shader.h"
+#include "VendorLevers.h"
 #include "Utils/CVars.h"
 #include "VoxelizationPass.h"
 #include "VoxelGuidingBuildPass.h"
@@ -156,12 +157,17 @@ bool GuidedPathTracingPass::UseInlineRayQuery()
 
 void GuidedPathTracingPass::EnsureInlineRayQueryPso()
 {
-    if (m_inlineRqProgram)
+    // The RQ backend shares the integrator body, so it needs the same compile-time
+    // levers the pipeline raygen got — including the swizzle, whose padded dispatch
+    // is decided from the SAME key. A key change rebuilds it.
+    if (m_inlineRqProgram && m_inlineRqVariantKey == m_shaderVariantKey)
         return;
 
+    const std::string asset = VendorLevers::VariantAsset("resources/shaders/guidedPathTracing.rq.shader", m_shaderVariantKey);
     m_inlineRqProgram = ShaderProgramCache::Get().GetOrCreateCompute(m_device.Get(), m_globalRootSignature.Get(),
-        "resources/shaders/guidedPathTracing.rq.shader", L"GuidedPathTracing InlineRQ PSO");
-    spdlog::info("GuidedPathTracingPass: inline-RayQuery compute PSO created");
+        asset.c_str(), L"GuidedPathTracing InlineRQ PSO");
+    m_inlineRqVariantKey = m_shaderVariantKey;
+    spdlog::info("GuidedPathTracingPass: inline-RayQuery compute PSO created ({})", asset);
 }
 
 TechniqueDesc GuidedPathTracingPass::GetTechniqueDesc() const
@@ -342,8 +348,8 @@ void GuidedPathTracingPass::Render()
         // thread per pixel, no SBT.
         EnsureInlineRayQueryPso();
         m_commandList->SetPipelineState(m_inlineRqProgram->GetPipelineState());
-        const uint32_t width  = Window::Get().GetWidth();
-        const uint32_t height = Window::Get().GetHeight();
+        uint32_t width = 0, height = 0;
+        GetLaunchExtent(width, height);
         CommandContext::Get().Dispatch((width + 7) / 8, (height + 7) / 8, 1);
     }
     else
@@ -360,8 +366,7 @@ void GuidedPathTracingPass::Render()
         desc.HitGroupTable.StrideInBytes = m_shaderBindingTable->GetHitEntrySize();
         desc.HitGroupTable.SizeInBytes   = m_shaderBindingTable->GetHitSectionSize();
 
-        desc.Width  = Window::Get().GetWidth();
-        desc.Height = Window::Get().GetHeight();
+        GetLaunchExtent(desc.Width, desc.Height);
         desc.Depth  = 1;
 
         m_commandList->SetPipelineState1(m_rtStateObject.Get());

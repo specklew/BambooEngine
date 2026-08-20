@@ -210,9 +210,11 @@ inline void GenerateCameraRayJittered(uint2 index, float2 jitter, out float3 ori
 }
 #endif
 
-inline void GenerateCameraRay(uint2 index, uint seed, out float3 origin, out float3 direction)
+// Explicit dims: the launch grid is not always the image (the swizzle lever pads
+// the dispatch up to whole tiles, ADR 0020 R2), and the camera basis must come
+// from the image extent or the frustum stretches.
+inline void GenerateCameraRay(uint2 index, uint seed, float2 dims, out float3 origin, out float3 direction)
 {
-    float2 dims = float2(DispatchRaysDimensions().xy);
     float2 rand_offset = Random2D(seed) - 0.5;
     float2 d = (((index + 0.5f + rand_offset) / dims) * 2.f - 1.f);
 
@@ -220,6 +222,13 @@ inline void GenerateCameraRay(uint2 index, uint seed, out float3 origin, out flo
     float4 target = mul(projectionI, float4(d.x, -d.y, 1, 1));
     direction = normalize(mul(viewI, float4(target.xyz, 0)).xyz);
 }
+
+#ifndef GUIDED_TRACE_RQ
+inline void GenerateCameraRay(uint2 index, uint seed, out float3 origin, out float3 direction)
+{
+    GenerateCameraRay(index, seed, float2(DispatchRaysDimensions().xy), origin, direction);
+}
+#endif
 
 float3 RayPlaneIntersection(float3 planeOrigin, float3 planeNormal, float3 rayOrigin, float3 rayDirection)
 {

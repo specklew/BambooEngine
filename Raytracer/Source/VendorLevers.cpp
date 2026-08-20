@@ -25,6 +25,9 @@ VendorLevers::VendorLevers()
         { "onesample", "vxpg.oneSampleMis",
           "ONE_SAMPLE_MIS=1", LeverScope::ShaderVariant, false,
           "One-sample MIS at the first vertex (ADR 0015). Default off; two-sample is what benchmarks measure." },
+        { "swizzle", "renderer.raygenSwizzle",
+          "RAYGEN_SWIZZLE=1", LeverScope::ShaderVariant, false,
+          "Morton launch-to-pixel swizzle inside a 32x32 tile (ADR 0020 R2). Pads the dispatch; bit-exact." },
     };
 }
 

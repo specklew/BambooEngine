@@ -9,6 +9,7 @@
 #include "passConstants.hlsl"
 #include "RaytraceDebugMode.h"
 #include "RaytraceDebugViews.hlsl"
+#include "PassRegisters.h"
 
 // 1 = debug-view branches compiled in (default; interactive debug variant),
 // 0 = clean benchmark variant (raytracing.rg.clean.shader). The CVar-driven
@@ -17,6 +18,47 @@
 #ifndef RT_DEBUG_VIEWS
 #define RT_DEBUG_VIEWS 1
 #endif
+
+// 1 = launch index is remapped to a pixel in Morton order within a tile (the
+// "swizzle" vendor lever, ADR 0020 R2), so the pixels a wave shades form a
+// compact block rather than a wide scanline strip. Vendor-neutral, and the
+// control experiment for SER: it separates "reordering helps this workload"
+// from "this GPU has a reorder unit".
+#ifndef RAYGEN_SWIZZLE
+#define RAYGEN_SWIZZLE 0
+#endif
+
+#if RAYGEN_SWIZZLE
+
+uint CompactEveryOtherBit(uint x)
+{
+    x &= 0x55555555u;
+    x = (x ^ (x >> 1)) & 0x33333333u;
+    x = (x ^ (x >> 2)) & 0x0f0f0f0fu;
+    x = (x ^ (x >> 4)) & 0x00ff00ffu;
+    x = (x ^ (x >> 8)) & 0x0000ffffu;
+    return x;
+}
+
+uint2 MortonDecode2D(uint index)
+{
+    return uint2(CompactEveryOtherBit(index), CompactEveryOtherBit(index >> 1));
+}
+
+// Bijective on the PADDED launch grid only: the tile part of the index passes
+// through untouched and the Morton decode permutes the slots inside one tile, so
+// every pixel is still hit exactly once — but only if the grid covers whole
+// tiles. The dispatch is padded up for that (DxrPass::Render), which is also why
+// callers must drop the mapped pixels that land outside the image.
+uint2 SwizzleLaunchToPixel(uint2 launchIndex)
+{
+    const uint2 tile  = launchIndex >> RAYGEN_SWIZZLE_TILE_SHIFT;
+    const uint2 local = launchIndex & (RAYGEN_SWIZZLE_TILE_SIZE - 1);
+    const uint  slot  = (local.y << RAYGEN_SWIZZLE_TILE_SHIFT) | local.x;
+    return (tile << RAYGEN_SWIZZLE_TILE_SHIFT) + MortonDecode2D(slot);
+}
+
+#endif // RAYGEN_SWIZZLE
 
 // Minimal hit-ID payload (ADR 0007): the closest hit reports WHAT was hit,
 // raygen reconstructs the surface and shades in the bounce loop. The shared
@@ -228,8 +270,19 @@ float GetLightAttenuation(float3 shadingPoint, LightData light)
 [shader("raygeneration")]
 void RayGen()
 {
-    uint2 launchIndex = DispatchRaysIndex().xy;
-    uint2 dims = DispatchRaysDimensions().xy;
+#if RAYGEN_SWIZZLE
+    // Padded launch grid: dims are the padded extent, so the image size comes
+    // from the output texture and the out-of-image slots return.
+    uint imageWidth, imageHeight;
+    gOutput.GetDimensions(imageWidth, imageHeight);
+    const uint2 dims = uint2(imageWidth, imageHeight);
+    const uint2 launchIndex = SwizzleLaunchToPixel(DispatchRaysIndex().xy);
+    if (launchIndex.x >= dims.x || launchIndex.y >= dims.y)
+        return;
+#else
+    const uint2 launchIndex = DispatchRaysIndex().xy;
+    const uint2 dims = DispatchRaysDimensions().xy;
+#endif
     uint pixelId = launchIndex.x + launchIndex.y * dims.x;
 
     float3 accumulated = float3(0, 0, 0);
@@ -239,7 +292,7 @@ void RayGen()
         uint seed = pcg_hash(pixelId ^ (i * 2654435761u) ^ (frameIndex * 805459861u));
 
         float3 rayOrigin, rayDir;
-        GenerateCameraRay(launchIndex, seed, rayOrigin, rayDir);
+        GenerateCameraRay(launchIndex, seed, float2(dims), rayOrigin, rayDir);
         seed = pcg_hash(seed);  // advance: camera ray and bounce 0 now use different xi
 
         float3 radiance = float3(0, 0, 0);

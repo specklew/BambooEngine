@@ -67,6 +67,7 @@ private:
     bool UseInlineRayQuery();
     void EnsureInlineRayQueryPso();
     ComputeProgram* m_inlineRqProgram = nullptr;
+    std::string     m_inlineRqVariantKey; // lever key the RQ PSO was compiled with (ADR 0020)
 
     // One-sample MIS adaptive q (ADR 0015): per-16x16-tile guide-selection
     // probability + this frame's per-strategy luminance stats, folded into q
