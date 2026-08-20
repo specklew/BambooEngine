@@ -121,7 +121,7 @@ void SampleDirectLightComponents(HitData hit, SurfaceData surface, inout uint se
         return;
 
     float pdfNeeLocal = pdfSelect * distSq / (cosLight * tri.area);
-    float3 brdf = EvalDirectBRDF(surface, L);
+    float3 brdf = EvalPathBRDF(surface, L); // same BRDF the BSDF/guide strategies see (ADR 0016 M4)
 
     lightPoint = lp;
     pdfNee = pdfNeeLocal;

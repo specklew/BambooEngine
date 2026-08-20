@@ -27,16 +27,16 @@
 #include "LightTreeNode.hlsl"
 #include "SphericalQuad.hlsl"
 
-// 1 = guiding debug views 1-14 compiled in (default; interactive debug
-// variant), 0 = clean benchmark variant (guidedPathTracing.rg.clean.shader):
+// 1 = guiding debug views 1-14 compiled in (default; interactive debug variant),
+// 0 = clean benchmark variant, selected by the "noviews" vendor lever (ADR 0020):
 // debugView folds to constant 0, so every view branch and the view-5..14
 // blocks drop out of the raygen entirely.
 #ifndef GUIDING_DEBUG_VIEWS
 #define GUIDING_DEBUG_VIEWS 1
 #endif
 
-// 1 = one-sample MIS estimator compiled in (guidedPathTracing.rg.onesample
-// sidecar, selected while vxpg.oneSampleMis is on). Kept out of the default
+// 1 = one-sample MIS estimator compiled in (the "onesample" vendor lever, which
+// tracks vxpg.oneSampleMis — ADR 0015/0020). Kept out of the default
 // raygen: this kernel's throughput is codegen-shape-sensitive (ADR 0014), so
 // the experimental estimator must not tax the faithful two-sample build.
 #ifndef ONE_SAMPLE_MIS
@@ -157,33 +157,9 @@ struct GuidedPayload
 // (Task 7) so forward sampling and the reverse MIS query share one formula.
 // Callers use PdfBsdfMixture(surface, specularProb, dir) directly.
 
-// Full BRDF eval consistent with the vanilla bounce estimator: GGX specular
-// with the path-tracing Smith G (k = a^2/2, NOT the direct-lighting remap)
-// plus Lambertian diffuse weighted by kD at NdotV — matches vanilla Hit()
-// so the MIS estimator converges to the same image.
-float3 EvalBsdfBounce(SurfaceData s, float3 dir)
-{
-    float NdotL = dot(s.N, dir);
-    if (NdotL <= 0.0)
-        return float3(0, 0, 0);
-    NdotL = max(NdotL, EPSILON);
-
-    float3 H = normalize(s.V + dir);
-    float NdotH = max(dot(s.N, H), EPSILON);
-    float VdotH = max(dot(s.V, H), EPSILON);
-
-    float  D = DistributionGGX(NdotH, s.roughness);
-    float  G = SmithG_GGX(s.NdotV, NdotL, s.roughness);
-    float3 F = FresnelSchlick(VdotH, s.F0);
-    float3 specular = (D * G * F) / (4.0 * s.NdotV * NdotL + EPSILON);
-
-    // kD from Fresnel at NdotV — same as vanilla's path selection weighting
-    float3 Fn = FresnelSchlick(s.NdotV, s.F0);
-    float3 kD = (1.0 - Fn) * (1.0 - s.metallic);
-    float3 diffuse = kD * s.albedo / PI;
-
-    return specular + diffuse;
-}
+// EvalBsdfBounce lived here until ADR 0016 M4; it was moved to raytracing.hlsl as
+// EvalPathBRDF, unchanged, so the light pool's area-emitter NEE can evaluate the
+// same BRDF the guide and BSDF strategies do.
 
 // selector must come from a stream independent of xi; reusing a hash of xi
 // conditions the direction on the lobe choice and biases the mixture sample.
@@ -1089,7 +1065,7 @@ float3 ShadeSecondVertex(HitData hit2, SurfaceData surf2, float specularProb, in
         float3 dir = SampleBsdfDir(surf2, specularProb, xi, selector, pdfB);
         if (pdfB > EPSILON && dot(dir, surf2.N) > 0.0)
         {
-            float3 f = EvalBsdfBounce(surf2, dir);
+            float3 f = EvalPathBRDF(surf2, dir);
             if (any(f > 0))
             {
                 float3 hp; bool dh;
@@ -1134,7 +1110,7 @@ float3 ShadeSecondVertex(HitData hit2, SurfaceData surf2, float specularProb, in
                 const GuidePdf pdfG = pdfTree * GuidePdf(pdfDir);
                 if (pdfG > 0.0 && dot(dir, surf2.N) > 0.0)
                 {
-                    float3 f = EvalBsdfBounce(surf2, dir);
+                    float3 f = EvalPathBRDF(surf2, dir);
                     if (any(f > 0))
                     {
                         float3 hp; bool dh;
@@ -1482,7 +1458,7 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
         float3 dir = SampleBsdfDir(surface, specularProb, xi, selector, pdfB);
         if (pdfB > EPSILON && dot(dir, surface.N) > 0.0)
         {
-            float3 f = EvalBsdfBounce(surface, dir);
+            float3 f = EvalPathBRDF(surface, dir);
             if (any(f > 0))
             {
                 float3 hitPos;
@@ -1537,7 +1513,7 @@ float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specula
                                                dir, pdfG, aabbMin, aabbMax, outcome);
         if (chain == GUIDE_CHAIN_OK)
         {
-            float3 f = EvalBsdfBounce(surface, dir);
+            float3 f = EvalPathBRDF(surface, dir);
             if (any(f > 0))
             {
                 float3 hitPos;
@@ -1623,7 +1599,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         float3 dir = SampleBsdfDir(surface, specularProb, xi, selector, pdfB);
         if (pdfB > EPSILON && dot(dir, surface.N) > 0.0)
         {
-            float3 f = EvalBsdfBounce(surface, dir);
+            float3 f = EvalPathBRDF(surface, dir);
             if (any(f > 0))
             {
                 float3 hitPos;
@@ -1727,7 +1703,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         float3 dir = SampleBsdfDir(surface, specularProb, xi, selector, pdfB);
         if (pdfB > EPSILON && dot(dir, surface.N) > 0.0)
         {
-            float3 f = EvalBsdfBounce(surface, dir);
+            float3 f = EvalPathBRDF(surface, dir);
             if (any(f > 0))
             {
                 float3 hitPos;
@@ -1795,7 +1771,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         }
         if (chain == GUIDE_CHAIN_OK)
         {
-            float3 f = EvalBsdfBounce(surface, dir);
+            float3 f = EvalPathBRDF(surface, dir);
             if (all(f == 0))
                 guideOutcome = 7u;
             else

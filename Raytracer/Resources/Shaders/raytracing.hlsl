@@ -161,6 +161,35 @@ float3 EvalDirectBRDF(SurfaceData s, float3 L)
     return EvalSpecularDirect(s, L) + kD * EvalDiffuseDirect(s);
 }
 
+// Full BRDF for a known direction, matching what the BSDF and guide strategies
+// effectively evaluate: path-tracing Smith G (k = a^2/2) and kD taken at NdotV,
+// i.e. the pdf-cancelled bounce estimator above written out without the cancellation.
+// Area-emitter NEE evaluates with THIS, not EvalDirectBRDF: NEE and BSDF/guide
+// MIS-mix over the same emitter, and a G/kD convention split between them makes the
+// converged specular response a weight-proportional blend of two BRDFs (ADR 0016 M4).
+// Delta lights keep EvalDirectBRDF — no strategy overlaps NEE there.
+float3 EvalPathBRDF(SurfaceData s, float3 L)
+{
+    float NdotL = dot(s.N, L);
+    if (NdotL <= 0.0)
+        return float3(0, 0, 0);
+    NdotL = max(NdotL, EPSILON);
+
+    float3 H = normalize(s.V + L);
+    float NdotH = max(dot(s.N, H), EPSILON);
+    float VdotH = max(dot(s.V, H), EPSILON);
+
+    float  D = DistributionGGX(NdotH, s.roughness);
+    float  G = SmithG_GGX(s.NdotV, NdotL, s.roughness);
+    float3 F = FresnelSchlick(VdotH, s.F0);
+    float3 specular = (D * G * F) / (4.0 * s.NdotV * NdotL + EPSILON);
+
+    float3 Fn = FresnelSchlick(s.NdotV, s.F0);
+    float3 kD = (1.0 - Fn) * (1.0 - s.metallic);
+
+    return specular + kD * s.albedo / PI;
+}
+
 float GetLightAttenuation(float3 shadingPoint, LightData light)
 {
     if (light.type == 0) // Directional — no falloff
