@@ -101,6 +101,13 @@ static AutoCVarInt g_raygenCleanVariant("renderer.raygenCleanVariant",
 // a bijection — so a quality change under this lever means the remap is broken.
 static AutoCVarInt g_raygenSwizzle("renderer.raygenSwizzle",
 	"1 = Morton launch-to-pixel swizzle in the raygen (pads the dispatch)", 0, CVarFlags::EditCheckbox);
+// Wave-size forcing (ADR 0020 R10). Reaches the inline-RayQuery integrator only —
+// [WaveSize] is a compute/node attribute, so the DXR pipeline raygen cannot take
+// one. Mutually exclusive; both on drops both.
+static AutoCVarInt g_forceWave32("renderer.forceWave32",
+	"1 = force wave32 on the inline-RayQuery integrator", 0, CVarFlags::EditCheckbox);
+static AutoCVarInt g_forceWave64("renderer.forceWave64",
+	"1 = force wave64 on the inline-RayQuery integrator", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);

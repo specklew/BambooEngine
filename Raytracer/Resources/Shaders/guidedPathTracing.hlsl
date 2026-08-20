@@ -2329,8 +2329,20 @@ void GuidedIntegratorMain()
 
 // Compute wrapper (inline-RayQuery integrator, ADR 0011). One thread per
 // pixel, same body as the pipeline raygen.
+//
+// Wave size defaults to the driver's pick: measured 840 (default) vs 827
+// (wave32) vs 799 (wave64) frames/3s on RDNA, Deep Light b1. The wave32/wave64
+// levers (ADR 0020 R10) force it for a re-measurement. This is the ONLY pixel
+// integrator that can carry the attribute at all — [WaveSize] is compute/node
+// only in HLSL, so the DXR pipeline raygen cannot be forced from the shader.
+#ifndef FORCED_WAVE_SIZE
+#define FORCED_WAVE_SIZE 0
+#endif
+
 [numthreads(8, 8, 1)]
-// Wave size left to the driver: measured 840 (default) vs 827 (wave32) vs 799 (wave64) frames/3s on RDNA, Deep Light b1.
+#if FORCED_WAVE_SIZE
+[WaveSize(FORCED_WAVE_SIZE)]
+#endif
 void GuidedRqMain(uint3 dtid : SV_DispatchThreadID)
 {
     uint width, height;

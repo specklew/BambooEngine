@@ -29,6 +29,10 @@ struct VendorLever
     // A lever whose stripped code an active debug view needs. Forced off while one
     // is selected, because the alternative is a view that renders nothing.
     bool        suppressedByDebugView;
+    // Name of a lever that cannot be on at the same time (wave32 vs wave64 set the
+    // same define). Both on drops BOTH and logs — an impossible request must not
+    // quietly measure as if it were one of the two.
+    const char* conflictsWith;
     const char* description;
 };
 
@@ -53,8 +57,9 @@ public:
     // built it, and must not depend on the levers' state having stayed put.
     static std::string DefinesForKey(const std::string& key);
 
-    // "resources/shaders/x.rg.shader" + "noviews" -> "resources/shaders/x.rg.shader|noviews".
-    // An empty key returns the base path unchanged.
+    // "resources/shaders/x.rg.shader" + "noviews" -> "resources/shaders/x.rg|noviews.shader".
+    // The key goes BEFORE the extension; see the definition for why. An empty key
+    // returns the base path unchanged.
     static std::string VariantAsset(const std::string& basePath, const std::string& key);
 
     // Comma-separated names, for a capture sidecar. Includes Runtime and Resource

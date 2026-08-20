@@ -20,14 +20,23 @@ VendorLevers::VendorLevers()
     // generic path reproduces what the measured one did.
     m_levers = {
         { "noviews", "renderer.raygenCleanVariant",
-          "GUIDING_DEBUG_VIEWS=0 RT_DEBUG_VIEWS=0", LeverScope::ShaderVariant, true,
+          "GUIDING_DEBUG_VIEWS=0 RT_DEBUG_VIEWS=0", LeverScope::ShaderVariant, true, nullptr,
           "Compile the raygen without debug-view code. Measured SLOWER on this RDNA driver (ADR 0014)." },
         { "onesample", "vxpg.oneSampleMis",
-          "ONE_SAMPLE_MIS=1", LeverScope::ShaderVariant, false,
+          "ONE_SAMPLE_MIS=1", LeverScope::ShaderVariant, false, nullptr,
           "One-sample MIS at the first vertex (ADR 0015). Default off; two-sample is what benchmarks measure." },
         { "swizzle", "renderer.raygenSwizzle",
-          "RAYGEN_SWIZZLE=1", LeverScope::ShaderVariant, false,
+          "RAYGEN_SWIZZLE=1", LeverScope::ShaderVariant, false, nullptr,
           "Morton launch-to-pixel swizzle inside a 32x32 tile (ADR 0020 R2). Pads the dispatch; bit-exact." },
+        // Wave size reaches the inline-RayQuery integrator only: [WaveSize] is a
+        // compute/node attribute in HLSL, so the DXR pipeline raygen cannot take it
+        // (ADR 0020 R10). Inert unless vxpg.integrator.inlineRq selects that backend.
+        { "wave32", "renderer.forceWave32",
+          "FORCED_WAVE_SIZE=32", LeverScope::ShaderVariant, false, "wave64",
+          "Force wave32 on the inline-RayQuery integrator (ADR 0020 R10)." },
+        { "wave64", "renderer.forceWave64",
+          "FORCED_WAVE_SIZE=64", LeverScope::ShaderVariant, false, "wave32",
+          "Force wave64 on the inline-RayQuery integrator (ADR 0020 R10)." },
     };
 }
 
@@ -64,6 +73,15 @@ std::string VendorLevers::VariantKey(bool debugViewActive) const
             continue;
         if (debugViewActive && lever.suppressedByDebugView)
             continue;
+        if (lever.conflictsWith != nullptr)
+        {
+            const VendorLever* other = Find(lever.conflictsWith);
+            if (other != nullptr && IsEnabled(*other))
+            {
+                spdlog::error("Levers '{}' and '{}' conflict; both dropped", lever.name, other->name);
+                continue;
+            }
+        }
         names.emplace_back(lever.name);
     }
 
