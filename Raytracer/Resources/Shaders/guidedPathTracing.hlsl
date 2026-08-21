@@ -912,13 +912,18 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl,
             }
         }
 
-        const float3 directLight = SampleDirectLight(hit, surface, seed);
+        float3 directIrradiance;
+        const float3 directLight = SampleDirectLight(hit, surface, seed, directIrradiance);
         radiance += pathThroughput * directLight;
 
-        // ADR 0009: the first bounce vertex of the BSDF subtree doubles as
-        // next frame's injection sample.
+        // ADR 0009: the first bounce vertex of the BSDF subtree doubles as next
+        // frame's injection sample. What is injected is E(x2) — the paper's Eq. 5
+        // quantity — not the shaded contribution: `directLight` carries f_r(x2) and
+        // NEE's MIS weight, so fitting the guide to it tints the importance by the
+        // receiver's albedo AND undervalues exactly those voxels whose emitters BSDF
+        // sampling also finds. vxpg.injection.irradiance=0 restores the old quantity.
         if (bounce == 1u && writeVpl && voxReuseGiVpl != 0u)
-            InjectVplFromBounce(hit.position, N, directLight);
+            InjectVplFromBounce(hit.position, N, (guidingFlags & (1u << 10)) != 0u ? directIrradiance : directLight);
 
         if (bounce >= (uint)numBounces)
             break;
@@ -1218,8 +1223,9 @@ float3 TraceIndirectSecondGuide(float3 origin, float3 dir, inout uint seed, bool
     {
         uint neeKind; float3 neeLightPoint;
         float pdfNee, pdfBsdf; float3 neeUnweighted;
+        float3 neeIrradianceUnused;
         SampleDirectLightComponents(hit, surface, seed, neeKind, neeLightPoint,
-                                    pdfNee, pdfBsdf, neeUnweighted);
+                                    pdfNee, pdfBsdf, neeUnweighted, neeIrradianceUnused);
         if (neeKind == 2u)
         {
             float pG = (LitVoxelCount() > 0u)
@@ -1660,8 +1666,9 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     float3 neeUnweighted = float3(0, 0, 0);
     if (debugView < 3u)
     {
+        float3 neeIrradianceUnusedFirst;
         SampleDirectLightComponents(hit, surface, seed, neeKind, neeLightPoint,
-                                    neePdfNee, neePdfBsdf, neeUnweighted);
+                                    neePdfNee, neePdfBsdf, neeUnweighted, neeIrradianceUnusedFirst);
         if (neeKind == 2u && guideAlive)
         {
             neePdfGuide = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices,

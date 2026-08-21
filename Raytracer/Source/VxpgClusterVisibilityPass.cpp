@@ -65,9 +65,13 @@ constexpr BindingSlot kCvisSlots[] = {
 static AutoCVarInt g_cvisUseBsdf("vxpg.cvis.useBsdf",
     "Weight cluster visibility by the receiver Cook-Torrance BRDF (SIByL default on)",
     1, CVarFlags::EditCheckbox);
-static AutoCVarInt g_cvisUseDistance("vxpg.cvis.useDistance",
-    "Also weight cluster visibility by inverse-square distance (SIByL default off)",
-    0, CVarFlags::EditCheckbox);
+// Eq. 8's geometry term: cos(x2)/d^2 on top of the f_r*cos(x1) BsdfWeight already
+// applies. Default ON as of 2026-08-21 — the paper's average throughput is
+// f_r * G * V, and running without G flattened the cluster distribution (no distance
+// falloff, no emitter-side foreshortening). 0 restores the earlier behaviour for A/B.
+static AutoCVarInt g_cvisUseGeometry("vxpg.cvis.useGeometry",
+    "Weight cluster throughput by the full geometry term cos(x2)/d^2 (paper Eq. 8)",
+    1, CVarFlags::EditCheckbox);
 
 namespace
 {
@@ -178,7 +182,7 @@ bool VxpgClusterVisibilityPass::BindCommon(uint32_t frameIndex)
     uint32_t constants[8] = {
         m_width, m_height, m_mapX, m_mapY, frameIndex,
         static_cast<uint32_t>(g_cvisUseBsdf.Get() != 0),
-        static_cast<uint32_t>(g_cvisUseDistance.Get() != 0),
+        static_cast<uint32_t>(g_cvisUseGeometry.Get() != 0),
         m_scene->GetInstanceInfoBuffer()->GetElementsCount()
     };
     m_rootSig.SetConstants(cmd, kCvisConstants, constants, 8);

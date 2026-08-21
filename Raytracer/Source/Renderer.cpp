@@ -221,6 +221,14 @@ static AutoCVarInt   g_guidingOneSampleMis("vxpg.oneSampleMis",
 static AutoCVarInt   g_guidingOneSampleAdaptiveQ("vxpg.oneSample.adaptiveQ",
 	"Adaptive per-tile strategy-selection probability for one-sample MIS; 0 = fixed 0.5", 1,
 	CVarFlags::EditCheckbox);
+// What the guide is fitted to (VXPG paper Eq. 5). 1 = E(x2), the incident
+// irradiance the paper injects. 0 = the pre-2026-08-21 quantity, the shaded
+// MIS-weighted NEE contribution f_r(x2)*E*w — which tints voxel importance by the
+// receiver's albedo and undervalues emitters that BSDF sampling also finds.
+// Rides guidingFlags bit 10.
+static AutoCVarInt   g_injectionIrradiance("vxpg.injection.irradiance",
+	"Inject E(x2) (paper Eq. 5) instead of the shaded MIS-weighted contribution", 1,
+	CVarFlags::EditCheckbox);
 static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp",
 	"Clamp indirect-bounce skybox radiance to suppress HDR-sun fireflies for benchmark convergence. 0 = disabled (unbiased)",
 	0.0f, CVarFlags::EditDrag, 0.0f, 1000.0f);
@@ -565,7 +573,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		((static_cast<uint32_t>(g_guidingTreeWeightMode.Get()) & 3u) << 5) |
 		((g_guidingSecondBounce.Get() != 0 ? 1u : 0u) << 7) |
 		((g_guidingOneSampleMis.Get() != 0 ? 1u : 0u) << 8) |
-		((g_guidingOneSampleAdaptiveQ.Get() != 0 ? 1u : 0u) << 9);
+		((g_guidingOneSampleAdaptiveQ.Get() != 0 ? 1u : 0u) << 9) |
+		((g_injectionIrradiance.Get() != 0 ? 1u : 0u) << 10);
 	static_assert(static_cast<int>(GuidingDebugView::SymmetricBsdfBaseline) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };

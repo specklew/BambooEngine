@@ -55,16 +55,21 @@ float PdfNeeTowardHit(float3 shadingPos, InstanceInfo hitInstance, uint hitPrimi
 //   lightPoint: the sampled emitter point (area only; for the guide reverse pdf)
 //   pdfNee: solid-angle NEE pdf (select x geometry)
 //   pdfBsdfTowardLight: BSDF-mixture pdf toward the sampled direction
+//   irradianceOverPdf: the same sample WITHOUT the BRDF factor and WITHOUT any MIS
+//     weight — a single-sample estimate of the cosine-weighted incident radiance, i.e.
+//     E(x) in the VXPG paper's Eq. 5. The guide is fitted to this; the image is not.
 void SampleDirectLightComponents(HitData hit, SurfaceData surface, inout uint seed,
                                  out uint sampledKind, out float3 lightPoint,
                                  out float pdfNee, out float pdfBsdfTowardLight,
-                                 out float3 contributionOverPdfUnweighted)
+                                 out float3 contributionOverPdfUnweighted,
+                                 out float3 irradianceOverPdf)
 {
     sampledKind = 0u;
     lightPoint = float3(0, 0, 0);
     pdfNee = 0.0;
     pdfBsdfTowardLight = 0.0;
     contributionOverPdfUnweighted = float3(0, 0, 0);
+    irradianceOverPdf = float3(0, 0, 0);
 
     float selectXi = Random1D(seed);
     seed = pcg_hash(seed);
@@ -89,8 +94,10 @@ void SampleDirectLightComponents(HitData hit, SurfaceData surface, inout uint se
             return;
         float atten = GetLightAttenuation(hit.position, light);
         float3 brdf = EvalDirectBRDF(surface, L);
-        contributionOverPdfUnweighted = brdf * light.color * light.intensity * atten * visibility
+        const float3 incidentOverPdf = light.color * light.intensity * atten * visibility
              * max(dot(surface.N, L), 0.0) / pdfSelect;
+        contributionOverPdfUnweighted = brdf * incidentOverPdf;
+        irradianceOverPdf = incidentOverPdf;
         sampledKind = 1u; // delta: finished, weight 1
         return;
     }
@@ -127,23 +134,32 @@ void SampleDirectLightComponents(HitData hit, SurfaceData surface, inout uint se
     pdfNee = pdfNeeLocal;
     pdfBsdfTowardLight = PdfBsdfMixture(surface, SurfaceSpecularProb(surface), L);
     contributionOverPdfUnweighted = brdf * tri.radiance * NdotL / pdfNeeLocal;
+    // No MIS weight here: E is the whole direct irradiance, not NEE's share of it.
+    irradianceOverPdf = tri.radiance * NdotL / pdfNeeLocal;
     sampledKind = 2u; // area: caller applies the MIS weight
 }
 
 // Thin two-way wrapper: bit-identical to the pre-split SampleDirectLight for
 // every caller without a third sampler (PT, injection, deep/tail vertices). The
 // area branch reproduces brdf*Le*NdotL*BalanceWeight(pdfNee,pdfBsdf,0)/pdfNee.
-float3 SampleDirectLight(HitData hit, SurfaceData surface, inout uint seed)
+float3 SampleDirectLight(HitData hit, SurfaceData surface, inout uint seed, out float3 irradianceOverPdf)
 {
     uint sampledKind;
     float3 lightPoint;
     float pdfNee, pdfBsdfTowardLight;
     float3 contributionOverPdfUnweighted;
     SampleDirectLightComponents(hit, surface, seed, sampledKind, lightPoint,
-                                pdfNee, pdfBsdfTowardLight, contributionOverPdfUnweighted);
+                                pdfNee, pdfBsdfTowardLight, contributionOverPdfUnweighted,
+                                irradianceOverPdf);
     if (sampledKind == 2u)
         return contributionOverPdfUnweighted * BalanceWeight(pdfNee, pdfBsdfTowardLight, 0.0);
     return contributionOverPdfUnweighted; // delta (weight 1) or zero early-out
+}
+
+float3 SampleDirectLight(HitData hit, SurfaceData surface, inout uint seed)
+{
+    float3 unusedIrradiance;
+    return SampleDirectLight(hit, surface, seed, unusedIrradiance);
 }
 
 #endif

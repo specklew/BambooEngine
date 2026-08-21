@@ -59,7 +59,7 @@ cbuffer CvisCB : BAMBOO_PASS_CBV(CVIS_REG_CB)
     int2 gMapSize;      // (mapX, mapY) = superpixel grid dimensions
     uint gSeed;         // frame index (frame-varying, faithful)
     uint gUseBsdf;      // vxpg.cvis.useBsdf
-    uint gUseDistance;  // vxpg.cvis.useDistance
+    uint gUseGeometry;  // vxpg.cvis.useGeometry
     uint gInstanceCount; // guards VBuffer instanceId against g_instanceInfo size
 }
 
@@ -240,7 +240,8 @@ void CheckClusterVisibility(uint3 dtid : SV_DispatchThreadID, uint gidx : SV_Gro
             const float dist = length(dir);
             dir /= max(dist, 1e-8);
 
-            if (dot(-dir, vplNormal) > 1e-4 && dot(dir, hitNormal) > 1e-4)
+            const float cosAtVpl = dot(-dir, vplNormal);
+            if (cosAtVpl > 1e-4 && dot(dir, hitNormal) > 1e-4)
             {
                 RayDesc ray;
                 ray.Origin = hit.position + hitNormal * 0.01;
@@ -259,9 +260,15 @@ void CheckClusterVisibility(uint3 dtid : SV_DispatchThreadID, uint gidx : SV_Gro
 
                 if (visible)
                 {
+                    // Eq. 8: T = 1/32 * sum f_r * G * V, with G = cos(x1)cos(x2)/d^2.
+                    // BsdfWeight supplies f_r * cos(x1); the receiver-side cosine was
+                    // already there, but cos(x2) was only ever a gate and 1/d^2 was off
+                    // by default, so the throughput was missing the whole distance
+                    // falloff and the emitter-side foreshortening. Both are restored
+                    // here; gUseGeometry=0 returns the pre-2026-08-21 behaviour.
                     weight = (gUseBsdf != 0u) ? BsdfWeight(pixelID, dir) : 1.0;
-                    if (gUseDistance != 0u)
-                        weight /= (dist * dist);
+                    if (gUseGeometry != 0u)
+                        weight *= cosAtVpl / max(dist * dist, 1e-6);
                 }
             }
         }

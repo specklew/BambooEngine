@@ -126,7 +126,11 @@ void InjectHit(inout InjectPayload payload : SV_RayPayload, in Attributes attr)
     // Only the VPL bounce is traced now — the primary hit comes from the
     // VBuffer and is shaded in raygen. This is the second path vertex:
     // evaluate direct light here, raygen injects it.
-    payload.result = SampleDirectLight(hit, surface, payload.seed);
+    // Eq. 5 wants E(x2), the incident irradiance — not the shaded, MIS-weighted
+    // contribution. See the injection note in guidedPathTracing.hlsl.
+    float3 directIrradiance;
+    const float3 shaded = SampleDirectLight(hit, surface, payload.seed, directIrradiance);
+    payload.result = (guidingFlags & (1u << 10)) != 0u ? directIrradiance : shaded;
     payload.flags = 1;
 
     // VXPG B+: stash the representative VPL (pos + normal) for this voxel and
