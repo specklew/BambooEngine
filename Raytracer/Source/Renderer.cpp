@@ -227,8 +227,8 @@ static AutoCVarInt   g_guidingOneSampleAdaptiveQ("vxpg.oneSample.adaptiveQ",
 // receiver's albedo and undervalues emitters that BSDF sampling also finds.
 // Rides guidingFlags bit 10.
 static AutoCVarInt   g_injectionIrradiance("vxpg.injection.irradiance",
-	"Inject E(x2) (paper Eq. 5) instead of the shaded MIS-weighted contribution", 1,
-	CVarFlags::EditCheckbox);
+	"0 = f_r*E*w (legacy), 1 = E (paper Eq. 5), 2 = f_r*E (no MIS weight)", 1,
+	CVarFlags::EditDrag, 0, 2);
 static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp",
 	"Clamp indirect-bounce skybox radiance to suppress HDR-sun fireflies for benchmark convergence. 0 = disabled (unbiased)",
 	0.0f, CVarFlags::EditDrag, 0.0f, 1000.0f);
@@ -574,7 +574,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		((g_guidingSecondBounce.Get() != 0 ? 1u : 0u) << 7) |
 		((g_guidingOneSampleMis.Get() != 0 ? 1u : 0u) << 8) |
 		((g_guidingOneSampleAdaptiveQ.Get() != 0 ? 1u : 0u) << 9) |
-		((g_injectionIrradiance.Get() != 0 ? 1u : 0u) << 10);
+		((static_cast<uint32_t>(g_injectionIrradiance.Get()) & 3u) << 10);
 	static_assert(static_cast<int>(GuidingDebugView::SymmetricBsdfBaseline) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };

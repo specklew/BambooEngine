@@ -142,7 +142,8 @@ void SampleDirectLightComponents(HitData hit, SurfaceData surface, inout uint se
 // Thin two-way wrapper: bit-identical to the pre-split SampleDirectLight for
 // every caller without a third sampler (PT, injection, deep/tail vertices). The
 // area branch reproduces brdf*Le*NdotL*BalanceWeight(pdfNee,pdfBsdf,0)/pdfNee.
-float3 SampleDirectLight(HitData hit, SurfaceData surface, inout uint seed, out float3 irradianceOverPdf)
+float3 SampleDirectLight(HitData hit, SurfaceData surface, inout uint seed,
+                        out float3 irradianceOverPdf, out float3 contributionUnweighted)
 {
     uint sampledKind;
     float3 lightPoint;
@@ -151,15 +152,22 @@ float3 SampleDirectLight(HitData hit, SurfaceData surface, inout uint seed, out 
     SampleDirectLightComponents(hit, surface, seed, sampledKind, lightPoint,
                                 pdfNee, pdfBsdfTowardLight, contributionOverPdfUnweighted,
                                 irradianceOverPdf);
+    contributionUnweighted = contributionOverPdfUnweighted;
     if (sampledKind == 2u)
         return contributionOverPdfUnweighted * BalanceWeight(pdfNee, pdfBsdfTowardLight, 0.0);
     return contributionOverPdfUnweighted; // delta (weight 1) or zero early-out
 }
 
+float3 SampleDirectLight(HitData hit, SurfaceData surface, inout uint seed, out float3 irradianceOverPdf)
+{
+    float3 unusedContribution;
+    return SampleDirectLight(hit, surface, seed, irradianceOverPdf, unusedContribution);
+}
+
 float3 SampleDirectLight(HitData hit, SurfaceData surface, inout uint seed)
 {
-    float3 unusedIrradiance;
-    return SampleDirectLight(hit, surface, seed, unusedIrradiance);
+    float3 unusedIrradiance, unusedContribution;
+    return SampleDirectLight(hit, surface, seed, unusedIrradiance, unusedContribution);
 }
 
 #endif
