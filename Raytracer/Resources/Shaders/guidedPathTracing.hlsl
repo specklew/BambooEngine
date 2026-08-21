@@ -1608,7 +1608,8 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         primaryEmission = instance.emissiveRadiance;
 
     if (numBounces == 0)
-        return primaryEmission + SampleDirectLight(hit, surface, seed);
+        return IndirectOnly() ? float3(0, 0, 0)
+                              : primaryEmission + SampleDirectLight(hit, surface, seed);
 
 #if GUIDING_DEBUG_VIEWS
     // View 15: symmetric in-framework baseline (SIByL gi.slang strategy 0).
@@ -1690,7 +1691,10 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     }
 
     float3 radiance = float3(0, 0, 0);
-    if (debugView < 3u)
+    // IndirectOnly drops the first vertex's own emission and its NEE — the two terms
+    // that reach the camera without a bounce — so the image matches what the paper
+    // evaluates (Sec. 6). The BSDF and guide branches below are untouched.
+    if (debugView < 3u && !IndirectOnly())
     {
         radiance = primaryEmission;
         radiance += (neeKind == 2u)
@@ -1795,7 +1799,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
             // SIByL's ordering. Rare with intensity-only traversal
             // (internal intensity = exact child sum), but not impossible
             // with float summation drift.
-            if (debugView >= 3u)
+            if (debugView >= 3u || IndirectOnly())
                 return float3(0, 0, 0);
             return SampleDirectLight(hit, surface, seed);
         }
@@ -1904,7 +1908,7 @@ void GuidedIntegratorMain()
         float u = atan2(direction.z, direction.x) / (2.0 * PI) + 0.5;
         float v = -asin(clamp(direction.y, -1.0, 1.0)) / PI + 0.5;
         float3 sky = g_skybox.SampleLevel(gsamLinearWrap, float2(u, v), 0).rgb;
-        gOutput[launchIndex] = float4(sky, 1.0);
+        gOutput[launchIndex] = float4(IndirectOnly() ? float3(0, 0, 0) : sky, 1.0);
         return;
     }
 

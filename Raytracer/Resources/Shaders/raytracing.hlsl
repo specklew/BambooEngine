@@ -60,6 +60,17 @@ uint2 SwizzleLaunchToPixel(uint2 launchIndex)
 
 #endif // RAYGEN_SWIZZLE
 
+// Indirect-only output (guidingFlags bit 12). The VXPG paper evaluates on images that
+// "visualize indirect illumination only, omitting direct illumination, to emphasize the
+// improvement of our algorithm for guiding indirect illumination" (Sec. 6), so a
+// paper-comparable measurement has to drop exactly the same term: everything reaching
+// the FIRST vertex without a bounce — its NEE, its own emission, and directly visible
+// sky. Everything that arrives via one or more bounces stays, including the direct
+// lighting evaluated at deeper vertices, which IS the indirect illumination of the image.
+// Applies to PT and to the guided integrator alike, and must be set for the reference
+// render too or the comparison scores an indirect image against a full one.
+bool IndirectOnly() { return (guidingFlags & (1u << 12)) != 0u; }
+
 // Minimal hit-ID payload (ADR 0007): the closest hit reports WHAT was hit,
 // raygen reconstructs the surface and shades in the bounce loop. The shared
 // RaytracingUtils Payload stays for the AO technique.
@@ -332,7 +343,8 @@ void RayGen()
 
             if (p.hitFlag == 0u)
             {
-                radiance += pathThroughput * SkyRadianceAtVertex(rayDir, vertexIndex);
+                if (!(vertexIndex == 0u && IndirectOnly()))
+                    radiance += pathThroughput * SkyRadianceAtVertex(rayDir, vertexIndex);
                 break;
             }
 
@@ -390,11 +402,16 @@ void RayGen()
                         float pdfNee = PdfNeeTowardHit(previousVertexPosition, instance, p.primitiveId, hit.position);
                         weight = BalanceWeight(prevBouncePdf, pdfNee, 0.0);
                     }
-                    radiance += pathThroughput * instance.emissiveRadiance * weight;
+                    if (!(vertexIndex == 0u && IndirectOnly()))
+                        radiance += pathThroughput * instance.emissiveRadiance * weight;
                 }
             }
 
-            radiance += pathThroughput * SampleDirectLight(hit, surface, seed);
+            {
+                const float3 direct = SampleDirectLight(hit, surface, seed);
+                if (!(vertexIndex == 0u && IndirectOnly()))
+                    radiance += pathThroughput * direct;
+            }
 
             if (vertexIndex >= (uint)numBounces)
                 break;

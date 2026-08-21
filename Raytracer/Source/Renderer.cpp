@@ -232,6 +232,14 @@ static AutoCVarInt   g_injectionIrradiance("vxpg.injection.irradiance",
 static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp",
 	"Clamp indirect-bounce skybox radiance to suppress HDR-sun fireflies for benchmark convergence. 0 = disabled (unbiased)",
 	0.0f, CVarFlags::EditDrag, 0.0f, 1000.0f);
+// Indirect-illumination-only output, for measurements comparable with the VXPG paper,
+// which evaluates on images that omit direct illumination (Sec. 6). Drops the first
+// vertex's NEE, its own emission and directly visible sky; everything arriving via a
+// bounce stays. Applies to every technique AND must be set for the reference render.
+// Rides guidingFlags bit 12.
+static AutoCVarInt   g_indirectOnly("pathtracing.indirectOnly",
+	"Render indirect illumination only (drops all first-vertex direct terms)", 0,
+	CVarFlags::EditCheckbox);
 static AutoCVarInt   g_skyLighting("pathtracing.skyLighting",
 	"Skybox radiance lights surfaces via indirect rays; 0 = sky is background-only (benchmark isolation: the VXPG guide only targets direct-lit surfaces)",
 	1, CVarFlags::EditCheckbox);
@@ -574,7 +582,8 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		((g_guidingSecondBounce.Get() != 0 ? 1u : 0u) << 7) |
 		((g_guidingOneSampleMis.Get() != 0 ? 1u : 0u) << 8) |
 		((g_guidingOneSampleAdaptiveQ.Get() != 0 ? 1u : 0u) << 9) |
-		((static_cast<uint32_t>(g_injectionIrradiance.Get()) & 3u) << 10);
+		((static_cast<uint32_t>(g_injectionIrradiance.Get()) & 3u) << 10) |
+		((g_indirectOnly.Get() != 0 ? 1u : 0u) << 12);
 	static_assert(static_cast<int>(GuidingDebugView::SymmetricBsdfBaseline) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
 	m_passConstants->data.cameraWorldPos = { camPos.x, camPos.y, camPos.z };
