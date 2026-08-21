@@ -30,7 +30,11 @@ int Application::Run()
 	RECT windowRect = { 0, 0, winW, winH };
 	if (headlessArgs.headless)
 	{
-		headlessConfig = LoadHeadlessConfig("SavedUserData/headless.json");
+		// --config, because the config carries the LIGHTS: one file cannot light
+		// both a small interior and Sponza, and a scene lit for the wrong one renders
+		// black rather than failing (ADR 0022).
+		headlessConfig = LoadHeadlessConfig(headlessArgs.configPath.empty()
+			? "SavedUserData/headless.json" : headlessArgs.configPath);
 		windowRect = { 0, 0, static_cast<LONG>(headlessConfig.width), static_cast<LONG>(headlessConfig.height) };
 	}
 

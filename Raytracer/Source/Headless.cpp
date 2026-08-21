@@ -73,6 +73,7 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
         else if (flag == "--rdg-timings") args.rdgTimings = true;
         else if (flag == "--cvar")        args.cvarAssignments.push_back(valueOf(i));
         else if (flag == "--cvar-matrix") args.cvarMatrix = valueOf(i);
+        else if (flag == "--config")      args.configPath = valueOf(i);
         else if (flag == "--levers")
         {
             // "--levers none" is how a matrix row asks for the baseline: an empty

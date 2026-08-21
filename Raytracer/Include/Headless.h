@@ -140,6 +140,11 @@ struct HeadlessArgs
     std::vector<std::string> levers;
     bool                     leversSpecified = false;
 
+    // --config <path>: which headless config to read. It carries the render settings
+    // AND the lights, so a scene needs the one lit for it — the default file lights a
+    // small interior and leaves Sponza black.
+    std::string configPath;
+
     // --cvar-matrix "renderer.numBounces=1,2,4;vxpg.oneSampleMis=0,1": a sweep over
     // the CROSS PRODUCT of these, measured inside ONE process. These are runtime
     // CVars — no shader recompile, no pipeline rebuild — so a settings point costs a
