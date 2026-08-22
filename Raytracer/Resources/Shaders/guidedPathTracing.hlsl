@@ -912,8 +912,8 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl,
             }
         }
 
-        float3 directIrradiance, directUnweighted;
-        const float3 directLight = SampleDirectLight(hit, surface, seed, directIrradiance, directUnweighted);
+        float3 directIrradiance;
+        const float3 directLight = SampleDirectLight(hit, surface, seed, directIrradiance);
         radiance += pathThroughput * directLight;
 
         // ADR 0009: the first bounce vertex of the BSDF subtree doubles as next
@@ -922,20 +922,8 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl,
         // NEE's MIS weight, so fitting the guide to it tints the importance by the
         // receiver's albedo AND undervalues exactly those voxels whose emitters BSDF
         // sampling also finds. vxpg.injection.irradiance=0 restores the old quantity.
-        // Mode 0 = f_r*E*w (pre-2026-08-21), 1 = E (paper Eq. 5), 2 = f_r*E.
-        // The two halves are separable and they are not equally good: dropping the MIS
-        // weight is what the paper's E requires and it is a clear win where area
-        // emitters make w < 1; dropping f_r throws away albedo information that turns
-        // out to be a useful importance signal. Mode 2 keeps the first and reverses
-        // the second.
         if (bounce == 1u && writeVpl && voxReuseGiVpl != 0u)
-        {
-            const uint injectMode = (guidingFlags >> 10) & 3u;
-            const float3 injected = injectMode == 1u ? directIrradiance
-                                  : injectMode == 2u ? directUnweighted
-                                                     : directLight;
-            InjectVplFromBounce(hit.position, N, injected);
-        }
+            InjectVplFromBounce(hit.position, N, directIrradiance);
 
         if (bounce >= (uint)numBounces)
             break;

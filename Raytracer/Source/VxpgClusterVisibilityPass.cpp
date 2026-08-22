@@ -46,7 +46,7 @@ constexpr BindingSlot kCvisCamera       = RootCbv("CameraParams", FRAME_REG_CAME
 constexpr BindingSlot kCvisGeometryInfo = RootSrv("g_geometryInfo", FRAME_REG_GEOMETRY_INFO);
 constexpr BindingSlot kCvisInstanceInfo = RootSrv("g_instanceInfo", FRAME_REG_INSTANCE_INFO);
 constexpr BindingSlot kCvisGridConstants   = PassCbv("CvisGridCB", CVIS_REG_GRID_CB);
-constexpr BindingSlot kCvisConstants       = PassRootConstants("CvisCB", CVIS_REG_CB, 8);
+constexpr BindingSlot kCvisConstants       = PassRootConstants("CvisCB", CVIS_REG_CB, 7);
 constexpr BindingSlot kCvisInverseIndex    = PassUav("gVoxInverseIndex", CVIS_REG_INVERSE_INDEX);
 constexpr BindingSlot kCvisAssignments     = PassUav("gVoxelClusterAssignments", CVIS_REG_CLUSTER_ASSIGNMENTS);
 constexpr BindingSlot kCvisGatheredPoints  = PassUav("gClusterGatheredLightPoints", CVIS_REG_GATHERED_LIGHT_POINTS);
@@ -64,13 +64,6 @@ constexpr BindingSlot kCvisSlots[] = {
 // visibility). Both exposed so the weighting can be toggled for measurement.
 static AutoCVarInt g_cvisUseBsdf("vxpg.cvis.useBsdf",
     "Weight cluster visibility by the receiver Cook-Torrance BRDF (SIByL default on)",
-    1, CVarFlags::EditCheckbox);
-// Eq. 8's geometry term: cos(x2)/d^2 on top of the f_r*cos(x1) BsdfWeight already
-// applies. Default ON as of 2026-08-21 — the paper's average throughput is
-// f_r * G * V, and running without G flattened the cluster distribution (no distance
-// falloff, no emitter-side foreshortening). 0 restores the earlier behaviour for A/B.
-static AutoCVarInt g_cvisUseGeometry("vxpg.cvis.useGeometry",
-    "Weight cluster throughput by the full geometry term cos(x2)/d^2 (paper Eq. 8)",
     1, CVarFlags::EditCheckbox);
 
 namespace
@@ -179,13 +172,12 @@ bool VxpgClusterVisibilityPass::BindCommon(uint32_t frameIndex)
     m_rootSig.Set(cmd, kCvisInstanceInfo, m_scene->GetInstanceInfoBuffer()->GetUnderlyingResource()->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kCvisGridConstants, m_voxelPass->GetGridConstantsBuffer()->GetGPUVirtualAddress());
 
-    uint32_t constants[8] = {
+    uint32_t constants[7] = {
         m_width, m_height, m_mapX, m_mapY, frameIndex,
         static_cast<uint32_t>(g_cvisUseBsdf.Get() != 0),
-        static_cast<uint32_t>(g_cvisUseGeometry.Get() != 0),
         m_scene->GetInstanceInfoBuffer()->GetElementsCount()
     };
-    m_rootSig.SetConstants(cmd, kCvisConstants, constants, 8);
+    m_rootSig.SetConstants(cmd, kCvisConstants, constants, 7);
     m_rootSig.Set(cmd, kCvisInverseIndex, m_buildPass->GetInverseIndexBuffer()->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kCvisAssignments, m_clusterPass->GetVoxelClusterAssignmentsBuffer()->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kCvisGatheredPoints, m_clusterGatheredLightPoints->GetGPUVirtualAddress());

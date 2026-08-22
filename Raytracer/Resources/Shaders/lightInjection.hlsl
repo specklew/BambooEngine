@@ -128,12 +128,9 @@ void InjectHit(inout InjectPayload payload : SV_RayPayload, in Attributes attr)
     // evaluate direct light here, raygen injects it.
     // Eq. 5 wants E(x2), the incident irradiance — not the shaded, MIS-weighted
     // contribution. See the injection note in guidedPathTracing.hlsl.
-    float3 directIrradiance, directUnweighted;
-    const float3 shaded = SampleDirectLight(hit, surface, payload.seed, directIrradiance, directUnweighted);
-    const uint injectMode = (guidingFlags >> 10) & 3u;
-    payload.result = injectMode == 1u ? directIrradiance
-                   : injectMode == 2u ? directUnweighted
-                                      : shaded;
+    float3 directIrradiance;
+    SampleDirectLight(hit, surface, payload.seed, directIrradiance);
+    payload.result = directIrradiance;
     payload.flags = 1;
 
     // VXPG B+: stash the representative VPL (pos + normal) for this voxel and

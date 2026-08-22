@@ -40,17 +40,15 @@ VendorLevers::VendorLevers()
         // The "dxrprofile" group: each of these compiles the DXR libraries at a
         // different shader profile, and a state object has exactly one. allShaders
         // because the payload declaration they change is shared (ADR 0020 R7).
-        { "payloadqual", "renderer.payloadQualifiers",
-          "PAYLOAD_QUALIFIERS=1", LeverScope::ShaderVariant, false, true, "lib_6_7", "dxrprofile",
-          "Payload access qualifiers on the trace payloads (ADR 0020 R7). Needs lib_6_7." },
-        // The control for the one above: same profile bump, no qualifiers, so the two
-        // arms together separate "the profile costs this" from "the qualifiers cost
-        // this". lib_6_6 rather than lib_6_7 because 6_7 makes the annotation mandatory.
-        { "lib66", "renderer.forceLib66",
-          "", LeverScope::ShaderVariant, false, true, "lib_6_6", "dxrprofile",
-          "Compile the DXR libraries as lib_6_6 with no payload qualifiers (ADR 0020 R7 control)." },
+        //
+        // `payloadqual` (lib_6_7 + qualifiers) and its `lib66` control were measured on
+        // 2026-08-21 and removed: −2.9 % frames on PT and −16.6 % on VXPG, with the
+        // control showing most of that was the profile rather than the qualifiers. The
+        // PAQ macros and the payload annotations stay — lib_6_9 makes them mandatory,
+        // so `ser` needs them.
+        //
         // SER (ADR 0020 R1). lib_6_9 makes the payload annotation mandatory, so this
-        // necessarily carries payloadqual's define too — which is why the lever below
+        // necessarily carries the qualifier define too — which is why the lever below
         // exists as its control: lib_6_9 WITHOUT the reorder call.
         { "ser", "renderer.shaderExecutionReordering",
           "PAYLOAD_QUALIFIERS=1 RAYGEN_SER=1", LeverScope::ShaderVariant, false, true, "lib_6_9", "dxrprofile",
