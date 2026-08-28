@@ -2,8 +2,11 @@
 #define GUIDED_PATH_TRACING_HLSL
 
 // VXPG guided path tracing: two-sample MIS at the first bounce between BSDF
-// sampling and the tree-backed voxel guide (vxguiding-gi.slang, strategy 5
-// "EXT"). Forward: superpixel -> per-superpixel importance heap (5 binary
+// sampling and the tree-backed voxel guide (vxguiding-gi.slang's strategy
+// 5/6/7 block: "EXT"/"EXT2"/"EXT3"). The forward chain is strategy 6's — the
+// fuzzy parent is CDF-picked (gi.slang:301-311) — and the cluster pdf on BOTH
+// sides is strategy 7's mixture (gi.slang:389-403); see FuzzyClusterMixturePdf.
+// Forward: superpixel -> per-superpixel importance heap (5 binary
 // decisions -> cluster + pdf_top) -> cluster-root light-tree walk by intensity
 // ratios (-> voxel + pdf_tree) -> exact solid-angle sampling of the voxel's
 // visible AABB faces as spherical quads (pdf_dir; SIByL SampleSphericalVoxel —
@@ -13,9 +16,11 @@
 // compact->leaf maps. pdf products ride in GuidePdf (see GUIDE_PDF_FP64 below;
 // SIByL uses double, DoublePrecisionFloatShaderOps still hard-checked at init).
 //
-// Guiding is applied at the FIRST vertex only; deeper bounces are vanilla
-// recursion (deviation: SIByL's degraded second-bounce bolt-on omitted,
-// ADR 0003). When the guide is dead for a pixel (superpixel heap root 0 or
+// Guiding is applied at the FIRST vertex only; deeper bounces run the plain
+// flat tail loop (ADR 0007). Deviation: SIByL's second-bounce bolt-on
+// (gi.slang:445-503, `second=true`) is not implemented — it was ported, measured
+// break-even, and deleted 2026-08-23 to keep the integrator to one guided
+// vertex. When the guide is dead for a pixel (superpixel heap root 0 or
 // no lit voxels) the pixel is BSDF-only that frame at full MIS weight —
 // SIByL-faithful; the old stage-A uniform-sphere fallback is gone.
 //
@@ -27,20 +32,12 @@
 #include "LightTreeNode.hlsl"
 #include "SphericalQuad.hlsl"
 
-// 1 = guiding debug views 1-14 compiled in (default; interactive debug variant),
+// 1 = guiding debug views 1-15 compiled in (default; interactive debug variant),
 // 0 = clean benchmark variant, selected by the "noviews" vendor lever (ADR 0020):
-// debugView folds to constant 0, so every view branch and the view-5..14
-// blocks drop out of the raygen entirely.
+// debugView folds to constant 0, so every view branch — the view-5..14 raygen
+// blocks and the view-15 baseline in ShadeFirstVertex — drops out entirely.
 #ifndef GUIDING_DEBUG_VIEWS
 #define GUIDING_DEBUG_VIEWS 1
-#endif
-
-// 1 = one-sample MIS estimator compiled in (the "onesample" vendor lever, which
-// tracks vxpg.oneSampleMis — ADR 0015/0020). Kept out of the default
-// raygen: this kernel's throughput is codegen-shape-sensitive (ADR 0014), so
-// the experimental estimator must not tax the faithful two-sample build.
-#ifndef ONE_SAMPLE_MIS
-#define ONE_SAMPLE_MIS 0
 #endif
 
 // Guide-pdf precision switch. SIByL carries the pdf chain in double; consumer
@@ -49,6 +46,16 @@
 // chain (worst-case leaf/root ~1e-9 power-squared ~= 1e-18 vs float's ~1e-38
 // floor, ADR 0003). 1 = SIByL-faithful double, 0 = float (measured deviation).
 #define GUIDE_PDF_FP64 0
+
+// Measurement variant: 1 removes the guide STRATEGY from the compiled kernel — both the
+// forward chain (SampleGuideDirection) and the reverse pdf queries that pair with it —
+// leaving a weight-1 BSDF estimator inside the full guided frame. Estimator-identical to
+// debug view 15, which skips the same work at RUNTIME; the pair isolates what the code's
+// mere presence costs in raygen registers. Unbiased: with no second strategy there is no
+// second pdf in any balance denominator.
+#ifndef GUIDE_STRATEGY_COMPILED_OUT
+#define GUIDE_STRATEGY_COMPILED_OUT 0
+#endif
 #if GUIDE_PDF_FP64
 typedef double GuidePdf;
 #else
@@ -65,7 +72,7 @@ RWStructuredBuffer<uint>  gVoxCounters     : BAMBOO_PASS_UAV(GUIDED_REG_COUNTERS
 RWStructuredBuffer<uint>  gVoxCompactIds   : BAMBOO_PASS_UAV(GUIDED_REG_COMPACT_IDS);
 // Per-pixel SLIC superpixel assignment (flat map index, -1 invalid), written by
 // SuperpixelBuildPass. SIByL u_spixelIdx. NOT pixel/32 — assignment follows
-// geometry. Global-heap slot 523.
+// geometry. Global-heap slot 522.
 RWTexture2D<int> gSpixelIndexImage : BAMBOO_PASS_UAV(GUIDED_REG_SUPERPIXEL_INDEX);
 // voxelID (flat) -> compactID, sentinel -1 (built by VoxelGuidingBuildPass).
 RWStructuredBuffer<int>   gVoxInverseIndex : BAMBOO_PASS_UAV(GUIDED_REG_INVERSE_INDEX);
@@ -74,6 +81,10 @@ RWStructuredBuffer<int>   gVoxInverseIndex : BAMBOO_PASS_UAV(GUIDED_REG_INVERSE_
 // representative VPL and per-pixel VPL hit position, both pos + octa normal.
 RWTexture3D<float4> gVoxelRepresentative : BAMBOO_PASS_UAV(GUIDED_REG_VOXEL_REPRESENTATIVE);
 RWTexture2D<float4> gVplPosition         : BAMBOO_PASS_UAV(GUIDED_REG_VPL_POSITION);
+// Written by the injection pass this frame; read only when vxpg.injection.reuseInMis
+// makes that sample double as this integrator's BSDF MIS sample.
+RWTexture2D<float4> gVplRadiance         : BAMBOO_PASS_UAV(GUIDED_REG_VPL_RADIANCE);
+RWTexture2D<float4> gVplEmitter          : BAMBOO_PASS_UAV(GUIDED_REG_VPL_EMITTER);
 
 // Shared primary-visibility buffer (ADR 0004): the first path vertex comes
 // from here; all spp samples of a frame share it and diverge at the bounce.
@@ -88,7 +99,7 @@ RWStructuredBuffer<int> gVoxelClusterAssignments : BAMBOO_PASS_UAV(GUIDED_REG_CL
 RWStructuredBuffer<int> gClusterSeedCompactIds   : BAMBOO_PASS_UAV(GUIDED_REG_CLUSTER_SEEDS);
 
 // Cluster-visibility mask (debug view 10). SIByL u_spixel_visibility: bit k =
-// this superpixel tile can see light cluster k. Global-heap slot 530.
+// this superpixel tile can see light cluster k. Global-heap slot 529.
 RWTexture2D<uint> gClusterVisibilityMask : BAMBOO_PASS_UAV(GUIDED_REG_VISIBILITY_MASK);
 
 // Bottom light tree (guided sampling + debug view 11). SIByL u_Nodes /
@@ -103,15 +114,16 @@ RWStructuredBuffer<float>         gSpixelClusterImportanceHeap : BAMBOO_PASS_UAV
 
 // Live per-voxel geometry bounds, quantized to the voxel cube (uint 0 =
 // cube min, 0xffffffff = cube max), reloaded from the bake each frame by
-// VoxelGuidingBuildPass. With voxel.bake.useCompact off (default) the bake
-// stores the full cube, so unpacking is an exact no-op. SIByL u_pMin/u_pMax.
+// VoxelGuidingBuildPass. voxel.bake.useCompact defaults ON here (a deviation
+// from SIByL, Renderer.cpp), so these really are tighter than the cube; with it
+// off the bake stores the full cube and unpacking is a no-op. SIByL u_pMin/u_pMax.
 RWStructuredBuffer<uint4>         gVoxelLiveBoundMin : BAMBOO_PASS_UAV(GUIDED_REG_LIVE_BOUND_MIN);
 RWStructuredBuffer<uint4>         gVoxelLiveBoundMax : BAMBOO_PASS_UAV(GUIDED_REG_LIVE_BOUND_MAX);
 
 // Fuzzy 4-nearest superpixel blend (SIByL u_fuzzyWeight / u_fuzzyIdx, written
 // by the superpixel pass): the 4 nearest superpixel centers per pixel and
 // their normalized 1/dist^2 weights. Top-level cluster selection becomes a
-// mixture over these parents. Global-heap slots 531/532.
+// mixture over these parents. Global-heap slots 530/531.
 RWTexture2D<float4> gFuzzyWeights : BAMBOO_PASS_UAV(GUIDED_REG_FUZZY_WEIGHT);
 RWTexture2D<int4>   gFuzzyIndices : BAMBOO_PASS_UAV(GUIDED_REG_FUZZY_INDEX);
 
@@ -124,7 +136,6 @@ cbuffer VoxelGridCB : BAMBOO_PASS_CBV(REG_VOXEL_GRID_CB)
     uint   voxInjectUseAvg;
     uint   _voxReserved0;
     float  voxHeatScale;
-    uint   voxReuseGiVpl; // ADR 0009: 1 = this raygen's BSDF subtree writes the VPL data
 }
 
 float UnpackIrradiance(uint packed)
@@ -182,8 +193,8 @@ float3 SampleBsdfDir(SurfaceData s, float specularProb, float2 xi, float selecto
 
 // ---- Voxel guide distribution (tree-backed, vxguiding-gi strategy 5) ----
 
-// uint16 leaf ceiling of the bottom tree (Constants::Graphics::LIGHT_TREE_MAX_LEAVES).
-#define LIGHT_TREE_MAX_LEAVES 32768
+// Leaf ceiling of the bottom tree (Constants::Graphics::LIGHT_TREE_MAX_LEAVES).
+#define LIGHT_TREE_MAX_LEAVES 65536
 
 // Lit-voxel count clamped exactly like tree-encode clamped it when building
 // this frame's tree — the raw counter would put the leaf boundary past the
@@ -201,8 +212,9 @@ uint LitVoxelCount()
 // which keeps the forward sample and the reverse query trivially consistent.
 // Every drawn direction geometrically enters the voxel: the semi-NEE gate can
 // only fail on occlusion, never on a geometric miss (unlike the old cone).
-// Shipped SIByL bakes full-cube per-voxel bounds (tight bounds off, ADR 0004),
-// so the plain cube AABB here matches its compact_bound path exactly.
+// Shipped SIByL bakes full-cube per-voxel bounds (its tight-bounds flag is off,
+// ADR 0004); Bamboo defaults voxel.bake.useCompact ON, so the sampled AABB is
+// the triangle bound inside the voxel, not the cube.
 
 // Permutation matrices mapping world axes onto each face's local frame
 // (local z = face normal axis). SIByL rotations[3].
@@ -217,8 +229,8 @@ static const float3x3 kVoxelFaceRotations[3] = {
 // by the forward sampler and the reverse pdf so both see identical geometry.
 // Sampling targets the voxel's COMPACT geometry bounds (SIByL UnpackCompactAABB
 // on u_pMin/u_pMax); the semi-NEE gate aabb stays the FULL cube — SIByL
-// semantics (gi.slang gates on the VoxelToBound out param). With full-cube
-// bakes (useCompact off) compact == cube and behavior is unchanged.
+// semantics (gi.slang gates on the VoxelToBound out param). Under useCompact = 0
+// compact == cube and the two coincide.
 void BuildVoxelFaceQuads(
     float3 shadingPos, int3 v,
     out SphericalQuad squads[3], out float3 locals[3], out float3 faceSolidAngles,
@@ -369,8 +381,10 @@ float GeomTermBound(float3 p, float3 n, float3 bmin, float3 bmax)
 
 // Cheap variant (SIByL GeomTermBoundApproximate): drops the tangent frame and the
 // two 8-corner AbsMinDistAlong passes, using the single closest-point tangential
-// offset instead. ~1/5 the per-node cost of GeomTermBound; for voxel-sized boxes
-// far from p the bound is nearly identical. Used by treeWeightMode == 2.
+// offset instead. For voxel-sized boxes far from p the bound is nearly identical.
+// It is cheaper, not free: measured 2026-08-23 it removes under 60% of the exact
+// bound's marginal frame cost (see Renderer.cpp's weightMode CVar).
+// Used by treeWeightMode == 2.
 float GeomTermBoundApproximate(float3 p, float3 n, float3 bmin, float3 bmax)
 {
     const float nrmMax = MaxDistAlong(p, n, bmin, bmax);
@@ -525,7 +539,7 @@ GuidePdf PdfTraverseLightTree(int clusterRootId, int leafNodeId, float3 p, float
     [loop] while (true)
     {
         const uint parentId = uint(gLightTreeNodes[nodeId].parentIndex);
-        if (parentId == 0xFFFFu)
+        if (parentId == LIGHT_TREE_NO_NODE)
             break; // reached the whole tree's root
         const uint leftChild  = uint(gLightTreeNodes[parentId].leftIndex);
         const uint rightChild = uint(gLightTreeNodes[parentId].rightIndex);
@@ -548,9 +562,10 @@ GuidePdf PdfTraverseLightTree(int clusterRootId, int leafNodeId, float3 p, float
 // Mixture probability of the fuzzy parent set picking `cluster`: sum over the
 // (renormalized) parents of weight x heapLeaf/heapRoot — SIByL strategy 7's
 // reverse formula (gi.slang:389-403), used here on BOTH the forward and the
-// reverse side. The shipped strategy 6 pairs a single-parent forward pdf with
-// this mixture reverse — an inconsistent estimator; consistent-mixture is a
-// deliberate deviation (ADR 0003).
+// reverse side. The shipped strategy 7 pairs a single-parent forward pdf
+// (gi.slang:315 walks only the CDF-picked parent's heap) with this mixture
+// reverse — an inconsistent estimator; strategy 6 is single-parent on both
+// sides. Consistent-mixture is a deliberate deviation (ADR 0003).
 GuidePdf FuzzyClusterMixturePdf(float4 fuzzyWeights, int4 fuzzyIndices, int cluster)
 {
     GuidePdf pdfTop = 0.0;
@@ -671,24 +686,6 @@ float3 SampleVoxelSolidAngle(
     return mul(localDir, kVoxelFaceRotations[selectedFace] * dirSign[selectedFace]);
 }
 
-// ---- MIS weight (balance or power heuristic via guidingFlags bit 0) ----
-
-float MisWeight(float wSelf, float wOther)
-{
-    if ((guidingFlags & 1u) != 0u)
-    {
-        wSelf  *= wSelf;
-        wOther *= wOther;
-    }
-    // No epsilon in the denominator (SIByL w1/(w1+w2) verbatim): both call
-    // sites gate on pdf > 0 and isnan-guard the other strategy's pdf, so the
-    // denominator is strictly positive. An epsilon here makes the two MIS
-    // weights sum below 1 — an energy tax that concentrates exactly where
-    // squared pdfs are small (grazing/penumbra directions; measured as the
-    // 0.026-FLIP darkening on Deep Light before removal).
-    return wSelf / (wSelf + wOther);
-}
-
 // ---- Continuation trace (deeper bounces, vanilla logic) ----
 
 // Sky reached by an indirect ray: sky-lighting switch + firefly clamp applied
@@ -779,56 +776,19 @@ GuidedPayload TraceBounceRay(RayDesc ray)
 static uint2 gLaunchIndex;
 static uint2 gLaunchDims;
 
-// VPL injection from the BSDF subtree's first bounce vertex (ADR 0009): the
-// same writes the dedicated injection trace performs — per-pixel VPL position,
-// per-voxel representative (last-writer-wins), and the packed-irradiance
-// atomics. Position/normal write on any hit; irradiance only when the vertex
-// receives direct light (mirrors lightInjection.hlsl exactly).
-void InjectVplFromBounce(float3 position, float3 shadingNormal, float3 directLight)
-{
-    const float packedNormal = asfloat(UnitVectorToUnorm32Octahedron(shadingNormal));
-    gVplPosition[gLaunchIndex] = float4(position, packedNormal);
-
-    int3 voxelIdx = int3(floor((position - voxGridMin) / voxVoxelSize));
-    if (any(voxelIdx < 0) || any(voxelIdx >= int(voxGridDim)))
-        return;
-
-    gVoxelRepresentative[voxelIdx] = float4(position, packedNormal);
-
-    float irradiance = max(directLight.r, max(directLight.g, directLight.b));
-    if (irradiance <= 0.0)
-        return;
-
-    uint packedIrr = PackIrradiance(irradiance);
-    if (voxInjectUseAvg != 0)
-    {
-        uint old;
-        InterlockedAdd(gVoxIrradiance[voxelIdx], packedIrr, old);
-        InterlockedAdd(gVoxVplCount[voxelIdx], 1u, old);
-    }
-    else
-    {
-        uint old;
-        InterlockedMax(gVoxIrradiance[voxelIdx], packedIrr, old);
-        gVoxVplCount[voxelIdx] = 1u;
-    }
-}
-
 // Flat iterative bounce loop (ADR 0007): replaces the recursive closest-hit
 // continuation with the same estimator — per vertex add throughput-weighted
 // direct light, sample the next bounce, stop at numBounces. All rays (bounce +
 // shadow) launch from raygen; the closest hit only reports hit IDs and the
 // surface is reconstructed here through the same instance-parameterized path
 // the VBuffer first vertex uses.
-// writeVpl: only the BSDF MIS subtree passes true (ADR 0009) — fitting the
-// guide from guided samples would be a self-reinforcing feedback loop.
 // firstEmitterLe/firstEmitterNeePdf: the FIRST segment's emissive hit (if any,
 // front face) is NOT added here — its Le is 3-way MIS'd (this segment's two
 // first-vertex strategies + NEE-at-v0), and only the caller knows the OTHER
 // strategy's pdf at this hit. It is returned instead so the caller applies the
 // 3-way weight with the same f*NdotL/pdf throughput factor. Deeper segments'
 // emission is 2-way MIS'd (PT-style) inline, everything known here.
-float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl,
+float3 TraceIndirect(float3 origin, float3 dir, inout uint seed,
                      out float3 hitPos, out bool didHit,
                      out float3 firstEmitterLe, out float firstEmitterNeePdf)
 {
@@ -901,29 +861,20 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl,
             if (bounce == 1u)
             {
                 // Deferred to the caller for the 3-way (BSDF/guide + NEE) weight.
-                firstEmitterLe = instance.emissiveRadiance;
+                firstEmitterLe = EmitterRadiance(instance, hit.uv);
                 firstEmitterNeePdf = PdfNeeTowardHit(origin, instance, p.primitiveId, hit.position);
             }
             else
             {
                 float pdfNee = PdfNeeTowardHit(previousVertexPosition, instance, p.primitiveId, hit.position);
                 float weight = BalanceWeight(prevBouncePdf, pdfNee, 0.0);
-                radiance += pathThroughput * instance.emissiveRadiance * weight;
+                radiance += pathThroughput * EmitterRadiance(instance, hit.uv) * weight;
             }
         }
 
         float3 directIrradiance;
         const float3 directLight = SampleDirectLight(hit, surface, seed, directIrradiance);
         radiance += pathThroughput * directLight;
-
-        // ADR 0009: the first bounce vertex of the BSDF subtree doubles as next
-        // frame's injection sample. What is injected is E(x2) — the paper's Eq. 5
-        // quantity — not the shaded contribution: `directLight` carries f_r(x2) and
-        // NEE's MIS weight, so fitting the guide to it tints the importance by the
-        // receiver's albedo AND undervalues exactly those voxels whose emitters BSDF
-        // sampling also finds. vxpg.injection.irradiance=0 restores the old quantity.
-        if (bounce == 1u && writeVpl && voxReuseGiVpl != 0u)
-            InjectVplFromBounce(hit.position, N, directIrradiance);
 
         if (bounce >= (uint)numBounces)
             break;
@@ -973,281 +924,9 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed, bool writeVpl,
     return radiance;
 }
 
-// ---- Second-bounce guiding (SIByL strategy-6 `second=true`) -----------------
-// SIByL guides the SECOND path vertex too, via the GLOBAL irradiance guide
-// (VG_Irradiance: traverse the light tree from the root node 0 by intensity, no
-// superpixel/cluster/fuzzy top level). Enabled by vxpg.secondBounce
-// (guidingFlags bit 7). This turns the estimator into a 2-bounce guided path
-// (vertex1 MIS -> NEE at vertex2 -> vertex2 MIS -> NEE at vertex3), so run the
-// A/B at bounces == 2. Deviation from Bamboo's flat N-bounce tail (ADR 0007),
-// gated off by default.
-
-// One indirect segment: trace a ray, return terminal NEE at the hit (SIByL
-// EvaluateIndirectLight) or the sky. hitPos/didHit feed the guide semi-NEE gate
-// and the reverse pdf. hitEmitterLe/hitEmitterNeePdf: the hit's emissive
-// emission is 3-way MIS'd by the caller (this vertex's BSDF + global guide, plus
-// NEE-at-origin), so it is returned rather than added to the terminal NEE.
-float3 TraceOneBounceNEE(float3 origin, float3 dir, inout uint seed,
-                         out float3 hitPos, out bool didHit,
-                         out float3 hitEmitterLe, out float hitEmitterNeePdf)
-{
-    hitPos = float3(0, 0, 0);
-    didHit = false;
-    hitEmitterLe = float3(0, 0, 0);
-    hitEmitterNeePdf = 0.0;
-
-    RayDesc ray;
-    ray.Origin = origin;
-    ray.Direction = dir;
-    ray.TMin = RAY_TMIN;
-    ray.TMax = RAY_TMAX;
-
-    GuidedPayload p = TraceBounceRay(ray);
-    if (p.hitFlag == 0u)
-        return IndirectSkyRadiance(dir);
-
-    InstanceInfo instance = g_instanceInfo[p.instanceId];
-    GeometryInfo geometry = g_geometryInfo[instance.geometryIndex];
-    HitData hit = GetHitData(p.primitiveId, geometry.vertexOffset, geometry.indexOffset,
-                             p.barycentrics, instance.objectToWorld);
-
-    float3 albedo = SampleTextureColor(instance, hit).rgb * instance.baseColorFactor.rgb;
-    float2 rm = SampleRoughnessMetallic(instance, hit);
-    float roughness = max(rm.x, MIN_ROUGHNESS);
-    float metallic = rm.y;
-
-    float3 N = SampleWorldSpaceNormal(instance, hit);
-    float3 V = -dir;
-    float3 geometricN = normalize(mul((float3x3)instance.objectToWorld, hit.tri_normal));
-    if (dot(geometricN, V) < 0.0)
-        N = -N;
-
-    SurfaceData surface;
-    surface.N         = N;
-    surface.V         = V;
-    surface.NdotV     = max(dot(N, V), 1e-4);
-    surface.F0        = lerp(DIELECTRIC_F0, albedo, metallic);
-    surface.albedo    = albedo;
-    surface.roughness = roughness;
-    surface.metallic  = metallic;
-
-    hitPos = hit.position;
-    didHit = true;
-
-    if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0) &&
-        dot(geometricN, V) > 0.0)
-    {
-        hitEmitterLe = instance.emissiveRadiance;
-        hitEmitterNeePdf = PdfNeeTowardHit(origin, instance, p.primitiveId, hit.position);
-    }
-
-    return SampleDirectLight(hit, surface, seed);
-}
-
-// Reverse pdf of the GLOBAL irradiance guide at a BSDF sample's hit voxel:
-// P(select the hit voxel from tree root 0, intensity-only) x P(dir | voxel).
-// 0 for sky / unlit / out-of-tree hits -> BSDF sample takes full MIS weight.
-GuidePdf EvalGlobalGuidePdf(float3 shadingPos, float3 shadingNormal, float3 hitPos)
-{
-    int3 v = int3(floor((hitPos - voxGridMin) / voxVoxelSize));
-    if (any(v < 0) || any(v >= int(voxGridDim)))
-        return 0.0;
-    const uint flatId = uint(v.x) + uint(v.y) * voxGridDim + uint(v.z) * voxGridDim * voxGridDim;
-    const int compactID = gVoxInverseIndex[flatId];
-    if (compactID < 0 || uint(compactID) >= LitVoxelCount())
-        return 0.0;
-    const int leafNodeId = gCompactToLeaf[compactID];
-    if (leafNodeId < 0)
-        return 0.0;
-    const GuidePdf pdfTree = PdfTraverseLightTreeIntensity(0, leafNodeId);
-    const float pdfDir = PdfVoxelSolidAngle(shadingPos, v);
-    return pdfTree * GuidePdf(pdfDir);
-}
-
-// Two-sample MIS (BSDF + global irradiance guide) at the SECOND vertex; returns
-// the terminal indirect radiance from that vertex (NEE at the third vertex).
-// Mirrors ShadeFirstVertex but with the global guide and a single terminal
-// segment (SIByL secondbounce block, gi.slang:445-503).
-float3 ShadeSecondVertex(HitData hit2, SurfaceData surf2, float specularProb, inout uint seed)
-{
-    const uint litVoxelCount = LitVoxelCount();
-    float3 radiance = float3(0, 0, 0);
-
-    // BSDF strategy
-    {
-        float2 xi = Random2D(seed); seed = pcg_hash(seed);
-        float selector = Random1D(seed); seed = pcg_hash(seed);
-        float pdfB;
-        float3 dir = SampleBsdfDir(surf2, specularProb, xi, selector, pdfB);
-        if (pdfB > EPSILON && dot(dir, surf2.N) > 0.0)
-        {
-            float3 f = EvalPathBRDF(surf2, dir);
-            if (any(f > 0))
-            {
-                float3 hp; bool dh;
-                float3 v2Le; float v2NeePdf;
-                float3 incoming = TraceOneBounceNEE(hit2.position, dir, seed, hp, dh, v2Le, v2NeePdf);
-                float pdfG = (litVoxelCount > 0u && dh)
-                    ? float(EvalGlobalGuidePdf(hit2.position, surf2.N, hp)) : 0.0;
-                if (isnan(pdfG)) pdfG = 0.0;
-                float weight = MisWeight(pdfB, pdfG);
-                radiance += f * dot(surf2.N, dir) * incoming * weight / pdfB;
-                // v2 emissive hit: 3-way (this vertex's BSDF + global guide + NEE-at-v1).
-                if (any(v2Le > 0.0))
-                {
-                    float wLe = BalanceWeight(pdfB, pdfG + v2NeePdf, 0.0);
-                    radiance += f * dot(surf2.N, dir) * v2Le * wLe / pdfB;
-                }
-            }
-        }
-    }
-
-    // Guide strategy (global irradiance tree, root node 0, intensity-only)
-    if (litVoxelCount > 0u)
-    {
-        float2 walkXi = Random2D(seed); seed = pcg_hash(seed);
-        float2 quadXi = Random2D(seed); seed = pcg_hash(seed);
-        float2 faceXi = Random2D(seed); seed = pcg_hash(seed);
-
-        GuidePdf pdfTree;
-        const int leafNodeId = TraverseLightTreeToLeaf(0, litVoxelCount - 1u, walkXi.x,
-                                                       hit2.position, surf2.N, 0u, pdfTree);
-        if (leafNodeId >= 0)
-        {
-            const uint compactID = uint(gLightTreeNodes[leafNodeId].voxelIndex);
-            const int3 v = VoxelCoordFromFlatId(gVoxCompactIds[compactID]);
-            const int3 currVox = int3(floor((hit2.position - voxGridMin) / voxVoxelSize));
-            // Skip a degenerate self-voxel pick (SIByL SampleVoxelGuiding guard).
-            if (!all(v == currVox))
-            {
-                float pdfDir; float3 aabbMin, aabbMax;
-                float3 dir = SampleVoxelSolidAngle(hit2.position, v, float3(faceXi.x, quadXi),
-                                                   pdfDir, aabbMin, aabbMax);
-                const GuidePdf pdfG = pdfTree * GuidePdf(pdfDir);
-                if (pdfG > 0.0 && dot(dir, surf2.N) > 0.0)
-                {
-                    float3 f = EvalPathBRDF(surf2, dir);
-                    if (any(f > 0))
-                    {
-                        float3 hp; bool dh;
-                        float3 v2Le; float v2NeePdf;
-                        float3 incoming = TraceOneBounceNEE(hit2.position, dir, seed, hp, dh, v2Le, v2NeePdf);
-                        bool accepted = dh && all(hp >= aabbMin) && all(hp <= aabbMax);
-                        if (accepted)
-                        {
-                            float pdfBAtDir = PdfBsdfMixture(surf2, specularProb, dir);
-                            if (isnan(pdfBAtDir)) pdfBAtDir = 0.0;
-                            float weight = MisWeight(float(pdfG), pdfBAtDir);
-                            radiance += f * dot(surf2.N, dir) * incoming * weight / float(pdfG);
-                            // v2 emissive hit: 3-way (this vertex's global guide + BSDF + NEE-at-v1).
-                            if (any(v2Le > 0.0))
-                            {
-                                float wLe = BalanceWeight(float(pdfG), pdfBAtDir + v2NeePdf, 0.0);
-                                radiance += f * dot(surf2.N, dir) * v2Le * wLe / float(pdfG);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    return radiance;
-}
-
-// BSDF-branch continuation of vertex 1 WITH second-bounce guiding: trace to
-// vertex 2, add its NEE, then the guided second-vertex MIS (terminal). Replaces
-// TraceIndirect for that branch when vxpg.secondBounce is on. hitPos/didHit are
-// vertex 2 (the vertex-1 guide semi-NEE gate + reverse pdf still key on it).
-float3 TraceIndirectSecondGuide(float3 origin, float3 dir, inout uint seed, bool writeVpl,
-                                out float3 hitPos, out bool didHit,
-                                out float3 firstEmitterLe, out float firstEmitterNeePdf)
-{
-    hitPos = float3(0, 0, 0);
-    didHit = false;
-    firstEmitterLe = float3(0, 0, 0);
-    firstEmitterNeePdf = 0.0;
-
-    RayDesc ray;
-    ray.Origin = origin;
-    ray.Direction = dir;
-    ray.TMin = RAY_TMIN;
-    ray.TMax = RAY_TMAX;
-
-    GuidedPayload p = TraceBounceRay(ray);
-    if (p.hitFlag == 0u)
-        return IndirectSkyRadiance(dir);
-
-    InstanceInfo instance = g_instanceInfo[p.instanceId];
-    GeometryInfo geometry = g_geometryInfo[instance.geometryIndex];
-    HitData hit = GetHitData(p.primitiveId, geometry.vertexOffset, geometry.indexOffset,
-                             p.barycentrics, instance.objectToWorld);
-
-    float3 albedo = SampleTextureColor(instance, hit).rgb * instance.baseColorFactor.rgb;
-    float2 rm = SampleRoughnessMetallic(instance, hit);
-    float roughness = max(rm.x, MIN_ROUGHNESS);
-    float metallic = rm.y;
-    float3 N = SampleWorldSpaceNormal(instance, hit);
-    float3 V = -dir;
-    float3 geometricN = normalize(mul((float3x3)instance.objectToWorld, hit.tri_normal));
-    if (dot(geometricN, V) < 0.0)
-        N = -N;
-
-    SurfaceData surface;
-    surface.N         = N;
-    surface.V         = V;
-    surface.NdotV     = max(dot(N, V), 1e-4);
-    surface.F0        = lerp(DIELECTRIC_F0, albedo, metallic);
-    surface.albedo    = albedo;
-    surface.roughness = roughness;
-    surface.metallic  = metallic;
-
-    hitPos = hit.position;
-    didHit = true;
-
-    // v1 emissive hit: deferred to the caller for the 3-way weight at v0.
-    if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0) &&
-        dot(geometricN, V) > 0.0)
-    {
-        firstEmitterLe = instance.emissiveRadiance;
-        firstEmitterNeePdf = PdfNeeTowardHit(origin, instance, p.primitiveId, hit.position);
-    }
-
-    // NEE@v1 (A1, second-bounce path): NEE here competes with BSDF@v1 AND the
-    // global irradiance guide@v1 that ShadeSecondVertex samples, so weight it
-    // 3-way — sums to 1 with that vertex's v2-emitter Le weights. The guide
-    // strategy runs only when litVoxelCount > 0; gate pG the same way. Uses the
-    // global guide's reverse pdf (EvalGlobalGuidePdf), the helper that branch
-    // already uses for its reverse queries.
-    float3 directLight;
-    {
-        uint neeKind; float3 neeLightPoint;
-        float pdfNee, pdfBsdf; float3 neeUnweighted;
-        float3 neeIrradianceUnused;
-        SampleDirectLightComponents(hit, surface, seed, neeKind, neeLightPoint,
-                                    pdfNee, pdfBsdf, neeUnweighted, neeIrradianceUnused);
-        if (neeKind == 2u)
-        {
-            float pG = (LitVoxelCount() > 0u)
-                ? float(EvalGlobalGuidePdf(hit.position, N, neeLightPoint)) : 0.0;
-            if (isnan(pG)) pG = 0.0;
-            directLight = neeUnweighted * BalanceWeight(pdfNee, pdfBsdf + pG, 0.0);
-        }
-        else
-            directLight = neeUnweighted; // delta (weight 1) or early-out zero
-    }
-    if (writeVpl && voxReuseGiVpl != 0u)
-        InjectVplFromBounce(hit.position, N, directLight);
-
-    float specularProb = SurfaceSpecularProb(surface);
-
-    return directLight + ShadeSecondVertex(hit, surface, specularProb, seed);
-}
-
 // ---- Shared guide forward chain -------------------------------------------
 // fuzzy parent pick -> per-superpixel heap -> cluster root -> bottom tree ->
-// voxel -> solid-angle direction. Used by the two-sample MIS branch and the
-// one-sample estimator (ADR 0015). Result codes:
+// voxel -> solid-angle direction. Result codes:
 #define GUIDE_CHAIN_OK          0  // dir/pdfG/aabb valid
 #define GUIDE_CHAIN_NO_PARENT   1  // no live fuzzy parent and no hard assignment
 #define GUIDE_CHAIN_DEAD_BRANCH 2  // leaf -1 under a live root (SIByL wipe quirk)
@@ -1332,248 +1011,6 @@ int SampleGuideDirection(float3 shadingPos, float3 shadingNormal, float4 fuzzyWe
     return GUIDE_CHAIN_OK;
 }
 
-// ---- One-sample MIS (ADR 0015, deviation from SIByL's two-sample MIS) ------
-#if ONE_SAMPLE_MIS
-
-// Per-16x16-tile guide-selection probability, learned from the previous
-// frame's per-strategy contribution shares (adaptive q, guidingFlags bit 9;
-// updated + cleared by vxpgAdaptiveQ.hlsl after every guided dispatch).
-RWStructuredBuffer<float> gTileGuideQ        : BAMBOO_PASS_UAV(GUIDED_REG_TILE_GUIDE_Q);
-// [tile*2] = guide-attributed luminance (fixed point), [tile*2+1] = total
-// strategy luminance. Both are sums of actual sample contributions, whose
-// 1/(q x pdf) scaling makes them estimates of int(w_G f) and int(f) — the
-// ratio is the variance-aware target for q.
-RWStructuredBuffer<uint>  gTileStrategyStats : BAMBOO_PASS_UAV(GUIDED_REG_TILE_STRATEGY_STATS);
-
-// Keep in sync with vxpgAdaptiveQ.hlsl. MAX capped at 1/2 (defensive): the
-// semi-NEE gate leaves a large slice of transport BSDF-exclusive, and a
-// guide-majority tile amplifies exactly that energy by 1/((1-q) pB) —
-// measured FLIP 0.049 with cap 0.95.
-#define ADAPTIVE_Q_MIN 0.05
-#define ADAPTIVE_Q_MAX 0.5
-
-// Contribution scale for the selected strategy: MIS weight over
-// (selection probability x pdf), computed in one expression so a tiny
-// selected pdf never rides through value/pdf first (inf x 0 NaN hazard).
-// Weights use the q-weighted mixture (one-sample balance telescopes to
-// 1/(qS pS + qO pO); power, guidingFlags bit 0, to qS pS/((qS pS)^2+(qO pO)^2))
-// so any q in (0,1) — including the adaptive per-tile value — stays unbiased
-// and continuous down to a single-strategy estimator as the other q -> 0.
-// Reduces exactly to the fixed formulas at q = 1/2. Callers gate pdfS > 0.
-float OneSampleMisScale(float pdfSelected, float probSelected, float pdfOther, float probOther)
-{
-    const float selected = probSelected * pdfSelected;
-    const float other    = probOther * pdfOther;
-    if ((guidingFlags & 1u) != 0u)
-        return selected / (selected * selected + other * other);
-    return 1.0 / (selected + other);
-}
-
-// First-segment emissive-hit scale for the one-sample estimator: the coin group
-// {BSDF, guide} has effective density probSel*pdfSel + probOther*pdfOther, and
-// NEE-at-v0 is an always-on partner with density pdfNee. The balance-heuristic
-// weight of the selected coin strategy is (probSel*pdfSel)/D over the total
-// D = probSel*pdfSel + probOther*pdfOther + pdfNee; dividing by (probSel*pdfSel)
-// telescopes to 1/D. Always balance (the power-heuristic combination of a
-// stochastic coin group with a deterministic NEE partner is not well-defined,
-// and the emissive integrand is weighted independently of the reflected one).
-float OneSampleMisScaleLe(float pdfSelected, float probSelected, float pdfOther, float probOther, float pdfNee)
-{
-    return 1.0 / (probSelected * pdfSelected + probOther * pdfOther + pdfNee);
-}
-
-// Fixed-point (x256) luminance accumulation for the adaptive-q share. The
-// per-sample clamp keeps one tile's pixels x spp within 32 bits; a control
-// signal tolerates the distortion (both buckets clamp identically).
-void AccumulateTileStrategyStats(uint tileId, bool guideSelected, float3 contribution)
-{
-    const float lum = dot(contribution, float3(0.2126, 0.7152, 0.0722));
-    const uint fx = uint(min(lum, 4096.0) * 256.0 + 0.5);
-    if (fx == 0u)
-        return;
-    uint previous;
-    if (guideSelected)
-        InterlockedAdd(gTileStrategyStats[tileId * 2u + 0u], fx, previous);
-    InterlockedAdd(gTileStrategyStats[tileId * 2u + 1u], fx, previous);
-}
-
-// One-sample estimator for the first path vertex: a fair coin picks EITHER the
-// BSDF strategy OR the guide strategy, traces only that branch, and scales its
-// contribution by weight/(q x pdf) — halves the per-sample trace work of the
-// two-sample MIS at higher per-sample variance. Guide-dead pixels run BSDF at
-// q = 1 (identical to the two-sample guide-dead path). Chain failures and
-// gate rejects contribute zero; direct light stands (the SIByL dead-branch
-// wipe has nothing else to wipe here). VPL reuse writes (ADR 0009) stay
-// BSDF-selected-only — fitting the guide from guided samples would be a
-// self-reinforcing feedback loop; coverage drops to ~half the pixels per
-// frame, which still oversamples the voxel grid by orders of magnitude.
-float3 ShadeFirstVertexOneSample(HitData hit, SurfaceData surface, float specularProb,
-                                 float4 fuzzyWeights, int4 fuzzyIndices, int spixelFlat,
-                                 uint treeWeightMode, bool guideSecondBounce,
-                                 uint litVoxelCount, bool guideAlive,
-                                 float3 primaryEmission, uint neeKind, float3 neeUnweighted,
-                                 float neePdfNee, float neePdfBsdf, float neePdfGuide,
-                                 inout uint seed)
-{
-    // Everything one-sample works at ONE_SAMPLE_TILE_SIZE granularity: the
-    // selection coin (wave coherence), the adaptive q, and the strategy stats.
-    const uint tilesPerRow = (gLaunchDims.x + (ONE_SAMPLE_TILE_SIZE - 1u)) >> ONE_SAMPLE_TILE_SHIFT;
-    const uint tileId = (gLaunchIndex.x >> ONE_SAMPLE_TILE_SHIFT)
-                      + (gLaunchIndex.y >> ONE_SAMPLE_TILE_SHIFT) * tilesPerRow;
-    const bool adaptiveQ = ((guidingFlags >> 9) & 1u) != 0u;
-
-    // Guide-selection probability: fixed fair coin, or the per-tile value
-    // learned from the previous frame's strategy shares. Prior-frame data is
-    // independent of this sample's randomness, so any q keeps the estimator
-    // unbiased. Out-of-range/NaN reads (fresh or garbage buffer) fall back
-    // to 0.5 — one frame self-heals, no CPU init needed.
-    float qGuide = 0.5;
-    if (adaptiveQ)
-    {
-        const float learned = gTileGuideQ[tileId];
-        qGuide = (learned >= ADAPTIVE_Q_MIN && learned <= ADAPTIVE_Q_MAX) ? learned : 0.5;
-    }
-
-    // Wave-coherent strategy coin: one draw per tile per frame. A per-pixel
-    // coin diverges within every wave, which executes BOTH branches and saves
-    // nothing (measured: frame time identical to two-sample, variance still
-    // doubled). Tile granularity keeps whole waves on one branch; the hash
-    // decorrelates tiles and frames, and the selection stays independent of
-    // the integrand (unbiased).
-    // The draws are independent per frame, so over a short window one tile can
-    // collect several times another's guided samples — that binomial spread is
-    // what makes an UNACCUMULATED frame look patchy (ADR 0015). It averages out
-    // with accumulation; the tile is kept at one wave so the patches are as
-    // small as the estimator allows.
-    uint tileSeed = pcg_hash((tileId * 7919u) ^ (frameIndex * 805459861u));
-    const bool chooseGuide = guideAlive && Random1D(tileSeed) < qGuide;
-    const float probGuide = guideAlive ? qGuide : 0.0;
-    const float probBsdf  = guideAlive ? (1.0 - qGuide) : 1.0;
-
-    // Base radiance: weight-1 primary emission (A4, outside the coin) + the
-    // exact one-sample NEE (A1). NEE competes with the stochastic coin group
-    // {BSDF, guide}, whose selection-weighted mixture density toward the NEE
-    // light point is probBsdf*neePdfBsdf + probGuide*neePdfGuide, so its balance
-    // weight uses that denominator — sums to exactly 1 with OneSampleMisScaleLe's
-    // coin-group Le weights. Delta lights carry weight 1; early-outs are zero.
-    float3 radiance = primaryEmission;
-    if (neeKind == 2u)
-        radiance += neeUnweighted * BalanceWeight(neePdfNee,
-                        probBsdf * neePdfBsdf + probGuide * neePdfGuide, 0.0);
-    else
-        radiance += neeUnweighted;
-
-    if (!chooseGuide)
-    {
-        // BSDF strategy — same chain as the two-sample branch.
-        float2 xi = Random2D(seed);
-        seed = pcg_hash(seed);
-        float selector = Random1D(seed);
-        seed = pcg_hash(seed);
-
-        float pdfB;
-        float3 dir = SampleBsdfDir(surface, specularProb, xi, selector, pdfB);
-        if (pdfB > EPSILON && dot(dir, surface.N) > 0.0)
-        {
-            float3 f = EvalPathBRDF(surface, dir);
-            if (any(f > 0))
-            {
-                float3 hitPos;
-                bool didHit;
-                float3 firstLe; float firstNeePdf;
-                float3 incoming;
-                if (guideSecondBounce)
-                    incoming = TraceIndirectSecondGuide(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
-                else
-                    incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
-
-                float pdfGAtDir = 0.0;
-                if (guideAlive && didHit)
-                    pdfGAtDir = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices, hit.position, surface.N, hitPos, treeWeightMode));
-                if (isnan(pdfGAtDir)) pdfGAtDir = 0.0; // SIByL w2 guard
-
-                float scale = OneSampleMisScale(pdfB, probBsdf, pdfGAtDir, probGuide);
-                if (!isnan(scale) && !isinf(scale))
-                {
-                    const float3 strategyRadiance = f * max(dot(surface.N, dir), 0.0) * incoming;
-                    radiance += strategyRadiance * scale;
-                    if (adaptiveQ && guideAlive)
-                    {
-                        // Control-signal share uses q-FREE balance weights:
-                        // weighting by the live mixture (which contains q)
-                        // feeds q into its own target and spirals it to the
-                        // clamp floor (measured: FLIP 0.051 vs 0.032 fixed).
-                        const float shareWeight = pdfB / (pdfB + pdfGAtDir);
-                        AccumulateTileStrategyStats(tileId, /*guideSelected*/ false,
-                            strategyRadiance * (shareWeight / (probBsdf * pdfB)));
-                    }
-                }
-                // First-segment emissive hit: 3-way (BSDF + guide coin, + NEE-at-v0).
-                if (any(firstLe > 0.0))
-                {
-                    float scaleLe = OneSampleMisScaleLe(pdfB, probBsdf, pdfGAtDir, probGuide, firstNeePdf);
-                    if (!isnan(scaleLe) && !isinf(scaleLe))
-                        radiance += f * max(dot(surface.N, dir), 0.0) * firstLe * scaleLe;
-                }
-            }
-        }
-    }
-    else
-    {
-        float3 dir;
-        GuidePdf pdfG;
-        float3 aabbMin, aabbMax;
-        uint outcome;
-        const int chain = SampleGuideDirection(hit.position, surface.N, fuzzyWeights,
-                                               fuzzyIndices, spixelFlat, treeWeightMode,
-                                               litVoxelCount, seed,
-                                               dir, pdfG, aabbMin, aabbMax, outcome);
-        if (chain == GUIDE_CHAIN_OK)
-        {
-            float3 f = EvalPathBRDF(surface, dir);
-            if (any(f > 0))
-            {
-                float3 hitPos;
-                bool didHit;
-                float3 firstLe; float firstNeePdf;
-                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ false, hitPos, didHit, firstLe, firstNeePdf);
-
-                // Semi-NEE gate: the claimed pdf belongs to the chosen voxel,
-                // so only count hits inside its AABB.
-                bool accepted = didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax);
-                if (accepted)
-                {
-                    float pdfBAtDir = PdfBsdfMixture(surface, specularProb, dir);
-                    if (isnan(pdfBAtDir)) pdfBAtDir = 0.0; // SIByL w1 guard
-                    float scale = OneSampleMisScale(float(pdfG), probGuide, pdfBAtDir, probBsdf);
-                    if (!isnan(scale) && !isinf(scale))
-                    {
-                        const float3 strategyRadiance = f * max(dot(surface.N, dir), 0.0) * incoming;
-                        radiance += strategyRadiance * scale;
-                        if (adaptiveQ)
-                        {
-                            // q-free balance share — see the BSDF site's comment.
-                            const float shareWeight = float(pdfG) / (float(pdfG) + pdfBAtDir);
-                            AccumulateTileStrategyStats(tileId, /*guideSelected*/ true,
-                                strategyRadiance * (shareWeight / (probGuide * float(pdfG))));
-                        }
-                    }
-                    // First-segment emissive hit: 3-way (guide + BSDF coin, + NEE-at-v0).
-                    if (any(firstLe > 0.0))
-                    {
-                        float scaleLe = OneSampleMisScaleLe(float(pdfG), probGuide, pdfBAtDir, probBsdf, firstNeePdf);
-                        if (!isnan(scaleLe) && !isinf(scaleLe))
-                            radiance += f * max(dot(surface.N, dir), 0.0) * firstLe * scaleLe;
-                    }
-                }
-            }
-        }
-    }
-
-    return radiance;
-}
-#endif // ONE_SAMPLE_MIS
-
 // ---- First path vertex: two-sample MIS between BSDF and the tree guide ----
 // Runs in raygen on the VBuffer-reconstructed hit (ADR 0004); deeper bounces
 // continue through the closest hit. debugView = guidingFlags bits 1-4
@@ -1584,16 +1021,16 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                         float4 fuzzyWeights, int4 fuzzyIndices, int spixelFlat,
                         InstanceInfo instance, float3 geometricN, inout uint seed)
 {
-    // A4: primary-visible emitter (PT raytracing.hlsl:287-300 vertex-0 term).
+    // A4: primary-visible emitter (PT raytracing.hlsl:394-407 vertex-0 term).
     // The guide integrator never continued a camera ray onto an emitter, so a
     // directly visible light read as black; add its emission at weight 1 (front
     // face only, geometric normal), exactly like PT's vertex 0. Weight-1 term:
-    // outside every MIS branch (and outside the one-sample coin). Views >= 3
+    // outside every MIS branch. Views >= 3
     // that zero direct light zero this too (handled where radiance is set).
     float3 primaryEmission = float3(0, 0, 0);
     if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0) &&
         dot(geometricN, surface.V) > 0.0)
-        primaryEmission = instance.emissiveRadiance;
+        primaryEmission = EmitterRadiance(instance, hit.uv);
 
     if (numBounces == 0)
         return IndirectOnly() ? float3(0, 0, 0)
@@ -1607,7 +1044,13 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     // from view 0 by exactly the guide-side work. Converges to the PT target.
     if (debugView == 15u)
     {
-        float3 radianceBaseline = primaryEmission + SampleDirectLight(hit, surface, seed);
+        // Honour IndirectOnly exactly as the guided path does above. Without this the
+        // baseline silently carries the first-vertex direct term that both the guided arm
+        // and path tracing drop, so it was scoring a DIFFERENT integral than the arm it
+        // exists to baseline.
+        float3 radianceBaseline = IndirectOnly()
+            ? float3(0, 0, 0)
+            : primaryEmission + SampleDirectLight(hit, surface, seed);
         float2 xi = Random2D(seed);
         seed = pcg_hash(seed);
         float selector = Random1D(seed);
@@ -1623,7 +1066,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 float3 hitPos;
                 bool didHit;
                 float3 firstLe; float firstNeePdf;
-                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
+                float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit, firstLe, firstNeePdf);
                 float NdotL = dot(surface.N, dir);
                 radianceBaseline += f * NdotL * incoming / pdfB;
                 // No guide strategy in the baseline: the 3-way weight collapses to
@@ -1643,16 +1086,15 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     const uint litVoxelCount = LitVoxelCount();
     // Guide-dead pixels (no lit voxels, or every fuzzy parent's heap empty) run
     // BSDF-only at full MIS weight — no uniform fallback (faithful, see header).
+#if GUIDE_STRATEGY_COMPILED_OUT
+    const bool guideAlive = false;
+#else
     const bool guideAlive = (litVoxelCount > 0u) && any(fuzzyWeights > 0.0);
+#endif
 
     // Bottom light-tree branch weighting (vxpg.tree.weightMode, guidingFlags
     // bits 5-6): 0 = intensity-only, 1 = geometry + avg-minmax distance (paper).
     const uint treeWeightMode = (guidingFlags >> 5) & 3u;
-    // Second-bounce guiding (vxpg.secondBounce, bit 7): also MIS-guide the second
-    // vertex (SIByL `second=true`). Turns the BSDF branch into a 2-bounce guided
-    // path — meaningful only at bounces >= 2.
-    const bool guideSecondBounce = ((guidingFlags >> 7) & 1u) != 0u && numBounces >= 2u;
-
     // Exact 3-way NEE at the guided first vertex (A1): NEE competes with the
     // BSDF strategy AND the voxel guide, so the guide's reverse pdf toward the
     // sampled emitter point (pG) belongs in the balance denominator. The
@@ -1665,7 +1107,10 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     float3 neeLightPoint = float3(0, 0, 0);
     float neePdfNee = 0.0, neePdfBsdf = 0.0, neePdfGuide = 0.0;
     float3 neeUnweighted = float3(0, 0, 0);
-    if (debugView < 3u)
+    // Every output of this block is consumed only by the gated accumulation below, so
+    // under indirect-only the whole thing — light-pool sampling, shadow ray and the
+    // guide-pdf query — is dead work. It used to run and be discarded.
+    if (debugView < 3u && !IndirectOnly())
     {
         float3 neeIrradianceUnusedFirst;
         SampleDirectLightComponents(hit, surface, seed, neeKind, neeLightPoint,
@@ -1690,52 +1135,89 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
             : neeUnweighted; // delta (weight 1) or early-out zero
     }
 
-#if ONE_SAMPLE_MIS
-    // One-sample MIS (vxpg.oneSampleMis, guidingFlags bit 8, ADR 0015): trace
-    // one stochastically-selected strategy per sample instead of both. Debug
-    // views keep the two-sample estimator (views 1-4 dissect its branches).
-    // Pass the NEE components (not the pre-weighted value): the one-sample NEE
-    // weight uses the q-weighted coin-group mixture density, not the two-sample
-    // denominator, so the weight is applied inside once q is known.
-    if (((guidingFlags >> 8) & 1u) != 0u && debugView == 0u)
-        return ShadeFirstVertexOneSample(hit, surface, specularProb, fuzzyWeights, fuzzyIndices,
-                                         spixelFlat, treeWeightMode, guideSecondBounce,
-                                         litVoxelCount, guideAlive, primaryEmission,
-                                         neeKind, neeUnweighted, neePdfNee, neePdfBsdf,
-                                         neePdfGuide, seed);
-#endif
-
     float misWeightB = 0.0;
     float misWeightG = 0.0;
     // Acceptance classification (view 4): 0 = guide dead (blue), 1 = traced
     // but gate-rejected (red), 2 = accepted (green), 3 = heap walk returned no
     // cluster (cyan), 5 = pdf <= 0 (orange), 6 = sampled direction below the
     // horizon (violet), 7 = zero BRDF toward the sample (yellow).
+    // 0 also covers the two chain failures that used to exit early: no live fuzzy
+    // parent, and a dead tree branch.
     uint guideOutcome = 0u;
 
-    // BSDF strategy
+    // BSDF strategy. Two ways to obtain the sample:
+    //
+    //  - trace one (default). The injection pass traced its own, independent
+    //    sample earlier this frame, so the guide was fitted to data this
+    //    estimator does not contain — the supplemental's second remedy
+    //    ("trace two sets of BSDF samples for light injection and MIS
+    //    respectively, but this would increase the cost"), and unbiased.
+    //  - reuse the injected one (vxpg.injection.reuseInMis). One BSDF chain
+    //    per pixel instead of two, and KNOWINGLY BIASED: the guiding pdf is
+    //    then conditioned on the very sample being weighted, which is what
+    //    supplemental Sec. 2 proves the balance heuristic cannot absorb. It
+    //    exists to put a number on that bias, which the paper states but never
+    //    measures. SIByL ships the same switch as UNBIASED_LIGHT_INJECTION.
+    //
+    // The direction and its pdf are RECONSTRUCTED from the stored hit position
+    // rather than stored alongside it (SIByL's EvaluateVPLIndirectLight does the
+    // same): x1 is known here, so a normalize and one pdf evaluation are cheaper
+    // than two more screen-sized channels.
     if (debugView != 2u && debugView != 4u)
     {
-        float2 xi = Random2D(seed);
-        seed = pcg_hash(seed);
-        float selector = Random1D(seed);
-        seed = pcg_hash(seed);
+        const bool reuseInMis = ((guidingFlags >> 8) & 1u) != 0u;
 
-        float pdfB;
-        float3 dir = SampleBsdfDir(surface, specularProb, xi, selector, pdfB);
-        if (pdfB > EPSILON && dot(dir, surface.N) > 0.0)
+        float  pdfB = 0.0;
+        float3 dir  = float3(0, 0, 0);
+        float3 hitPos = float3(0, 0, 0);
+        bool   didHit = false;
+        float3 incoming = float3(0, 0, 0);
+        float3 firstLe = float3(0, 0, 0);
+        float  firstNeePdf = 0.0;
+        bool   haveSample = false;
+
+        if (reuseInMis)
+        {
+            const float4 vplPosition = gVplPosition[gLaunchIndex];
+            const float4 vplRadiance = gVplRadiance[gLaunchIndex];
+            if (vplRadiance.w != 0.0)
+            {
+                dir = normalize(vplPosition.xyz - hit.position);
+                if (dot(dir, surface.N) > 0.0)
+                {
+                    pdfB = PdfBsdfMixture(surface, specularProb, dir);
+                    if (isnan(pdfB)) pdfB = 0.0;
+                    hitPos      = vplPosition.xyz;
+                    didHit      = true;
+                    incoming    = vplRadiance.rgb;
+                    const float4 vplEmitter = gVplEmitter[gLaunchIndex];
+                    firstLe     = vplEmitter.rgb;
+                    firstNeePdf = vplEmitter.w;
+                    haveSample  = pdfB > EPSILON;
+                }
+            }
+            // The RNG is advanced either way so both variants walk the same
+            // stream: the guide branch below must not shift when this one changes.
+            seed = pcg_hash(pcg_hash(seed));
+        }
+        else
+        {
+            float2 xi = Random2D(seed);
+            seed = pcg_hash(seed);
+            float selector = Random1D(seed);
+            seed = pcg_hash(seed);
+
+            dir = SampleBsdfDir(surface, specularProb, xi, selector, pdfB);
+            haveSample = pdfB > EPSILON && dot(dir, surface.N) > 0.0;
+        }
+
+        if (haveSample)
         {
             float3 f = EvalPathBRDF(surface, dir);
             if (any(f > 0))
             {
-                float3 hitPos;
-                bool didHit;
-                float3 firstLe; float firstNeePdf;
-                float3 incoming;
-                if (guideSecondBounce)
-                    incoming = TraceIndirectSecondGuide(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
-                else
-                    incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ true, hitPos, didHit, firstLe, firstNeePdf);
+                if (!reuseInMis)
+                    incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit, firstLe, firstNeePdf);
 
                 // Guide pdf at the BSDF sample, evaluated through the reverse
                 // chain at the ray's hit voxel (0 for misses / unreachable
@@ -1746,7 +1228,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                     pdfGAtDir = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices, hit.position, surface.N, hitPos, treeWeightMode));
                 if (isnan(pdfGAtDir)) pdfGAtDir = 0.0; // SIByL w2 guard
 
-                float weight = MisWeight(pdfB, pdfGAtDir);
+                float weight = BalanceWeight(pdfB, pdfGAtDir, 0.0);
                 misWeightB = weight;
                 float NdotL = dot(surface.N, dir);
                 if (debugView != 3u)
@@ -1775,9 +1257,12 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                                                fuzzyIndices, spixelFlat, treeWeightMode,
                                                litVoxelCount, seed,
                                                dir, pdfG, aabbMin, aabbMax, guideOutcome);
-        if (chain == GUIDE_CHAIN_NO_PARENT)
+        // View 4 exists to classify guide failures, so it must NOT take the early exits
+        // below — they used to return before its colour branch, leaving 80-99% of the
+        // image black and the probe useless.
+        if (chain == GUIDE_CHAIN_NO_PARENT && debugView != 4u)
             return radiance; // no live parent and no hard assignment
-        if (chain == GUIDE_CHAIN_DEAD_BRANCH)
+        if (chain == GUIDE_CHAIN_DEAD_BRANCH && debugView != 4u)
         {
             // SIByL strategy 5 wipes the STRATEGY contributions on a dead
             // branch but adds direct light AFTER the wipe (gi.slang:512
@@ -1801,7 +1286,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 float3 hitPos;
                 bool didHit;
                 float3 firstLe; float firstNeePdf;
-                float3 incoming = TraceIndirect(hit.position, dir, seed, /*writeVpl*/ false, hitPos, didHit, firstLe, firstNeePdf);
+                float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit, firstLe, firstNeePdf);
 
                 // Semi-NEE gate: the claimed pdf belongs to the chosen
                 // voxel, so only count hits inside its AABB.
@@ -1812,7 +1297,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 {
                     float pdfBAtDir = PdfBsdfMixture(surface, specularProb, dir);
                     if (isnan(pdfBAtDir)) pdfBAtDir = 0.0; // SIByL w1 guard
-                    float weight = MisWeight(float(pdfG), pdfBAtDir);
+                    float weight = BalanceWeight(float(pdfG), pdfBAtDir, 0.0);
                     misWeightG = weight;
                     if (debugView < 3u)
                     {
@@ -1875,13 +1360,6 @@ void GuidedIntegratorMain()
         return;
     }
 #endif
-
-    // ADR 0009: this raygen owns the per-pixel VPL slot — zero it up front so
-    // pixels whose BSDF bounce misses (or never traces: sky, guide debug
-    // views) stay empty for next frame's cvis, exactly like the dedicated
-    // injection pass's per-pixel clear.
-    if (voxReuseGiVpl != 0u)
-        gVplPosition[launchIndex] = float4(0, 0, 0, 0);
 
     // First path vertex from the shared VBuffer (ADR 0004): reconstruct the
     // hit once; every spp sample shares it and diverges at the bounce.
@@ -2142,7 +1620,7 @@ void GuidedIntegratorMain()
                         {
                             if (cur == clusterRoot) onPath = true;
                             uint parent = uint(gLightTreeNodes[cur].parentIndex);
-                            if (parent == 0xFFFFu) { reachedRoot = true; break; }
+                            if (parent == LIGHT_TREE_NO_NODE) { reachedRoot = true; break; }
                             cur = int(parent);
                         }
                         if (!reachedRoot)       col = float3(1, 0, 0);       // red: walk failed
@@ -2352,9 +1830,11 @@ void GuidedIntegratorMain()
 // Compute wrapper (inline-RayQuery integrator, ADR 0011). One thread per
 // pixel, same body as the pipeline raygen.
 //
-// Wave size defaults to the driver's pick: measured 840 (default) vs 827
-// (wave32) vs 799 (wave64) frames/3s on RDNA, Deep Light b1. The wave32/wave64
-// levers (ADR 0020 R10) force it for a re-measurement. This is the ONLY pixel
+// Wave size defaults to the driver's pick. Measured 2026-08-23 on RDNA
+// (veach-ajar Deep Light, 1920x1080, b1, skyLighting off, 3s x 3 rounds):
+// 590 (default) vs 592 (wave32) vs 489 (wave64) frames/3s — the driver's pick and
+// wave32 are a tie, wave64 costs 17%. The wave32/wave64 levers (ADR 0020 R10)
+// force it for a re-measurement. This is the ONLY pixel
 // integrator that can carry the attribute at all — [WaveSize] is compute/node
 // only in HLSL, so the DXR pipeline raygen cannot be forced from the shader.
 #ifndef FORCED_WAVE_SIZE

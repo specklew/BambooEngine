@@ -190,9 +190,10 @@ static UvTransform ReadMaterialUvTransform(const tinygltf::Material& material)
     const UvTransform baseColor = ReadUvTransform(material.pbrMetallicRoughness.baseColorTexture.extensions);
     const UvTransform normal    = ReadUvTransform(material.normalTexture.extensions);
     const UvTransform roughness = ReadUvTransform(material.pbrMetallicRoughness.metallicRoughnessTexture.extensions);
+    const UvTransform emissive  = ReadUvTransform(material.emissiveTexture.extensions);
 
     const UvTransform* chosen = nullptr;
-    for (const UvTransform* candidate : { &baseColor, &normal, &roughness })
+    for (const UvTransform* candidate : { &baseColor, &normal, &roughness, &emissive })
     {
         if (!candidate->present)
             continue;
@@ -294,6 +295,41 @@ static bool LoadTinyGLTFModel(const std::filesystem::path &path, tinygltf::Model
     return true;
 }
 
+// Same piecewise sRGB transfer function the shaders apply (RaytracingUtils.hlsl
+// SrgbToLinear), so a flat emissive texture averages to exactly the colour the
+// estimator will read per texel.
+static float SrgbToLinear(float encoded)
+{
+    return encoded <= 0.04045f ? encoded / 12.92f : std::pow((encoded + 0.055f) / 1.055f, 2.4f);
+}
+
+// Whole-image mean in linear space. This is the light pool's selection weight for a
+// textured emitter, never its radiance, so averaging over the image instead of over
+// each triangle's UV footprint costs sampling quality on a non-uniform emitter (a
+// shop sign) and cannot bias the estimate.
+static DirectX::XMFLOAT3 AverageLinearColor(const tinygltf::Image& image)
+{
+    const size_t pixelCount = static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
+    if (pixelCount == 0 || (image.component != 3 && image.component != 4) || image.bits != 8)
+    {
+        spdlog::warn("Emissive texture is not 8-bit RGB/RGBA ({}x{}, {} components, {} bits); "
+            "using a white light-pool weight", image.width, image.height, image.component, image.bits);
+        return { 1.0f, 1.0f, 1.0f };
+    }
+
+    float decoded[256];
+    for (int value = 0; value < 256; ++value)
+        decoded[value] = SrgbToLinear(static_cast<float>(value) / 255.0f);
+
+    double sum[3] = { 0.0, 0.0, 0.0 };
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel)
+        for (int channel = 0; channel < 3; ++channel)
+            sum[channel] += decoded[image.image[pixel * image.component + channel]];
+
+    return { static_cast<float>(sum[0] / pixelCount), static_cast<float>(sum[1] / pixelCount),
+        static_cast<float>(sum[2] / pixelCount) };
+}
+
 static std::shared_ptr<Texture> GetOrCreateTexture(Renderer& renderer, const tinygltf::Model& model, int textureIndex,
     std::unordered_map<int, std::shared_ptr<Texture>>& textureCache)
 {
@@ -391,6 +427,12 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
                 static_cast<float>(ef[2]) * emissive_strength };
         }
 
+        if (int emissive_texture_index = gltf_material.emissiveTexture.index; emissive_texture_index >= 0)
+        {
+            material->m_emissiveTexture = GetOrCreateTexture(renderer, model, emissive_texture_index, textureCache);
+            material->m_emissiveTextureAverage = AverageLinearColor(model.images[model.textures[emissive_texture_index].source]);
+        }
+
         material->UpdateMaterial();
     }
 
@@ -432,8 +474,12 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
     if (emissive_radiance.x != 0.0f || emissive_radiance.y != 0.0f || emissive_radiance.z != 0.0f)
     {
         prim->m_emissiveBakePositions.reserve(vertices.size());
+        prim->m_emissiveBakeUvs.reserve(vertices.size());
         for (const Vertex& v : vertices)
+        {
             prim->m_emissiveBakePositions.push_back(v.Pos);
+            prim->m_emissiveBakeUvs.push_back(v.Tex0);
+        }
         prim->m_emissiveBakeIndices = indices;
     }
 

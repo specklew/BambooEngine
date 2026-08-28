@@ -4,6 +4,16 @@
 // Unified NEE over the analytic + emissive-triangle pool. Selection pdf is the
 // actual CDF sampled, so any positive power weighting stays unbiased.
 
+// The only MIS weight in the engine: balance heuristic, two or three strategies.
+// Balance is what the paper specifies (Sec. 5.4) and what SIByL's own C++ default
+// asks for; the power heuristic was measured here as a certain loss on both benchmark
+// scenes at zero frame cost and removed (ADR 0010, ADR 0003).
+//
+// No epsilon in the denominator: every call site gates on its own pdf and isnan-guards
+// the others, so the denominator is strictly positive when the weight is used. An
+// epsilon makes the weights of one strategy set sum below 1 — an energy tax that
+// concentrates where the pdfs are small (grazing and penumbra directions; measured as
+// a 0.026-FLIP darkening on Deep Light before removal).
 float BalanceWeight(float pdfSelf, float pdfOtherA, float pdfOtherB)
 {
     float denom = pdfSelf + pdfOtherA + pdfOtherB;
@@ -130,12 +140,18 @@ void SampleDirectLightComponents(HitData hit, SurfaceData surface, inout uint se
     float pdfNeeLocal = pdfSelect * distSq / (cosLight * tri.area);
     float3 brdf = EvalPathBRDF(surface, L); // same BRDF the BSDF/guide strategies see (ADR 0016 M4)
 
+    // Le at the sampled point, not the triangle average: a BSDF ray landing here reads
+    // the same texel through EmitterRadiance, which is what keeps the MIS pair exact
+    // on a textured emitter. tri.averageRadiance only ever chose the triangle.
+    float2 lightUv = tri.uv0 * b0 + tri.uv1 * b1 + tri.uv2 * (1.0 - b0 - b1);
+    float3 Le = EmitterRadiance(g_instanceInfo[NonUniformResourceIndex(tri.instanceId)], lightUv);
+
     lightPoint = lp;
     pdfNee = pdfNeeLocal;
     pdfBsdfTowardLight = PdfBsdfMixture(surface, SurfaceSpecularProb(surface), L);
-    contributionOverPdfUnweighted = brdf * tri.radiance * NdotL / pdfNeeLocal;
+    contributionOverPdfUnweighted = brdf * Le * NdotL / pdfNeeLocal;
     // No MIS weight here: E is the whole direct irradiance, not NEE's share of it.
-    irradianceOverPdf = tri.radiance * NdotL / pdfNeeLocal;
+    irradianceOverPdf = Le * NdotL / pdfNeeLocal;
     sampledKind = 2u; // area: caller applies the MIS weight
 }
 

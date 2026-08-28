@@ -222,6 +222,13 @@
 #define INJECT_REG_VOXEL_REPRESENTATIVE 3 // u
 #define INJECT_REG_VPL_POSITION         4 // u
 #define INJECT_REG_VBUFFER              5 // u
+// The injected sample, kept in a form the guided integrator can reuse as its own
+// BSDF MIS sample within the same frame (vxpg.injection.reuseInMis). Radiance is
+// the SHADED direct light leaving x2 toward x1; the emitter pair is x2's own
+// emission and the NEE pdf toward it, which need a different MIS weight and so
+// cannot be folded into the first.
+#define INJECT_REG_VPL_RADIANCE         6 // u
+#define INJECT_REG_VPL_EMITTER          7 // u
 
 // ---------------------------------------------------------------------------
 // VBufferPass — vbufferPass.hlsl (frame layout plus this)
@@ -229,7 +236,7 @@
 #define VBUFFER_REG_VBUFFER 0 // u
 
 // ---------------------------------------------------------------------------
-// GuidedPathTracingPass — guidedPathTracing.hlsl and vxpgAdaptiveQ.hlsl, which
+// GuidedPathTracingPass — guidedPathTracing.hlsl, which
 // share one root signature (the adaptive-q update chains onto the raygen), so
 // u22/u23 below are the same registers in both shaders.
 // ---------------------------------------------------------------------------
@@ -254,20 +261,9 @@
 #define GUIDED_REG_LIVE_BOUND_MAX       18 // u
 #define GUIDED_REG_FUZZY_WEIGHT         19 // u
 #define GUIDED_REG_FUZZY_INDEX          20 // u
-#define GUIDED_REG_TILE_GUIDE_Q         21 // u
-#define GUIDED_REG_TILE_STRATEGY_STATS  22 // u
-// Tile count for the adaptive-q update's bounds check. Root descriptors carry no
-// size, so GetDimensions on u21/u22 returns garbage — the count has to be told.
-#define GUIDED_REG_ADAPTIVE_Q_CB        1  // b
-// Strategy-tile granularity for one-sample MIS (ADR 0015) — the selection coin,
-// the adaptive q and the strategy stats all work per tile. 8 is a wave64 raygen
-// footprint: the smallest tile that still keeps a whole wave on one branch,
-// which is the only coherence the estimator needs. Larger tiles buy nothing and
-// make the coin's binomial per-tile imbalance read as square patches of
-// differing noise in an unaccumulated frame.
-#define ONE_SAMPLE_TILE_SHIFT 3
-#define ONE_SAMPLE_TILE_SIZE  (1 << ONE_SAMPLE_TILE_SHIFT)
-
+// Read-only here; written by the injection pass (see INJECT_REG_VPL_RADIANCE).
+#define GUIDED_REG_VPL_RADIANCE         21 // u
+#define GUIDED_REG_VPL_EMITTER          22 // u
 // Tile edge for the "swizzle" vendor lever (ADR 0020 R2): launch indices are
 // remapped to pixels in Morton order inside a tile of this size, so a wave's
 // pixels form a compact block instead of a 32- or 64-wide scanline strip. Must

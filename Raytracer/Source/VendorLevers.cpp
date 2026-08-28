@@ -21,10 +21,8 @@ VendorLevers::VendorLevers()
     m_levers = {
         { "noviews", "renderer.raygenCleanVariant",
           "GUIDING_DEBUG_VIEWS=0 RT_DEBUG_VIEWS=0", LeverScope::ShaderVariant, true, false, nullptr, nullptr,
-          "Compile the raygen without debug-view code. Measured SLOWER on this RDNA driver (ADR 0014)." },
-        { "onesample", "vxpg.oneSampleMis",
-          "ONE_SAMPLE_MIS=1", LeverScope::ShaderVariant, false, false, nullptr, nullptr,
-          "One-sample MIS at the first vertex (ADR 0015). Default off; two-sample is what benchmarks measure." },
+          "Compile the raygen without debug-view code. Re-measured 2026-08-23 on this RDNA driver: a wash "
+          "on PT and ~2 % FASTER on VXPG, reversing the 2026-08 reading that made it opt-in (ADR 0014)." },
         { "swizzle", "renderer.raygenSwizzle",
           "RAYGEN_SWIZZLE=1", LeverScope::ShaderVariant, false, false, nullptr, nullptr,
           "Morton launch-to-pixel swizzle inside a 32x32 tile (ADR 0020 R2). Pads the dispatch; bit-exact." },

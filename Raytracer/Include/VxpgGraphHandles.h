@@ -12,6 +12,8 @@ struct VxpgGraphHandles
     GraphResourceHandle shadingPoints        = InvalidGraphResource;
     GraphResourceHandle voxelRepresentative  = InvalidGraphResource;
     GraphResourceHandle vplPosition          = InvalidGraphResource;
+    GraphResourceHandle vplRadiance          = InvalidGraphResource;
+    GraphResourceHandle vplEmitter           = InvalidGraphResource;
     GraphResourceHandle voxelOccupancy       = InvalidGraphResource;
     GraphResourceHandle bakedBoundMin        = InvalidGraphResource;
     GraphResourceHandle bakedBoundMax        = InvalidGraphResource;

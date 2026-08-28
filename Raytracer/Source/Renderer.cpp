@@ -91,11 +91,12 @@ static AutoCVarFloat g_uvCoordX("renderer.uv.x", "Texture uv x offset", 0.0f, CV
 static AutoCVarFloat g_uvCoordY("renderer.uv.y", "Texture uv y offset", 0.0f, CVarFlags::EditDrag, 0.0f, 1.0f);
 static AutoCVarFloat3 g_cameraPos("renderer.camera.position", "Camera world position", {0.0f, 0.0f, -10.0f});
 static AutoCVarFloat3 g_cameraRot("renderer.camera.rotation", "Camera rotation (pitch, yaw, roll) degrees", {0.0f, 0.0f, 0.0f});
-// Opt-in stripped raygen (debug-view code compiled out). Measured SLOWER on
-// the current AMD RDNA driver (see the variant-sync block in Update); kept for
-// A/Bs on other vendors/drivers where the dead-code footprint may win.
+// Opt-in stripped raygen (debug-view code compiled out). Originally measured
+// slower on this RDNA driver, which is why it is opt-in; the 2026-08-23 re-measure
+// no longer reproduces that (see the variant-sync block in Update). Kept opt-in
+// until a re-run says the default should move.
 static AutoCVarInt g_raygenCleanVariant("renderer.raygenCleanVariant",
-	"1 = compile raygen without debug-view code (measured slower on RDNA)", 0, CVarFlags::EditCheckbox);
+	"1 = compile raygen without debug-view code", 0, CVarFlags::EditCheckbox);
 // Thread-coherence swizzle (ADR 0020 R2): remaps launch index to pixel in Morton
 // order inside a tile so a wave shades a compact block. Bit-exact — the mapping is
 // a bijection — so a quality change under this lever means the remap is broken.
@@ -173,47 +174,29 @@ static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence wei
 static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer",
 	"SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
-// ADR 0009: 1 = the guided GI's BSDF MIS subtree writes the VPL fitting data
-// (last-frame reuse, supplemental 2's own pattern) and the injection pass
-// shrinks to a ShadingPoints writer; 0 = SIByL-shipped dedicated injection trace.
-static AutoCVarInt g_injectionReuseGi("vxpg.injection.reuseGiSamples",
-	"Fit the guide from last frame's GI BSDF samples instead of a dedicated injection trace",
-	1, CVarFlags::EditCheckbox);
-// Default = power: the ported integrator (vxguiding-gi strategy 5) hardcodes
-// power-heuristic squaring; balance stays available as a variance experiment.
-static AutoCVarInt   g_guidingPowerMis("guiding.powerMis", "MIS heuristic: 0 = balance, 1 = power", 1, CVarFlags::EditCheckbox);
+// Supplemental Sec. 2's biased shortcut, made measurable: 1 = the light-injection
+// sample doubles as the guided integrator's BSDF MIS sample IN THE SAME FRAME, so
+// the guiding pdf is conditioned on the very sample it weights. Halves the BSDF ray
+// budget (2 chains per pixel instead of 3) and is knowingly biased. 0 = the
+// integrator traces its own, independent BSDF sample — the supplemental's second
+// remedy, and unbiased. SIByL ships the same switch as UNBIASED_LIGHT_INJECTION.
+// Rides guidingFlags bit 8.
+static AutoCVarInt   g_injectionReuseInMis("vxpg.injection.reuseInMis",
+	"Reuse this frame's light-injection sample as the BSDF MIS sample (biased, 1 fewer ray chain)", 0,
+	CVarFlags::EditCheckbox);
 // Bottom light-tree branch weighting (guidedPathTracing.hlsl FirstChildProb).
 // 0 = intensity-only (telescoping reverse pdf, the shipped SIByL strategy-5
 // default); 1 = SIByL SLC geometry bound + avg-minmax distance (the paper's
-// distanceType==2); 2 = same but the CHEAP GeomTermBoundApproximate (drops the
-// tangent frame + two 8-corner passes, ~1/5 the per-node geometry cost). Modes
-// 1/2 make the within-cluster voxel pick account for solid angle + orientation,
-// at the cost of a non-telescoping leaf->root reverse pdf walk per BSDF-MIS
-// query. Rides guidingFlags bits 5-6.
+// distanceType==2); 2 = same but the cheaper GeomTermBoundApproximate (drops the
+// tangent frame + two 8-corner passes). Modes 1/2 make the within-cluster voxel
+// pick account for solid angle + orientation, at the cost of a non-telescoping
+// leaf->root reverse pdf walk per BSDF-MIS query. Measured 2026-08-23 (veach-ajar
+// Deep Light, b1): 4.55 / 6.40 / 5.31 ms for modes 0 / 1 / 2, so the approximate
+// bound removes under 60% of the exact one's marginal cost — cheaper, not the
+// 5x the name suggests. Rides guidingFlags bits 5-6.
 static AutoCVarInt   g_guidingTreeWeightMode("vxpg.tree.weightMode",
 	"Bottom light-tree weighting: 0 = intensity-only, 1 = geometry exact + dist (paper), 2 = geometry approx + dist (cheap)",
 	0, CVarFlags::EditDrag, 0, 2);
-// Second-bounce guiding (SIByL strategy-6 `second=true`, guidedPathTracing.hlsl
-// ShadeSecondVertex). MIS-guides the second path vertex via the global voxel
-// irradiance guide, turning the BSDF branch into a 2-bounce guided path.
-// Meaningful only at bounces >= 2; default off. Rides guidingFlags bit 7.
-static AutoCVarInt   g_guidingSecondBounce("vxpg.secondBounce",
-	"Also MIS-guide the second path vertex (SIByL second=true); needs bounces >= 2", 0, CVarFlags::EditCheckbox);
-// One-sample MIS at the first vertex (ADR 0015, deviation from SIByL's
-// two-sample MIS): a fair coin picks EITHER the BSDF or the guide strategy
-// per sample and only that branch traces — halves the GI raygen's trace work
-// at higher per-sample variance. Debug views keep the two-sample estimator.
-// Rides guidingFlags bit 8.
-static AutoCVarInt   g_guidingOneSampleMis("vxpg.oneSampleMis",
-	"One-sample MIS: trace one stochastically-picked strategy per sample instead of both", 0,
-	CVarFlags::EditCheckbox);
-// Adaptive per-tile selection probability for one-sample MIS (ADR 0015):
-// learned from the previous frame's per-strategy contribution shares —
-// where one strategy dominates, one-sample loses almost no variance there.
-// Rides guidingFlags bit 9; 0 = fixed fair coin.
-static AutoCVarInt   g_guidingOneSampleAdaptiveQ("vxpg.oneSample.adaptiveQ",
-	"Adaptive per-tile strategy-selection probability for one-sample MIS; 0 = fixed 0.5", 1,
-	CVarFlags::EditCheckbox);
 static AutoCVarFloat g_indirectSkyClamp("pathtracing.indirectSkyClamp",
 	"Clamp indirect-bounce skybox radiance to suppress HDR-sun fireflies for benchmark convergence. 0 = disabled (unbiased)",
 	0.0f, CVarFlags::EditDrag, 0.0f, 1000.0f);
@@ -227,6 +210,13 @@ static AutoCVarInt   g_indirectOnly("pathtracing.indirectOnly",
 	CVarFlags::EditCheckbox);
 static AutoCVarInt   g_skyLighting("pathtracing.skyLighting",
 	"Skybox radiance lights surfaces via indirect rays; 0 = sky is background-only (benchmark isolation: the VXPG guide only targets direct-lit surfaces)",
+	1, CVarFlags::EditCheckbox);
+// Emissive triangles are authored into materials, so without this an analytic light
+// added to a scene that has emitters JOINS them and the measurement compares one
+// source against two. Turning them off is what lets the light type be substituted
+// rather than supplemented, which is the whole premise of the K2 comparison.
+static AutoCVarInt   g_emissiveGeometry("pathtracing.emissiveGeometry",
+	"Emissive triangles light the scene; 0 = they emit nothing and leave the light pool, so an analytic light replaces them instead of joining them",
 	1, CVarFlags::EditCheckbox);
 
 // A lever may demand a shader profile (ADR 0020 R7). Refuse one the driver cannot
@@ -495,11 +485,13 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		OnShaderReload();
 	}
 
-	// Debug-view shader variant sync. Default keeps the view code compiled in:
-	// measured FASTER on the current AMD RDNA driver (interleaved A/B veach-ajar
-	// Deep Light 3s: views-in PT 3884/3874/3823, VXPG 833/826/832 vs stripped
-	// PT 3653/3656/3588/3556, VXPG 762/764/763/760 — stripping costs 6-8%,
-	// suspected driver wave-size heuristic flip, cf. ADR 0011 wave64 -5%).
+	// Debug-view shader variant sync. Default keeps the view code compiled in.
+	// That default came from an interleaved A/B on 2026-08 that put stripping at
+	// 6-8% slower on this RDNA driver; re-measured 2026-08-23 (same scene/state,
+	// veach-ajar Deep Light, 1920x1080, b1, skyLighting off, 3s x 3 rounds) the
+	// effect is gone: PT 3150 vs 3152 frames/3s, VXPG 651 vs 662 — a wash on PT
+	// and slightly in favour of stripping on VXPG. Both readings are below what
+	// separates two builds of this raygen, so the default stays where it is.
 	// renderer.raygenCleanVariant=1 opts into the stripped raygen for vendor
 	// A/Bs; an active debug-view CVar always forces the view code in. A
 	// transition swaps the sidecar (GetTechniqueDesc) and goes through the full
@@ -553,6 +545,10 @@ void Renderer::Update(double elapsedTime, double totalTime)
 		m_scene->RebuildLightPoolAnalyticTail(*this);
 		m_scene->ClearLightDataDirty();
 	}
+	// Same reason as above: this also rebuilds the pool, and it is a no-op unless the
+	// CVar actually moved. The pass-constant half of the switch is filled below from
+	// the same CVar, so the pool and the estimator can never hold different answers.
+	m_scene->SetEmissiveGeometryEnabled(*this, g_emissiveGeometry.Get() != 0);
 
 	m_passConstants->data.uvCoordX = g_uvCoordX.Get();
 	m_passConstants->data.uvCoordY = g_uvCoordY.Get();
@@ -560,13 +556,13 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.numBounces = g_numBounces.Get();
 	m_passConstants->data.numSamplesPerPixel = g_numSamplesPerPixel.Get();
 	m_passConstants->data.frameIndex++;
+	// Bit 0 is free: it carried the power-heuristic switch until the heuristic was
+	// removed. The other fields keep their positions rather than shifting down, so
+	// no shader mirror has to move with them.
 	m_passConstants->data.guidingFlags =
-		((g_guidingPowerMis.Get() != 0) ? 1u : 0u) |
 		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 15u) << 1) |
 		((static_cast<uint32_t>(g_guidingTreeWeightMode.Get()) & 3u) << 5) |
-		((g_guidingSecondBounce.Get() != 0 ? 1u : 0u) << 7) |
-		((g_guidingOneSampleMis.Get() != 0 ? 1u : 0u) << 8) |
-		((g_guidingOneSampleAdaptiveQ.Get() != 0 ? 1u : 0u) << 9) |
+		((g_injectionReuseInMis.Get() != 0 ? 1u : 0u) << 8) |
 		((g_indirectOnly.Get() != 0 ? 1u : 0u) << 12);
 	static_assert(static_cast<int>(GuidingDebugView::SymmetricBsdfBaseline) <= 15, "GuidingDebugView must fit in 4 bits of guidingFlags");
 	const auto& camPos = m_camera->GetPosition();
@@ -577,6 +573,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	m_passConstants->data.vbufferJitterEnabled = (g_vbufferJitter.Get() != 0) ? 1u : 0u;
 	m_passConstants->data.indirectSkyClamp = g_indirectSkyClamp.Get();
 	m_passConstants->data.skyLightingEnabled = (g_skyLighting.Get() != 0) ? 1u : 0u;
+	m_passConstants->data.emissiveGeometryEnabled = (g_emissiveGeometry.Get() != 0) ? 1u : 0u;
 	m_passConstants->data.lightPoolCount = m_scene->GetLightPoolCount();
 	m_passConstants->data.lightPoolTotalPower = m_scene->GetLightPoolTotalPower();
 	m_passConstants->Map(m_graphicsDevice->GetFrameIndex());
@@ -1193,6 +1190,22 @@ void Renderer::SetTechniqueByIndex(int index)
 	if (index < 0 || index >= static_cast<int>(registry.size()))
 		return;
 	spdlog::info("Switching render technique to: {}", registry[index].name);
+
+	// Wait for every submitted frame before anything below runs. Two of the steps
+	// are unsafe against a frame still executing: Initialize overwrites the
+	// shader-visible RaytraceOutput descriptor that in-flight frames read their
+	// output image through, and the move destroys the outgoing technique — its
+	// output texture, DXR state object and SBT — while a DispatchRays referencing
+	// them may still be running. Frame pacing only guarantees the ONE slot about
+	// to be reused is idle, which is not enough here. The symptom was a device
+	// removal ~100 ms after an interactive VXPG -> PT switch, reported as a hang
+	// with no page fault: the freed heap pages are still resident, so the SBT the
+	// GPU walks is recycled memory rather than an unmapped address.
+	// Headless never hit it because its capture readback serialises the frame
+	// immediately before the switch. Same rule as the grid-resize and scene-load
+	// paths, which flush for exactly this reason.
+	FlushCommandQueue();
+
 	auto newTechnique = registry[index].create();
 	WireTechniqueResources(newTechnique);
 	newTechnique->Initialize(g_device, m_d3d12CommandList, m_scene, m_passConstants);
@@ -1286,12 +1299,11 @@ void Renderer::ApplyRenderConfig(const HeadlessConfig& config)
 	g_lift.Set(config.lift);
 	g_indirectSkyClamp.Set(config.indirectSkyClamp);
 	g_skyLighting.Set(config.skyLighting ? 1 : 0);
+	g_emissiveGeometry.Set(config.emissiveGeometry ? 1 : 0);
+	g_injectionReuseInMis.Set(config.injectionReuseInMis ? 1 : 0);
+	g_indirectOnly.Set(config.indirectOnly ? 1 : 0);
 	g_guidingDebugView.Set(static_cast<GuidingDebugView>(config.guidingDebugView));
 	g_guidingTreeWeightMode.Set(static_cast<int32_t>(config.treeWeightMode));
-	g_guidingSecondBounce.Set(config.secondBounce ? 1 : 0);
-	g_guidingOneSampleMis.Set(config.oneSampleMis ? 1 : 0);
-	g_guidingOneSampleAdaptiveQ.Set(config.oneSampleAdaptiveQ ? 1 : 0);
-	g_injectionReuseGi.Set(config.injectionReuse ? 1 : 0);
 	// Headless timed capture integrates over the armed window, so temporal
 	// accumulation MUST be on — otherwise every capture is a single frame and
 	// --seconds only burns wall-time (the camera is static, so nothing resets it).
@@ -1340,25 +1352,7 @@ void Renderer::BuildVxpgGraph()
 	if (!FrameUsesVoxelGuiding() || !m_voxelizationPass || !m_scene)
 		return;
 
-	// Debug views suppress the BSDF subtree whose bounce writes the VPL data,
-	// which would starve the guide within two frames — fall back to the
-	// dedicated injection trace whenever one is active. The symmetric baseline
-	// (view 15) is exempt: its BSDF sample always traces and writes VPLs, so
-	// reuse stays on and its frame cost matches the full integrator's.
-	// Same reasoning one level up: only a technique that traces GI paths has
-	// anything to reuse. Rasterization reaches here for its VXPG debug views and
-	// traces nothing, so reuse would leave the irradiance grid permanently zero.
-	// A buffer view skips the integrator, so nothing would write the VPLs reuse
-	// waits for — same reasoning as ProducesGuidingVpls, one level further out.
-	const bool reuseGiVpl = g_injectionReuseGi.Get() != 0 &&
-		!DebugViewPass::IsActive() &&
-		m_technique->ProducesGuidingVpls() &&
-		(g_guidingDebugView.Get() == GuidingDebugView::None ||
-		 g_guidingDebugView.Get() == GuidingDebugView::SymmetricBsdfBaseline);
-	m_voxelizationPass->SetRuntimeParams(
-		g_voxelInjectUseAvg.Get() != 0,
-		g_voxelHeatScale.Get(),
-		reuseGiVpl);
+	m_voxelizationPass->SetRuntimeParams(g_voxelInjectUseAvg.Get() != 0, g_voxelHeatScale.Get());
 
 	// A grid resize destroys grid-sized resources that in-flight frames may
 	// still reference — wait for the GPU before recreating anything. Clamp the
@@ -1407,6 +1401,8 @@ void Renderer::BuildVxpgGraph()
 		m_vxpg.shadingPoints       = importRaw(m_lightInjectionPass->GetShadingPointsTexture().Get(), "VXPG ShadingPoints");
 		m_vxpg.voxelRepresentative = importRaw(m_lightInjectionPass->GetVoxelRepresentativeTexture().Get(), "VXPG VoxelRepresentative");
 		m_vxpg.vplPosition         = importRaw(m_lightInjectionPass->GetVplPositionTexture().Get(), "VXPG VplPosition");
+		m_vxpg.vplRadiance         = importRaw(m_lightInjectionPass->GetVplRadianceTexture().Get(), "VXPG VplRadiance");
+		m_vxpg.vplEmitter          = importRaw(m_lightInjectionPass->GetVplEmitterTexture().Get(), "VXPG VplEmitter");
 	}
 	if (m_voxelGuidingBuildPass)
 	{
@@ -1491,19 +1487,18 @@ void Renderer::BuildVxpgGraph()
 			[this]() { m_voxelizationPass->DispatchBake(*m_scene); });
 	}
 
-	// Faithful config: wipe the injection accumulators up front, the injection trace
-	// refills them this frame. Reuse config wipes after the guiding build instead
-	// (below) — those passes consume last frame's GI-written VPL data first.
-	if (!reuseGiVpl)
-	{
-		m_renderGraph.AddPass("VXPG InjectionClear",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.Write(m_vxpg.voxelIrradiance, kUavWrite);
-				pass.Write(m_vxpg.voxelVplCount, kUavWrite);
-			},
-			[this]() { m_voxelizationPass->DispatchFrameClear(); });
-	}
+	// Every frame stands alone: wipe the injection accumulators up front and let
+	// this frame's injection trace refill them. The guide is rebuilt from scratch
+	// each frame, which is what the paper claims for the method ("does not rely on
+	// temporal information", Sec. 4) and what keeps the integrator composable with
+	// resampling schemes that own the temporal axis themselves.
+	m_renderGraph.AddPass("VXPG InjectionClear",
+		[&](RenderGraphPassBuilder& pass)
+		{
+			pass.Write(m_vxpg.voxelIrradiance, kUavWrite);
+			pass.Write(m_vxpg.voxelVplCount, kUavWrite);
+		},
+		[this]() { m_voxelizationPass->DispatchFrameClear(); });
 
 	// Stage 2: shared VBuffer (one jittered primary per pixel, ADR 0004), then
 	// light injection reconstructing its first vertex from it (also emits the
@@ -1848,20 +1843,6 @@ void Renderer::BuildVxpgGraph()
 			[this]() { m_lightTreePass->RunTopLevel(); });
 	}
 
-	// Reuse config (ADR 0009): the build above consumed last frame's VPL data;
-	// wipe the accumulators now so the guided GI raygen refills them fresh. Its
-	// consumer is next frame's build, which culling cannot see.
-	if (reuseGiVpl)
-	{
-		m_renderGraph.AddPass("VXPG InjectionClear",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.NeverCull();
-				pass.Write(m_vxpg.voxelIrradiance, kUavWrite);
-				pass.Write(m_vxpg.voxelVplCount, kUavWrite);
-			},
-			[this]() { m_voxelizationPass->DispatchFrameClear(); });
-	}
 }
 
 // ADR 0017 step A: the technique -> accumulate -> tonemap -> copy chain declares

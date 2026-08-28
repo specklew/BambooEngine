@@ -50,29 +50,33 @@ struct HeadlessConfig
     // only (default); 1 = geometry + avg-minmax distance (the paper's SLC term).
     uint32_t treeWeightMode = 0;
 
-    // Second-bounce guiding (vxpg.secondBounce, SIByL second=true). Guides the
-    // 2nd vertex too; a 2-bounce guided estimator. Default off; needs bounces>=2.
-    bool secondBounce = false;
+    // Supplemental Sec. 2's biased shortcut (vxpg.injection.reuseInMis). Default
+    // false = the integrator traces its own BSDF sample and stays unbiased.
+    bool injectionReuseInMis = false;
 
-    // One-sample MIS (vxpg.oneSampleMis, ADR 0015): trace one stochastically-
-    // picked strategy per sample instead of both. Default off (two-sample,
-    // SIByL-faithful).
-    bool oneSampleMis = false;
+    // Indirect illumination only (pathtracing.indirectOnly). It lives here rather
+    // than only on the command line because it changes WHICH INTEGRAL is rendered:
+    // a reference image and the arms scored against it must share it, and a
+    // mismatch shows up as both arms being equally wrong with nothing in the table
+    // to reveal it. Making it a property of the config file makes it a property of
+    // the (scene, light rig) pair, which is exactly the unit a reference belongs to.
+    bool indirectOnly = false;
 
-    // Adaptive per-tile selection probability for one-sample MIS
-    // (vxpg.oneSample.adaptiveQ). Only meaningful with oneSampleMis true.
-    bool oneSampleAdaptiveQ = true;
-
-    // Injection reuse from GI BSDF samples (vxpg.injection.reuseGiSamples,
-    // ADR 0009). false = dedicated injection pass every frame.
-    bool injectionReuse = true;
+    // Emissive triangles light the scene (pathtracing.emissiveGeometry). Here for the
+    // same reason as indirectOnly: switching the scene's own emitters off changes
+    // which integral is rendered, so the reference image and every arm scored against
+    // it have to agree on it, and it belongs to the (scene, light rig) pair.
+    bool emissiveGeometry = true;
 
     float       defaultSeconds = 5.0f;
     std::string outputDir      = "SavedUserData/Screenshots";
 
-    // When non-empty, these replace the scene's glTF/default lights for the run.
-    // Empty => keep whatever lights the loaded scene provides.
+    // When the config names a "lights" array, it replaces the scene's glTF/default
+    // lights for the run — an EMPTY array included, which is how a measurement asks
+    // for a scene lit by its emissive geometry alone. Key absent => keep whatever
+    // lights the loaded scene provides.
     std::vector<HeadlessLight> lights;
+    bool                       lightsSpecified = false;
 };
 
 // Per-run intent parsed from the command line.
@@ -95,9 +99,9 @@ struct HeadlessArgs
     // --images M: M INDEPENDENT images in one process, accumulation reset between
     // them while the frame counter (and so the RNG stream) runs on. The spread
     // across them is the measurement's error bar, which a single capture cannot
-    // give. The guide is deliberately NOT reset: VXPG carries temporal state
-    // (ADR 0009 injection reuse, adaptive q, superpixels) and we measure it in
-    // steady state, so images share a guide and are not fully independent.
+    // give. They really are independent now that nothing is carried between frames:
+    // the guide is rebuilt from scratch every frame, so two images differ only by
+    // their RNG stream.
     uint32_t images = 1;
 
     // --checkpoints log:K | every:N | list:a,b,c. Images written DURING one
@@ -145,7 +149,7 @@ struct HeadlessArgs
     // small interior and leaves Sponza black.
     std::string configPath;
 
-    // --cvar-matrix "renderer.numBounces=1,2,4;vxpg.oneSampleMis=0,1": a sweep over
+    // --cvar-matrix "renderer.numBounces=1,2,4;vxpg.treeWeightMode=0,1": a sweep over
     // the CROSS PRODUCT of these, measured inside ONE process. These are runtime
     // CVars — no shader recompile, no pipeline rebuild — so a settings point costs a
     // re-arm rather than a process launch, and at short budgets the launch was 95% of

@@ -124,10 +124,12 @@ public:
 	
 	inline static Microsoft::WRL::ComPtr<ID3D12Device5> g_device;
 
-	// Headless (benchmark) runs disable the D3D12 debug layer: its per-submit
-	// validation of a fat-root-signature compute Dispatch costs ~100 ms/frame
-	// (measured 2026-07-16, inline-RQ integrator) and taxes DispatchRays and
-	// Dispatch unevenly, skewing equal-time comparisons. Must be set before
+	// Headless (benchmark) runs disable the D3D12 debug layer. It also switches on
+	// GPU-based validation (ENABLE_GPU_BASED_VALIDATION, GraphicsDevice.cpp), and
+	// the pair is not a tax a measurement can absorb: the inline-RQ integrator on
+	// veach-ajar Deep Light goes 5.1 ms -> 1118.5 ms per frame with it on (measured
+	// 2026-08-23). It also taxes DispatchRays and Dispatch unevenly, so it skews
+	// equal-time comparisons on top of slowing them. Must be set before
 	// Initialize(). Interactive Debug builds keep the layer.
 	inline static bool g_enableDebugLayer = true;
 

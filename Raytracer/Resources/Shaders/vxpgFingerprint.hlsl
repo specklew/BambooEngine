@@ -1,5 +1,7 @@
-// VXPG fingerprint pass — the MRCS "column reduction" that gives every lit
-// voxel a 128-bit visibility signature. Two kernels:
+// VXPG fingerprint pass — MRCS row sampling (Hasan et al. 2007): a handful of
+// representative shading points are evaluated against every voxel, so each voxel
+// ends up with the "reduced column" the cluster pass then groups on. Here that
+// column is a 128-bit visibility signature. Two kernels:
 //
 //   SampleScreenRepresentatives  (port of svoxel/row-presample.slang)
 //     Picks 128 stratified screen points (16x8 grid, one random pick per cell)
@@ -19,10 +21,14 @@
 
 #define FINGERPRINT_REPRESENTATIVE_COUNT 128  // 16 x 8 stratified screen samples
 #define FINGERPRINT_MASK_WORDS 4              // 128 bits / 32
-// Retries inside the stratification cell, then anywhere on screen. A cell that
-// is entirely background cannot be rescued locally — on the staircase view the
-// top four cell rows are all sky, which pinned exactly 64 of 128 representatives
-// as invalid however often the cell was resampled.
+#define FINGERPRINT_ROWS_PER_GROUP 8          // numthreads.y: voxels handled per group
+// Retries inside the stratification cell, then anywhere on screen. A cell that is
+// entirely background cannot be rescued locally, which is what the global pass
+// below is for. (An earlier note here blamed the staircase view's sky rows for
+// pinning 64 of 128 representatives; that reading came from the wave-width bug in
+// the packing below, which halved every reported count. Measured 2026-08-23 after
+// the fix: staircase resolves 127 of 128 with cell retries alone and 128 with the
+// global pass.)
 #define FINGERPRINT_PRESAMPLE_ATTEMPTS 16u
 #define FINGERPRINT_PRESAMPLE_GLOBAL_ATTEMPTS 16u
 
@@ -58,9 +64,10 @@ void SampleScreenRepresentatives(uint3 tid : SV_DispatchThreadID)
     // blind pick spends the representative on the sky whenever the cell is mostly
     // background, and a sky representative is not a receiver: it contributes no
     // bit to any voxel's fingerprint, so the 128-bit signature silently narrows.
-    // Measured before this loop: only 9.6 of 128 representatives were valid on
-    // ABeautifulGame and 64 of 128 on the staircase, which is where most of the
-    // clustering signal was going.
+    // Measured 2026-08-23 with the loop disabled
+    // (vxpg.fingerprint.retryPresample=0): 18 of 128 valid on ABeautifulGame and
+    // 127 of 128 on the staircase. With it on: 120 and 128. ABeautifulGame is
+    // where the stratified blind pick was throwing the clustering signal away.
     const uint seed = pcg_hash((flattenId * 9781u + gRandSeed * 26699u) | 1u);
     const float2 cellSize = float2(gResolution) / float2(16.0, 8.0);
 
@@ -140,6 +147,14 @@ static const float FINGERPRINT_RAY_EPSILON = 0.01;
 #define FINGERPRINT_PROBE_NO_FACING       1 // occlusion only
 #define FINGERPRINT_PROBE_NO_OCCLUSION    2 // facing only
 #define FINGERPRINT_PROBE_RECEIVER_VALID  3 // how many representatives hit a surface at all
+// Mode 4 tests the PACKING, not the scene: every live lane votes visible, so a
+// correct pass reports a mean popcount of exactly 128.0 on any scene with at
+// least one lit voxel. Anything lower means mask words are not reaching their
+// voxel — which is how the 2026-08-23 wave-width bug presented (a flat 64.0,
+// half the voxels never written). Run it as:
+//   --cvar vxpg.fingerprint.probe=4 --cvar vxpg.cluster.dumpStats=1
+// and read the "mean fingerprint popcount" line.
+#define FINGERPRINT_PROBE_PACKING         4 // structural self-test: must report 128.0
 
 cbuffer VisibilityCB : BAMBOO_PASS_CBV(FINGERPRINT_VISIBILITY_REG_CB)
 {
@@ -149,15 +164,30 @@ cbuffer VisibilityCB : BAMBOO_PASS_CBV(FINGERPRINT_VISIBILITY_REG_CB)
     uint _visibilityPad2;
 }
 
+// One 32-bit mask word per (voxel row, representative group). Packed through
+// groupshared rather than WaveActiveBallot: a ballot's bit i is LANE i, and a
+// wave wider than the group's x extent straddles two voxel rows, so lane 32+
+// would vote into a neighbouring voxel's word and WaveIsFirstLane would leave
+// that voxel unwritten. numthreads.x is the packing width by construction here,
+// which no driver wave-size choice can change.
+groupshared uint sFingerprintWord[FINGERPRINT_ROWS_PER_GROUP];
+
 [numthreads(32, 8, 1)]
-[WaveSize(32)]
-void BuildVoxelFingerprints(uint3 tid : SV_DispatchThreadID)
+void BuildVoxelFingerprints(uint3 tid : SV_DispatchThreadID, uint3 groupThreadId : SV_GroupThreadID)
 {
+    const uint row = groupThreadId.y;
+    const uint bit = groupThreadId.x;        // 0..31 within this representative word
+    if (bit == 0u)
+        sFingerprintWord[row] = 0u;
+    GroupMemoryBarrierWithGroupSync();
+
     const uint compactID = tid.y;            // lit voxel (SIByL DTid.y)
     const uint litVoxelCount = gReadDispatchArgs[0].w;
-    if (compactID >= litVoxelCount) return;  // over-dispatch early-out (option b)
+    // Over-dispatched rows fold into the vote as "not visible" instead of
+    // returning: the group-wide barriers below must stay uniform.
+    const bool rowIsLive = compactID < litVoxelCount;
 
-    const float4 lightPoint = gCompactVoxelLightPoints[compactID];
+    const float4 lightPoint = rowIsLive ? gCompactVoxelLightPoints[compactID] : float4(0, 0, 0, 0);
     const float3 lightPointPosition = lightPoint.xyz;
     const float3 lightPointNormal = Unorm32OctahedronToUnitVector(asuint(lightPoint.w));
 
@@ -183,18 +213,17 @@ void BuildVoxelFingerprints(uint3 tid : SV_DispatchThreadID)
                                 dot(lightPointNormal, toReceiver) >= 0.0 &&
                                 dot(receiverNormal, -toReceiver) >= 0.0;
 
-    if (gFingerprintProbe == FINGERPRINT_PROBE_RECEIVER_VALID)
-    {
-        const uint4 validMask = WaveActiveBallot(receiverIsValid);
-        if (WaveIsFirstLane())
-            gVoxelFingerprints[compactID * FINGERPRINT_MASK_WORDS + representativeIndex / 32u] = validMask.x;
-        return;
-    }
+    const bool probeReceiverValid = (gFingerprintProbe == FINGERPRINT_PROBE_RECEIVER_VALID);
+    const bool probePacking       = (gFingerprintProbe == FINGERPRINT_PROBE_PACKING);
 
-    visible = receiverIsValid && hasDistance &&
-              (facesEachOther || gFingerprintProbe == FINGERPRINT_PROBE_NO_FACING);
+    visible = rowIsLive &&
+              (probePacking ||
+               (receiverIsValid &&
+                (probeReceiverValid ||
+                 (hasDistance && (facesEachOther || gFingerprintProbe == FINGERPRINT_PROBE_NO_FACING)))));
 
-    if (visible && gFingerprintProbe != FINGERPRINT_PROBE_NO_OCCLUSION)
+    if (visible && !probeReceiverValid && !probePacking &&
+        gFingerprintProbe != FINGERPRINT_PROBE_NO_OCCLUSION)
     {
         RayDesc ray;
         ray.Origin = lightPointPosition + lightPointNormal * FINGERPRINT_RAY_EPSILON;
@@ -215,11 +244,13 @@ void BuildVoxelFingerprints(uint3 tid : SV_DispatchThreadID)
             visible = false;
     }
 
-    // 32 lanes (one representative-word) vote; lane 0 writes the packed word.
-    const uint4 visibilityMask = WaveActiveBallot(visible);
-    if (WaveIsFirstLane())
+    if (visible)
+        InterlockedOr(sFingerprintWord[row], 1u << bit);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (bit == 0u && rowIsLive)
     {
         const uint maskWordIndex = representativeIndex / 32u;
-        gVoxelFingerprints[compactID * FINGERPRINT_MASK_WORDS + maskWordIndex] = visibilityMask.x;
+        gVoxelFingerprints[compactID * FINGERPRINT_MASK_WORDS + maskWordIndex] = sFingerprintWord[row];
     }
 }

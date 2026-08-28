@@ -74,7 +74,7 @@ public:
     // is logged; the first one wins so the build stays deterministic.
     static std::string TargetForKey(const std::string& key);
 
-    // "-D GUIDING_DEBUG_VIEWS=0 -D ONE_SAMPLE_MIS=1" for a key produced above.
+    // "-D GUIDING_DEBUG_VIEWS=0" for a key produced above.
     // Static because the shader loader resolves a key long after the frame that
     // built it, and must not depend on the levers' state having stayed put.
     static std::string DefinesForKey(const std::string& key);

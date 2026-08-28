@@ -57,13 +57,6 @@ public:
     // declares, not from a stage order maintained here.
     virtual bool UsesVoxelGuiding() const { return false; }
 
-    // True when this technique's own paths write the VPL data light injection
-    // would otherwise trace for itself (ADR 0009 reuse). A technique that traces
-    // no GI paths must answer false, or injection skips its dedicated trace and
-    // waits forever for VPLs nothing produces — which is exactly what left the
-    // rasterized VoxelIrradiance view black.
-    virtual bool ProducesGuidingVpls() const { return false; }
-
     // PassConstants::debugMode carries a different enumeration depending on which
     // technique is active — raster views and raytracing views are separate lists
     // over the same field, so the technique that interprets it supplies it.

@@ -386,8 +386,12 @@ std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const Asse
         if (emissiveRadiance.x != 0.0f || emissiveRadiance.y != 0.0f || emissiveRadiance.z != 0.0f)
         {
             primitive->m_emissiveBakePositions.reserve(primVertices.size());
+            primitive->m_emissiveBakeUvs.reserve(primVertices.size());
             for (const Vertex& v : primVertices)
+            {
                 primitive->m_emissiveBakePositions.push_back(v.Pos);
+                primitive->m_emissiveBakeUvs.push_back(v.Tex0);
+            }
             primitive->m_emissiveBakeIndices = primIndices;
         }
 

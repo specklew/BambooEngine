@@ -232,11 +232,10 @@ void VoxelizationPass::WriteVplCountUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) cons
     WriteUintTex3DUav(m_vplCountTex.Get(), dest);
 }
 
-void VoxelizationPass::SetRuntimeParams(bool injectUseAvg, float heatScale, bool reuseGiVpl)
+void VoxelizationPass::SetRuntimeParams(bool injectUseAvg, float heatScale)
 {
     m_gridConstants.injectUseAvg = injectUseAvg ? 1u : 0u;
     m_gridConstants.heatScale    = heatScale;
-    m_gridConstants.reuseGiVpl   = reuseGiVpl ? 1u : 0u;
     WriteGridConstantsCB();
 }
 

@@ -12,7 +12,7 @@ cbuffer PassConstants : BAMBOO_CBV(FRAME_REG_PASS_CONSTANTS)
     uint samplesPerPixel;
     uint numBounces;
     uint frameIndex;
-    uint guidingFlags; // bit 0 = power MIS heuristic (also fills the implicit pad before float3)
+    uint guidingFlags; // bit 0 free since the power heuristic went (also fills the implicit pad before float3)
     float3 cameraWorldPos;
     // 1 = apply per-pixel sub-pixel jitter to the shared VBuffer primaries; the
     // jitter itself is derived per pixel from (pixel, frameIndex) in-shader.
@@ -27,6 +27,10 @@ cbuffer PassConstants : BAMBOO_CBV(FRAME_REG_PASS_CONSTANTS)
     // surfaces only (injection deposits SampleDirectLight), so sky-driven
     // indirect is unguidable variance in both techniques.
     uint skyLightingEnabled;
+    // 1 = emissive triangles light the scene (default); 0 = they emit nothing and
+    // carry no weight in the light pool, so an analytic light REPLACES the scene's
+    // own emitters instead of joining them. Mirrored by Include/Utils/PassConstants.h.
+    uint emissiveGeometryEnabled;
     uint  lightPoolCount;
     float lightPoolTotalPower;
 }

@@ -33,7 +33,9 @@ TechniqueDesc LightInjectionPass::GetTechniqueDesc() const
         {L"InjectHitGroup", L"InjectHit", L"InjectAnyHit"},
         {L"ShadowHitGroup", L"",          L"ShadowHit"},
     };
-    desc.maxPayloadSize    = 9 * sizeof(float); // InjectPayload: 2x float3 + 3x uint
+    // InjectPayload: hitPosition + result + shadedDirect + emitterLe (4x float3),
+    // emitterNeePdf (float), flags/seed/bounce (3x uint).
+    desc.maxPayloadSize    = 16 * sizeof(float);
     desc.maxAttributeSize  = 2 * sizeof(float);
     desc.maxRecursionDepth = 3; // -> hit -> shadow ray
     return desc;
@@ -59,6 +61,12 @@ constexpr BindingSlot kVoxelRepresentative = Accesses(
 constexpr BindingSlot kVplPosition = Accesses(
     PassTableEntry("gVplPosition", BindingKind::Uav, INJECT_REG_VPL_POSITION, GlobalDescriptor::VplPosition),
     GraphAccess::ComputeWrite);
+constexpr BindingSlot kVplRadiance = Accesses(
+    PassTableEntry("gVplRadiance", BindingKind::Uav, INJECT_REG_VPL_RADIANCE, GlobalDescriptor::VplRadiance),
+    GraphAccess::ComputeWrite);
+constexpr BindingSlot kVplEmitter = Accesses(
+    PassTableEntry("gVplEmitter", BindingKind::Uav, INJECT_REG_VPL_EMITTER, GlobalDescriptor::VplEmitter),
+    GraphAccess::ComputeWrite);
 constexpr BindingSlot kVBuffer = Accesses(
     PassTableEntry("gVBuffer", BindingKind::Uav, INJECT_REG_VBUFFER, GlobalDescriptor::VBuffer),
     GraphAccess::UnorderedAccessRead);
@@ -66,7 +74,8 @@ constexpr BindingSlot kVBuffer = Accesses(
 constexpr BindingSlot kVoxelGridConstants = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
 
 constexpr BindingSlot kInjectionSlots[] = {
-    kVoxelIrradiance, kVoxelVplCount, kShadingPoints, kVoxelRepresentative, kVplPosition, kVBuffer};
+    kVoxelIrradiance, kVoxelVplCount, kShadingPoints, kVoxelRepresentative, kVplPosition,
+    kVplRadiance, kVplEmitter, kVBuffer};
 }
 
 void LightInjectionPass::DeclareGraphResources(RenderGraphPassBuilder& pass, const VxpgGraphHandles& vxpg) const
@@ -75,7 +84,8 @@ void LightInjectionPass::DeclareGraphResources(RenderGraphPassBuilder& pass, con
     // which of the frame's resources sits behind each binding.
     const GraphResourceHandle handles[] = {
         vxpg.voxelIrradiance, vxpg.voxelVplCount, vxpg.shadingPoints,
-        vxpg.voxelRepresentative, vxpg.vplPosition, vxpg.vbuffer};
+        vxpg.voxelRepresentative, vxpg.vplPosition, vxpg.vplRadiance, vxpg.vplEmitter,
+        vxpg.vbuffer};
     static_assert(std::size(handles) == std::size(kInjectionSlots), "one handle per graph-visible slot");
 
     for (size_t i = 0; i < std::size(kInjectionSlots); ++i)
@@ -91,6 +101,8 @@ void LightInjectionPass::CreateGlobalRootSignature()
                                 .Add(kShadingPoints)
                                 .Add(kVoxelRepresentative)
                                 .Add(kVplPosition)
+                                .Add(kVplRadiance)
+                                .Add(kVplEmitter)
                                 .Add(kVBuffer)
                                 .Add(kVoxelGridConstants)
                                 .WithStaticSamplers()
@@ -173,9 +185,28 @@ void LightInjectionPass::CreateRepresentativeResources()
             globalHeap.CpuHandle(GlobalDescriptor::VoxelRepresentative));
     }
 
-    // Per-pixel VPL hit position: screen-sized Texture2D (mirrors ShadingPoints).
-    m_vplPositionTex.Reset();
+    // The per-pixel record of the injected sample: where the bounce landed, the
+    // shaded light leaving it, and that vertex's own emission. Three screen-sized
+    // RGBA32F siblings (mirrors ShadingPoints). The last two are only read when
+    // vxpg.injection.reuseInMis makes this sample double as the integrator's BSDF
+    // MIS sample, but they are always written — a variant switch must not need a
+    // resource rebuild.
+    struct VplTarget
     {
+        Microsoft::WRL::ComPtr<ID3D12Resource>* resource;
+        GlobalDescriptor                        slot;
+        const wchar_t*                          name;
+    };
+    const VplTarget vplTargets[] = {
+        { &m_vplPositionTex, GlobalDescriptor::VplPosition, L"VXPG VplPosition" },
+        { &m_vplRadianceTex, GlobalDescriptor::VplRadiance, L"VXPG VplRadiance" },
+        { &m_vplEmitterTex,  GlobalDescriptor::VplEmitter,  L"VXPG VplEmitter" },
+    };
+
+    for (const VplTarget& target : vplTargets)
+    {
+        target.resource->Reset();
+
         D3D12_RESOURCE_DESC desc = {};
         desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
         desc.Format           = DXGI_FORMAT_R32G32B32A32_FLOAT;
@@ -189,14 +220,14 @@ void LightInjectionPass::CreateRepresentativeResources()
 
         ThrowIfFailed(m_device->CreateCommittedResource(
             &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_vplPositionTex)));
-        m_vplPositionTex->SetName(L"VXPG VplPosition");
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(target.resource->GetAddressOf())));
+        (*target.resource)->SetName(target.name);
 
         D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
         uavDesc.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
         uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        m_device->CreateUnorderedAccessView(m_vplPositionTex.Get(), nullptr, &uavDesc,
-            globalHeap.CpuHandle(GlobalDescriptor::VplPosition));
+        m_device->CreateUnorderedAccessView(target.resource->Get(), nullptr, &uavDesc,
+            globalHeap.CpuHandle(target.slot));
     }
 }
 

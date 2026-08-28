@@ -55,7 +55,7 @@ struct ScreenshotMetadata
     // this are not a reproducible measurement.
     std::string activeLevers;
     std::string shaderVariant; // what the pipeline was built with, not what was asked for
-    // The --cvar-matrix point this image belongs to ("renderer.numBounces=2;vxpg.oneSampleMis=1").
+    // The --cvar-matrix point this image belongs to ("renderer.numBounces=2;vxpg.treeWeightMode=1").
     // A sweep varies these between images of one process, so the run's own arguments no
     // longer identify a capture — this does.
     std::string settings;

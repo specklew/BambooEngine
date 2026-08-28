@@ -43,20 +43,27 @@ namespace
 // their global slots; everything else is a root descriptor.
 //
 // Each slot also carries what the integrator does to it, which is what the frame
-// graph declares (ADR 0017 step 3). Four of them are WRITES: under injection
-// reuse (ADR 0009) this raygen's BSDF subtree owns the VPL data, so the
-// integrator is their producer and light injection returns before writing any.
+// graph declares (ADR 0017 step 3). Every one of them is a READ: the injection
+// pass is the sole producer of the VPL data now that nothing is carried between
+// frames, and this integrator only consumes it.
 constexpr GraphAccess kRead  = GraphAccess::UnorderedAccessRead;
 constexpr GraphAccess kWrite = GraphAccess::ComputeWrite;
 
 constexpr BindingSlot kVoxelIrradiance = Accesses(PassTableEntry("gVoxIrradiance", BindingKind::Uav,
-    GUIDED_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance), kWrite);
+    GUIDED_REG_IRRADIANCE, GlobalDescriptor::VoxelIrradiance), kRead);
 constexpr BindingSlot kVoxelVplCount = Accesses(PassTableEntry("gVoxVplCount", BindingKind::Uav,
-    GUIDED_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount), kWrite);
+    GUIDED_REG_VPL_COUNT, GlobalDescriptor::VoxelVplCount), kRead);
 constexpr BindingSlot kVoxelRepresentative = Accesses(PassTableEntry("gVoxelRepresentative", BindingKind::Uav,
-    GUIDED_REG_VOXEL_REPRESENTATIVE, GlobalDescriptor::VoxelRepresentative), kWrite);
+    GUIDED_REG_VOXEL_REPRESENTATIVE, GlobalDescriptor::VoxelRepresentative), kRead);
 constexpr BindingSlot kVplPosition = Accesses(PassTableEntry("gVplPosition", BindingKind::Uav,
-    GUIDED_REG_VPL_POSITION, GlobalDescriptor::VplPosition), kWrite);
+    GUIDED_REG_VPL_POSITION, GlobalDescriptor::VplPosition), kRead);
+// Read only when vxpg.injection.reuseInMis turns the injected sample into this
+// integrator's BSDF MIS sample; bound unconditionally so the switch is a CVar
+// rather than a root-signature rebuild.
+constexpr BindingSlot kVplRadiance = Accesses(PassTableEntry("gVplRadiance", BindingKind::Uav,
+    GUIDED_REG_VPL_RADIANCE, GlobalDescriptor::VplRadiance), kRead);
+constexpr BindingSlot kVplEmitter = Accesses(PassTableEntry("gVplEmitter", BindingKind::Uav,
+    GUIDED_REG_VPL_EMITTER, GlobalDescriptor::VplEmitter), kRead);
 
 constexpr BindingSlot kSuperpixelIndex = Accesses(PassTableEntry("gSpixelIndexImage", BindingKind::Uav,
     GUIDED_REG_SUPERPIXEL_INDEX, GlobalDescriptor::SuperpixelIndex), kRead);
@@ -81,25 +88,23 @@ constexpr BindingSlot kImportanceHeap      = Accesses(PassUav("gSpixelClusterImp
 constexpr BindingSlot kLiveBoundMin        = Accesses(PassUav("gVoxelLiveBoundMin", GUIDED_REG_LIVE_BOUND_MIN), kRead);
 constexpr BindingSlot kLiveBoundMax        = Accesses(PassUav("gVoxelLiveBoundMax", GUIDED_REG_LIVE_BOUND_MAX), kRead);
 
-// No graph access: constants have no producer, and the adaptive-q pair is read by
-// the dispatch but written by the update node, which one slot cannot say.
+// No graph access: constants have no producer.
 constexpr BindingSlot kVoxelGridConstants = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
-constexpr BindingSlot kTileGuideQ         = PassUav("gTileGuideQ", GUIDED_REG_TILE_GUIDE_Q);         // ADR 0015
-constexpr BindingSlot kTileStrategyStats  = PassUav("gTileStrategyStats", GUIDED_REG_TILE_STRATEGY_STATS);
-constexpr BindingSlot kAdaptiveQConstants = PassRootConstants("AdaptiveQCB", GUIDED_REG_ADAPTIVE_Q_CB, 1);
 
 constexpr BindingSlot kGuidedSlots[] = {
     kVoxelIrradiance,     kVoxelVplCount,   kSuperpixelIndex,  kVoxelRepresentative, kVplPosition,
+    kVplRadiance,         kVplEmitter,
     kVBuffer,             kVisibilityMask,  kFuzzyWeights,     kFuzzyIndices,        kVoxelGridConstants,
     kGuidingCounters,     kGuidingCompactIds, kGuidingInverseIndex, kVoxelFingerprints, kClusterAssignments,
     kClusterSeeds,        kLightTreeNodes,  kCompactToLeaf,    kClusterRoots,        kImportanceHeap,
-    kLiveBoundMin,        kLiveBoundMax,    kTileGuideQ,       kTileStrategyStats,   kAdaptiveQConstants};
+    kLiveBoundMin,        kLiveBoundMax};
 
 // The graph-visible subset, paired with the frame's handles below. Everything the
 // signature binds appears here exactly once — that is the property that made the
 // two hand-written lists drift apart.
 constexpr BindingSlot kGuidedGraphSlots[] = {
-    kVoxelIrradiance,   kVoxelVplCount,     kVoxelRepresentative, kVplPosition,     kSuperpixelIndex,
+    kVoxelIrradiance,   kVoxelVplCount,     kVoxelRepresentative, kVplPosition,     kVplRadiance,
+    kVplEmitter,        kSuperpixelIndex,
     kVBuffer,           kVisibilityMask,    kFuzzyWeights,        kFuzzyIndices,    kGuidingCounters,
     kGuidingCompactIds, kGuidingInverseIndex, kVoxelFingerprints, kClusterAssignments, kClusterSeeds,
     kLightTreeNodes,    kCompactToLeaf,     kClusterRoots,        kImportanceHeap,  kLiveBoundMin,
@@ -149,9 +154,11 @@ bool GuidedPathTracingPass::UseInlineRayQuery()
     const int mode = g_inlineRayQuery.Get();
     if (mode == 0) return false;
     if (mode > 0) return true;
-    // Auto = pipeline on every vendor: measured dead heat on RDNA (ADR 0011,
-    // 824 vs 827 frames/3s), and the pipeline path is the SER-ready one for
-    // future Ada+ hardware. The RQ backend stays as an opt-in cross-check.
+    // Auto = pipeline on every vendor. It was a dead heat when ADR 0011 measured
+    // it (824 vs 827 frames/3s); re-measured 2026-08-23 (veach-ajar Deep Light,
+    // 1920x1080, b1, skyLighting off, 3s x 3 rounds) the pipeline is ahead by 10%
+    // — 649 vs 590 frames/3s. It is also the SER-ready path for future Ada+
+    // hardware. The RQ backend stays as an opt-in cross-check.
     return false;
 }
 
@@ -208,52 +215,12 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
     // Compute programs are keyed on the root signature they were created with;
     // a rebuilt signature (variant reload) must drop them or a later dispatch
     // pairs a stale-layout PSO with the new signature.
-    m_inlineRqProgram        = nullptr;
-    m_adaptiveQUpdateProgram = nullptr;
-}
-
-void GuidedPathTracingPass::EnsureAdaptiveQResources(uint32_t width, uint32_t height)
-{
-    const uint32_t tilesPerRow    = (width  + ONE_SAMPLE_TILE_SIZE - 1) / ONE_SAMPLE_TILE_SIZE;
-    const uint32_t tilesPerColumn = (height + ONE_SAMPLE_TILE_SIZE - 1) / ONE_SAMPLE_TILE_SIZE;
-    if (m_tileGuideQ && tilesPerRow == m_tileGridWidth && tilesPerColumn == m_tileGridHeight)
-        return;
-    m_tileGridWidth  = tilesPerRow;
-    m_tileGridHeight = tilesPerColumn;
-    const size_t tileCount = size_t(tilesPerRow) * tilesPerColumn;
-    m_tileGuideQ = std::make_unique<RWStructuredBuffer<float>>(
-        m_device, tileCount, L"GuidedPT TileGuideQ");
-    m_tileStrategyStats = std::make_unique<RWStructuredBuffer<uint32_t>>(
-        m_device, tileCount * 2, L"GuidedPT TileStrategyStats");
-    // Fresh buffers hold undefined data: both shaders treat out-of-range q as
-    // 0.5 and the update kernel clears stats after every read, so one frame
-    // self-heals — no CPU-side init pass needed.
-}
-
-void GuidedPathTracingPass::EnsureAdaptiveQUpdatePso()
-{
-    if (m_adaptiveQUpdateProgram)
-        return;
-
-    m_adaptiveQUpdateProgram = ShaderProgramCache::Get().GetOrCreateCompute(m_device.Get(), m_globalRootSignature.Get(),
-        "resources/shaders/vxpgAdaptiveQ.update.shader", L"GuidedPT AdaptiveQ Update PSO");
+    m_inlineRqProgram = nullptr;
 }
 
 void GuidedPathTracingPass::DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass)
 {
     DeclareVoxelGuidingReads(dispatchPass);
-
-    if (!CompilesLever("onesample"))
-        return;
-
-    // The dispatch reads last frame's q and accumulates this frame's stats; the
-    // update node below turns one into the other (ADR 0015).
-    EnsureAdaptiveQResources(Window::Get().GetWidth(), Window::Get().GetHeight());
-    m_tileGuideQHandle        = graph.Import(*m_tileGuideQ, "GuidedPT TileGuideQ");
-    m_tileStrategyStatsHandle = graph.Import(*m_tileStrategyStats, "GuidedPT TileStrategyStats");
-
-    dispatchPass.Read(m_tileGuideQHandle, GraphAccess::UnorderedAccessRead);
-    dispatchPass.Write(m_tileStrategyStatsHandle, GraphAccess::ComputeWrite);
 }
 
 // Every VXPG resource the integrator's signature binds, paired with this frame's
@@ -266,7 +233,8 @@ void GuidedPathTracingPass::DeclareVoxelGuidingReads(RenderGraphPassBuilder& pas
     const VxpgGraphHandles& vxpg = *m_frameGuiding;
 
     const GraphResourceHandle handles[] = {
-        vxpg.voxelIrradiance, vxpg.voxelVplCount, vxpg.voxelRepresentative, vxpg.vplPosition, vxpg.superpixelIndex,
+        vxpg.voxelIrradiance, vxpg.voxelVplCount, vxpg.voxelRepresentative, vxpg.vplPosition, vxpg.vplRadiance,
+        vxpg.vplEmitter,      vxpg.superpixelIndex,
         vxpg.vbuffer,         vxpg.clusterVisibilityMask, vxpg.superpixelFuzzyWeight, vxpg.superpixelFuzzyIndex,
         vxpg.counters,        vxpg.compactIds,    vxpg.inverseIndex,       vxpg.voxelFingerprints,
         vxpg.clusterAssignments, vxpg.clusterSeedCompactIds, vxpg.lightTreeNodes, vxpg.lightTreeCompactToLeaf,
@@ -277,29 +245,8 @@ void GuidedPathTracingPass::DeclareVoxelGuidingReads(RenderGraphPassBuilder& pas
         pass.Declare(kGuidedGraphSlots[i], handles[i]);
 }
 
-void GuidedPathTracingPass::AppendPostDispatchNodes(RenderGraph& graph)
+void GuidedPathTracingPass::AppendPostDispatchNodes(RenderGraph&)
 {
-    if (!CompilesLever("onesample"))
-        return;
-
-    // Folds this frame's per-tile strategy stats into the guide-selection
-    // probability the NEXT frame's coin reads, then clears the stats. Its consumer
-    // is next frame's dispatch, which culling cannot see.
-    graph.AddPass("VXPG AdaptiveQ Update",
-        [&](RenderGraphPassBuilder& pass)
-        {
-            pass.NeverCull();
-            pass.Read(m_tileStrategyStatsHandle, GraphAccess::UnorderedAccessRead);
-            pass.Write(m_tileGuideQHandle, GraphAccess::ComputeWrite);
-        },
-        [this]()
-        {
-            EnsureAdaptiveQUpdatePso();
-            BindGuidingResources();
-            m_commandList->SetPipelineState(m_adaptiveQUpdateProgram->GetPipelineState());
-            const uint32_t tileCount = m_tileGridWidth * m_tileGridHeight;
-            CommandContext::Get().Dispatch((tileCount + 63) / 64, 1, 1);
-        });
 }
 
 void GuidedPathTracingPass::BindGuidingResources()
@@ -324,12 +271,6 @@ void GuidedPathTracingPass::BindGuidingResources()
     rootSignature.Set(commandList, kImportanceHeap, m_lightTreePass->GetSuperpixelClusterHeapBufferVA());
     rootSignature.Set(commandList, kLiveBoundMin, m_buildPass->GetLiveBoundMinBuffer()->GetGPUVirtualAddress());
     rootSignature.Set(commandList, kLiveBoundMax, m_buildPass->GetLiveBoundMaxBuffer()->GetGPUVirtualAddress());
-    EnsureAdaptiveQResources(Window::Get().GetWidth(), Window::Get().GetHeight());
-    rootSignature.Set(commandList, kTileGuideQ, m_tileGuideQ->GetGPUVirtualAddress());
-    rootSignature.Set(commandList, kTileStrategyStats, m_tileStrategyStats->GetGPUVirtualAddress());
-
-    const uint32_t tileCount = m_tileGridWidth * m_tileGridHeight;
-    rootSignature.SetConstants(commandList, kAdaptiveQConstants, &tileCount, 1);
 }
 
 void GuidedPathTracingPass::Render()

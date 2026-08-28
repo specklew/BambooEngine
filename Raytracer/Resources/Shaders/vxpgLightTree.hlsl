@@ -13,17 +13,22 @@
 //   BuildTreeInternalNodes -> Karras hierarchy (child + parent links)
 //   MergeTreeNodes         -> bottom-up AABB + intensity + cluster-root detection
 //
-// Three SIByL bugs are deviated on (ADR 0003): args written before the early-out
-// (N=0 ghost tree), leaf count clamped to the uint16 node ceiling (+overflow
-// flag), and the sort reads the clamped count. Ported from SIByL; identifiers
-// renamed (original SIByL names in comments).
+// Deviations from SIByL, each marked at its site (ADR 0003). Three are bug fixes:
+// args written before the early-out (bug 1, N=0 ghost tree), leaf count clamped to
+// the uint16 node ceiling (bug 2, +overflow flag, and the sort reads the clamped
+// count), and every cluster_roots write bounded to < 32 (bug 4, wild GPU write).
+// Three are portability: the merge sibling-gate flag moved to its own scalar
+// buffer, the merge parent-walk bails on an invalid parent, and the top-level heap
+// guards an arbitrary map width. Ported from SIByL; identifiers renamed (original
+// SIByL names in comments).
 
 #include "PassRegisters.h"
 #include "LightTreeNode.hlsl"
 
-// uint16 node-index ceiling: the node array holds 2N-1 entries and every index
-// must fit uint16, so 2N-1 <= 65535 => N <= 32768.
-#define LIGHT_TREE_MAX_LEAVES 32768
+// Leaf ceiling. The node index is uint, so 2N-1 no longer binds; what binds now is
+// the sort key, which carries the compact voxel id in its low 16 bits (see the
+// EncodeTreeLeaves key layout), and LIGHT_TREE_SORT_CAPACITY. Both cap at 65536.
+#define LIGHT_TREE_MAX_LEAVES 65536
 // Compact voxel capacity (matches Constants::Graphics::VOXEL_GUIDING_CAPACITY).
 #define LIGHT_TREE_COMPACT_CAPACITY 131072
 // Sort-key buffer capacity (SIByL bitonic element_count = 65536).
@@ -60,6 +65,8 @@ RWStructuredBuffer<uint3> gIndirectDispatchArgs : BAMBOO_PASS_UAV(LIGHT_TREE_REG
 // (InterlockedCompareExchange on gNodes[i].flag silently compiles NON-atomic ->
 // race -> merge parent-walk cycles -> GPU hang). node.flag stays pure clusterID.
 globallycoherent RWStructuredBuffer<uint> gNodeVisited : BAMBOO_PASS_UAV(LIGHT_TREE_REG_NODE_VISITED);
+
+#define TOP_LEVEL_THREADS_PER_GROUP 256 // numthreads of BuildSuperpixelClusterHeaps
 
 // ---- Top-level tree bindings (BuildSuperpixelClusterHeaps only) -------------
 // SIByL vxguiding/tree/tree-top-level-constr: per-superpixel implicit heap of
@@ -223,10 +230,10 @@ void InitializeTreeNodes(uint3 dtid : SV_DispatchThreadID)
     gNodeVisited[tid] = 0u; // merge sibling-gate reset (was TreeNode.flag in SIByL)
 
     LightTreeNode node;
-    node.parentIndex = 0xFFFF;
-    node.leftIndex = 0xFFFF;
-    node.rightIndex = 0xFFFF;
-    node.voxelIndex = 0xFFFF;
+    node.parentIndex = LIGHT_TREE_NO_NODE;
+    node.leftIndex = LIGHT_TREE_NO_NODE;
+    node.rightIndex = LIGHT_TREE_NO_NODE;
+    node.voxelIndex = LIGHT_TREE_NO_NODE;
     node.flag = 0u;
     node.intensity = 0.0f;
     node.aabbMin = uint2(0u, 0u);
@@ -249,7 +256,7 @@ void InitializeTreeNodes(uint3 dtid : SV_DispatchThreadID)
     node.aabbMin = PackFloat3(boundMin);
     node.aabbMax = PackFloat3(boundMax);
     node.intensity = gPremulIrradiance[compactID];
-    node.voxelIndex = uint16_t(compactID);
+    node.voxelIndex = compactID;
     node.flag = clusterID;
 
     gLeafRanges[tid] = leafID; // dead output (cost fidelity)
@@ -366,19 +373,19 @@ void BuildTreeInternalNodes(uint3 dtid : SV_DispatchThreadID)
     gLeafRanges[idx] = ij.x | (ij.y << 16); // dead output
     const uint gamma = FindSplit(ij.x, ij.y);
 
-    // Clamped N <= 32768 keeps gamma + (numVPLs-1) <= 65534 < 0xFFFF, so these
+    // Clamped N <= 65536 keeps gamma + (numVPLs-1) <= 131070, well inside uint, so these
     // uint16 adds never wrap (SIByL Bug 2 site, defused by the encode clamp).
-    uint16_t leftIndex = uint16_t(gamma);
-    uint16_t rightIndex = uint16_t(gamma + 1);
+    uint leftIndex = uint(gamma);
+    uint rightIndex = uint(gamma + 1);
     if (min(ij.x, ij.y) == gamma)
-        leftIndex += uint16_t(numVPLs - 1);
+        leftIndex += uint(numVPLs - 1);
     if (max(ij.x, ij.y) == gamma + 1)
-        rightIndex += uint16_t(numVPLs - 1);
+        rightIndex += uint(numVPLs - 1);
 
     gNodes[idx].leftIndex = leftIndex;
     gNodes[idx].rightIndex = rightIndex;
-    gNodes[leftIndex].parentIndex = uint16_t(idx);
-    gNodes[rightIndex].parentIndex = uint16_t(idx);
+    gNodes[leftIndex].parentIndex = uint(idx);
+    gNodes[rightIndex].parentIndex = uint(idx);
 }
 
 // ---- MergeTreeNodes (tree-merge-pass) --------------------------------------
@@ -392,9 +399,9 @@ void MergeTreeNodes(uint3 dtid : SV_DispatchThreadID)
     const int numInternalNodes = int(numVPLs - 1);
     const int idx = int(dtid.x) + numInternalNodes;
 
-    uint16_t parent = gNodes[idx].parentIndex;
+    uint parent = gNodes[idx].parentIndex;
 
-    if (numVPLs == 1 && parent == 0xFFFF)
+    if (numVPLs == 1 && parent == LIGHT_TREE_NO_NODE)
     {
         gClusterRoots[min(gNodes[idx].flag, 31u)] = 0;
         return;
@@ -402,14 +409,14 @@ void MergeTreeNodes(uint3 dtid : SV_DispatchThreadID)
 
     // DEVIATION from SIByL: bail before dereferencing an invalid parent. SIByL
     // unconditionally reads u_Nodes[parent].left_idx first, which for
-    // parent == 0xFFFF reads one element past the node buffer.
-    if (parent == 0xFFFF)
+    // parent == LIGHT_TREE_NO_NODE reads one element past the node buffer.
+    if (parent == LIGHT_TREE_NO_NODE)
         return;
 
     int lhsNodeId = gNodes[parent].leftIndex;
     LightTreeNode lhs = gNodes[lhsNodeId];
 
-    while (parent != 0xFFFF)
+    while (parent != LIGHT_TREE_NO_NODE)
     {
         uint old;
         InterlockedCompareExchange(gNodeVisited[parent], 0u, 1u, old);
@@ -438,7 +445,7 @@ void MergeTreeNodes(uint3 dtid : SV_DispatchThreadID)
             gClusterRoots[lhs.flag] = lhsNodeId;
         if (rhs.flag != merged.flag && rhs.flag < 32u)
             gClusterRoots[rhs.flag] = int(rhsNodeId);
-        if (merged.parentIndex == 0xFFFF && lhs.flag == rhs.flag && merged.flag < 32u)
+        if (merged.parentIndex == LIGHT_TREE_NO_NODE && lhs.flag == rhs.flag && merged.flag < 32u)
             gClusterRoots[merged.flag] = 0;
 
         gNodes[parent] = merged;
@@ -457,66 +464,88 @@ void MergeTreeNodes(uint3 dtid : SV_DispatchThreadID)
 // [1] = total. Slot 0 is never written (dead). The integrator later samples a
 // cluster per pixel from this heap by walking [1] down to a leaf.
 //
-// SIByL subgroup ops translate to wave ops (kmpp WaveReadLaneAt precedent):
-//   subgroupClusteredAdd(x, 2)  == x + WaveReadLaneAt(x, lane ^ 1)  (pair sum)
-//   subgroupShuffle(x, lane<<1) == WaveReadLaneAt(x, (lane<<1) & 31) (gather down)
-// Only the low N lanes write each level; the high lanes' reads are masked into
-// bounds and their (unused) values never feed a written low lane.
+// SIByL subgroup ops are emulated through groupshared, NOT wave intrinsics:
+//   subgroupClusteredAdd(x, 2)  == x + exchange[base + (cluster ^ 1)]   (pair sum)
+//   subgroupShuffle(x, lane<<1) == exchange[base + ((cluster << 1) & 31)] (gather)
+// The 32 "lanes" of a superpixel are a GROUP-INDEX slice, not a hardware wave.
+// Built on WaveGetLaneIndex() this kernel was correct only at wave32: a 64-wide
+// wave hands out lane ids 32..63, which read gClusterRoots past its 32 entries
+// and write 32 slots past the superpixel's 64-slot heap block, into the NEXT
+// superpixel's heap. Index arithmetic cannot drift with the driver's wave-size
+// choice. Only the low N lanes write each level; the high lanes' reads are masked
+// into bounds and their (unused) values never feed a written low lane.
+groupshared float sHeapExchange[TOP_LEVEL_THREADS_PER_GROUP];
+
+// One pair-sum + gather-down step of the heap fold, over the 32 cluster slots of
+// one superpixel. Every thread of the group reaches every barrier.
+float TopLevelFoldStep(uint groupIndex, uint warpBase, uint cluster, float importance)
+{
+    sHeapExchange[groupIndex] = importance;
+    GroupMemoryBarrierWithGroupSync();
+    const float summed = importance + sHeapExchange[warpBase + (cluster ^ 1u)];
+    GroupMemoryBarrierWithGroupSync();
+
+    sHeapExchange[groupIndex] = summed;
+    GroupMemoryBarrierWithGroupSync();
+    const float gathered = sHeapExchange[warpBase + ((cluster << 1) & 31u)];
+    GroupMemoryBarrierWithGroupSync();
+    return gathered;
+}
 
 [numthreads(256, 1, 1)]
-[WaveSize(32)]
 void BuildSuperpixelClusterHeaps(uint3 gid : SV_GroupID, uint groupIndex : SV_GroupIndex)
 {
-    const uint laneId = WaveGetLaneIndex(); // 0..31 = cluster
-    const uint warpId = groupIndex / 32u;   // 0..7 = warp (SIByL gl_SubgroupID)
-    const uint2 spixel = uint2(gid.x * 8u + warpId, gid.y);
+    const uint cluster  = groupIndex % 32u; // 0..31 = cluster slot
+    const uint warpId   = groupIndex / 32u; // 0..7 = superpixel within the group
+    const uint warpBase = warpId * 32u;
+    const uint2 spixel  = uint2(gid.x * 8u + warpId, gid.y);
 
     // DEVIATION from SIByL: guard the arbitrary map width. SIByL's 40x23 map
     // divides by 8 exactly (dispatch (5,23)); Bamboo's ceil(width/32) does not.
-    // spixel.x is warp-uniform, so the whole warp returns together -> wave-safe.
-    if (spixel.x >= gMapX)
-        return;
+    // Carried as a predicate rather than an early return: the barriers below are
+    // group-wide, so no slice of the group may leave before them.
+    const bool active = spixel.x < gMapX;
+    const uint spixelFlat = active ? (spixel.y * gMapX + spixel.x) : 0u;
 
-    const uint spixelFlat = spixel.y * gMapX + spixel.x;
-
-    const int clusterNodeId = gClusterRoots[laneId];
+    const int clusterNodeId = gClusterRoots[cluster];
     float clusterIntensity = (clusterNodeId != -1) ? gNodes[clusterNodeId].intensity : 0.0f;
 
     if (gUseAvgVisibility == 0u)
     {
         // Binary mode: mask bit clear => this superpixel can't see the cluster.
-        const uint visibilityPack = gClusterVisibilityMask[spixel];
-        if ((visibilityPack & (1u << laneId)) == 0u)
+        const uint visibilityPack = active ? gClusterVisibilityMask[spixel] : 0u;
+        if ((visibilityPack & (1u << cluster)) == 0u)
             clusterIntensity = 0.0f;
     }
     else
     {
         // Average mode (SIByL default visibility=1): soft BRDF-weighted fraction.
-        const float avgVisibility = gAvgVisibility[spixelFlat * 32u + laneId] / 32.0f;
+        const float avgVisibility = active ? (gAvgVisibility[spixelFlat * 32u + cluster] / 32.0f) : 0.0f;
         clusterIntensity *= avgVisibility;
     }
 
     float importance = clusterIntensity;
     const uint offset = spixelFlat * 64u;
 
-    gSpixelClusterImportanceHeap[offset + 32u + laneId] = importance;
+    if (active)
+        gSpixelClusterImportanceHeap[offset + 32u + cluster] = importance;
 
-    importance += WaveReadLaneAt(importance, laneId ^ 1u);
-    importance  = WaveReadLaneAt(importance, (laneId << 1) & 31u);
-    if (laneId < 16u) gSpixelClusterImportanceHeap[offset + 16u + laneId] = importance;
+    importance = TopLevelFoldStep(groupIndex, warpBase, cluster, importance);
+    if (active && cluster < 16u) gSpixelClusterImportanceHeap[offset + 16u + cluster] = importance;
 
-    importance += WaveReadLaneAt(importance, laneId ^ 1u);
-    importance  = WaveReadLaneAt(importance, (laneId << 1) & 31u);
-    if (laneId < 8u) gSpixelClusterImportanceHeap[offset + 8u + laneId] = importance;
+    importance = TopLevelFoldStep(groupIndex, warpBase, cluster, importance);
+    if (active && cluster < 8u) gSpixelClusterImportanceHeap[offset + 8u + cluster] = importance;
 
-    importance += WaveReadLaneAt(importance, laneId ^ 1u);
-    importance  = WaveReadLaneAt(importance, (laneId << 1) & 31u);
-    if (laneId < 4u) gSpixelClusterImportanceHeap[offset + 4u + laneId] = importance;
+    importance = TopLevelFoldStep(groupIndex, warpBase, cluster, importance);
+    if (active && cluster < 4u) gSpixelClusterImportanceHeap[offset + 4u + cluster] = importance;
 
-    importance += WaveReadLaneAt(importance, laneId ^ 1u);
-    importance  = WaveReadLaneAt(importance, (laneId << 1) & 31u);
-    if (laneId < 2u) gSpixelClusterImportanceHeap[offset + 2u + laneId] = importance;
+    importance = TopLevelFoldStep(groupIndex, warpBase, cluster, importance);
+    if (active && cluster < 2u) gSpixelClusterImportanceHeap[offset + 2u + cluster] = importance;
 
-    importance += WaveReadLaneAt(importance, laneId ^ 1u);
-    if (laneId < 1u) gSpixelClusterImportanceHeap[offset + 1u + laneId] = importance;
+    // Last level is the pair sum only — there is nothing left to gather down.
+    sHeapExchange[groupIndex] = importance;
+    GroupMemoryBarrierWithGroupSync();
+    importance += sHeapExchange[warpBase + (cluster ^ 1u)];
+    GroupMemoryBarrierWithGroupSync();
+    if (active && cluster < 1u) gSpixelClusterImportanceHeap[offset + 1u + cluster] = importance;
 }

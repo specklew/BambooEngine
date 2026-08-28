@@ -123,8 +123,9 @@ void VxpgClusterVisibilityPass::CreateResolutionBuffers()
 void VxpgClusterVisibilityPass::CreateRootSignature()
 {
     // No texture range: the BSDF weight uses per-instance material factors, so
-    // this compute pass never samples the scene textures (which sit in the
-    // raster path's PIXEL_SHADER_RESOURCE layout, illegal for a compute Dispatch).
+    // this compute pass never samples the scene textures. (Scene textures are
+    // created PIXEL | NON_PIXEL, so a compute Dispatch could legally read them —
+    // the reason is cost, not state; see the DEVIATION note in the shader.)
     // It includes RaytracingUtils.hlsl, so the scene half of its bindings is the
     // frame layout; only the cvis-specific UAVs are pass-scoped.
     m_rootSig = RootSignatureBuilder(L"VxpgClusterVisibility RootSig", /*tableCount*/ 1)

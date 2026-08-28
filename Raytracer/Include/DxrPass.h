@@ -39,7 +39,8 @@ protected:
 
     // Override to customize local root signatures (default: one empty sig per role group).
     virtual void CreateLocalRootSignatures();
-    // Override to customize the global root signature (default: standard 7-param scene binding).
+    // Override to customize the global root signature (default: the FrameBindingLayout
+    // scene binding — one descriptor table plus seven root descriptors).
     virtual void CreateGlobalRootSignature();
 
     // Checks every library's reflected bindings against the global root signature.

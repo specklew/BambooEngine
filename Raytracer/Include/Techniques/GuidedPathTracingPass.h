@@ -11,10 +11,12 @@ class VxpgFingerprintPass;
 class VxpgClusterPass;
 class VxpgLightTreePass;
 
-// VXPG guided path tracing technique. Two-sample MIS at the first bounce
-// between BSDF sampling and the voxel irradiance distribution (CDF over
-// compacted voxels, cone sampling toward the chosen voxel). Falls back to a
-// uniform-sphere guide when no guiding data exists.
+// VXPG guided path tracing technique. Two-sample MIS at the first bounce between
+// BSDF sampling and the tree-backed voxel guide: per-superpixel importance heap
+// -> cluster-root light-tree walk -> exact solid-angle sampling of the chosen
+// voxel's visible AABB faces. A pixel with no guiding data (no lit voxels, or
+// every fuzzy parent's heap empty) is BSDF-only at full MIS weight — there is no
+// uniform-sphere fallback. See guidedPathTracing.hlsl for the full chain.
 class GuidedPathTracingPass : public DxrTechnique
 {
 public:
@@ -41,9 +43,6 @@ public:
     // cost belongs in equal-time benchmarks.
     bool UsesVoxelGuiding() const override { return true; }
 
-    // The BSDF subtree of this integrator writes the VPLs (ADR 0009).
-    bool ProducesGuidingVpls() const override { return true; }
-
     // This technique reads GuidingDebugView, not the raytracing enum DxrTechnique
     // offers, so the dropdown and headless enumeration see the guide's own views.
     std::vector<DebugView> GetDebugViews() const override;
@@ -69,23 +68,7 @@ private:
     ComputeProgram* m_inlineRqProgram = nullptr;
     std::string     m_inlineRqVariantKey; // lever key the RQ PSO was compiled with (ADR 0020)
 
-    // One-sample MIS adaptive q (ADR 0015): per-16x16-tile guide-selection
-    // probability + this frame's per-strategy luminance stats, folded into q
-    // by a small compute update after every guided dispatch.
-    void EnsureAdaptiveQResources(uint32_t width, uint32_t height);
-    void EnsureAdaptiveQUpdatePso();
-    std::unique_ptr<RWStructuredBuffer<float>>    m_tileGuideQ;
-    std::unique_ptr<RWStructuredBuffer<uint32_t>> m_tileStrategyStats;
-    ComputeProgram* m_adaptiveQUpdateProgram = nullptr;
-    uint32_t m_tileGridWidth  = 0;
-    uint32_t m_tileGridHeight = 0;
-    // Handed from the dispatch declaration to the update node; imports last one
-    // frame, so these are refreshed every time the graph is rebuilt.
-    GraphResourceHandle m_tileGuideQHandle       = InvalidGraphResource;
-    GraphResourceHandle m_tileStrategyStatsHandle = InvalidGraphResource;
-
-    // Every root binding the guided dispatch needs, shared with the adaptive-q
-    // update node so neither depends on the other having run first.
+    // Every root binding the guided dispatch needs.
     void BindGuidingResources();
 
     std::shared_ptr<VoxelizationPass>      m_voxelPass;

@@ -33,7 +33,6 @@ cbuffer VoxelGridCB : BAMBOO_PASS_CBV(REG_VOXEL_GRID_CB)
     uint   voxInjectUseAvg;
     uint   _voxReserved0;
     float  voxHeatScale;
-    uint   voxReuseGiVpl;
 };
 
 cbuffer DebugViewCB : BAMBOO_PASS_CBV(DEBUG_VIEW_REG_CB)

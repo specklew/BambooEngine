@@ -9,9 +9,18 @@ struct EmissiveTriangle
     DirectX::XMFLOAT3 v0;
     DirectX::XMFLOAT3 v1;
     DirectX::XMFLOAT3 v2;
-    DirectX::XMFLOAT3 radiance;   // Le, constant over the triangle
+    // Le averaged over the whole emissive texture (= the factor alone when there is
+    // none). Feeds the light-pool selection weight ONLY. The estimator never reads it:
+    // both NEE and a BSDF hit evaluate Le per texel through EmitterRadiance(), so a
+    // textured emitter stays exact and the two strategies cannot disagree.
+    DirectX::XMFLOAT3 averageRadiance;
     float area;
     uint32_t instanceId;
+    // Emitter-surface UVs, so an NEE sample can read the emissive texel at the point
+    // it just sampled. Same UVs the hit shaders interpolate (post KHR_texture_transform).
+    DirectX::XMFLOAT2 uv0;
+    DirectX::XMFLOAT2 uv1;
+    DirectX::XMFLOAT2 uv2;
 };
 
 enum LightPoolKind : uint32_t

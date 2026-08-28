@@ -8,7 +8,7 @@
 
 static const float MIN_ROUGHNESS = 0.04;
 static const float RAY_TMIN = 0.001;
-static const float RAY_TMAX = 100.0;
+static const float RAY_TMAX = 1000.0;
 
 // ---- Payload access qualifiers (ADR 0020 R7) ----
 // Tell the driver which stages read and write each payload field, so the ones a
@@ -334,6 +334,31 @@ float2 SampleRoughnessMetallic(InstanceInfo instance, HitData data)
 {
     float4 mr = SampleTexture(instance.roughnessTextureIndex, data.uv);
     return float2(instance.roughnessFactor * mr.g, instance.metallicFactor * mr.b);
+}
+
+// glTF stores the emissive texture sRGB-encoded and the resource is UNORM, so the
+// decode happens here rather than in the sampler. Mirrored on the CPU by
+// ModelLoading.cpp's SrgbToLinear, which averages the same image for the light-pool weight.
+float3 SrgbToLinear(float3 encoded)
+{
+    float3 low  = encoded / 12.92;
+    float3 high = pow((encoded + 0.055) / 1.055, 2.4);
+    return lerp(high, low, step(encoded, 0.04045));
+}
+
+// The ONE definition of an emitter's radiance. Every strategy that can see a light -
+// NEE at the point it samples on the triangle, a BSDF/guide ray that lands on one,
+// the VXPG injection ray - must call this with the emitter-surface UV, or the MIS
+// combination stops summing to Le and the estimate goes biased.
+float3 EmitterRadiance(InstanceInfo instance, float2 uv)
+{
+    // Being the one definition is what makes this the one place the K2 substitution
+    // can switch emitters off: every strategy that could see a light goes through here.
+    if (emissiveGeometryEnabled == 0)
+        return float3(0.0, 0.0, 0.0);
+    if (instance.emissiveTextureIndex < 0)
+        return instance.emissiveRadiance;
+    return instance.emissiveRadiance * SrgbToLinear(SampleTexture(instance.emissiveTextureIndex, uv).rgb);
 }
 
 float3 SampleWorldSpaceNormal(HitData data)

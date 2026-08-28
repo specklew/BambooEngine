@@ -15,6 +15,10 @@
 // keep the list short. Pass-scoped resources do not belong in this file.
 
 #include "FrameBindingRegisters.h"
+// The pass constants are a frame binding like the rest of this file, and shared
+// includes read them by global name (LightPool's pool counters, EmitterRadiance's
+// emissive switch), so they are declared here rather than left to each includer.
+#include "passConstants.hlsl"
 
 #define MAX_TEXTURES FRAME_MAX_TEXTURES
 
@@ -37,8 +41,9 @@ struct InstanceInfo
     // row-vector world matrix). Lets raygen shaders reconstruct hits from the
     // VBuffer without hit-shader intrinsics.
     row_major float3x4 objectToWorld;
-    float3 emissiveRadiance; // 0 = not emissive
+    float3 emissiveRadiance; // constant factor; 0 = not emissive
     int    emissiveLightOffset; // -1 = not a light; else light-pool index of primitive 0
+    int    emissiveTextureIndex; // -1 = untextured emitter, emissiveRadiance is the whole Le
 };
 
 struct LightData
@@ -54,9 +59,10 @@ struct LightData
 struct EmissiveTriangle
 {
     float3 v0; float3 v1; float3 v2;
-    float3 radiance;
+    float3 averageRadiance; // light-pool selection weight only; Le is per texel
     float  area;
     uint   instanceId;
+    float2 uv0; float2 uv1; float2 uv2;
 };
 
 struct LightPoolEntry

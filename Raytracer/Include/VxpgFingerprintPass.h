@@ -9,15 +9,18 @@
 class VoxelGuidingBuildPass;
 class LightInjectionPass;
 
-// VXPG fingerprint pass (MRCS column reduction): assigns every compacted lit
+// VXPG fingerprint pass (MRCS row sampling, producing each voxel's reduced
+// column): assigns every compacted lit
 // voxel a 128-bit visibility signature. Two compute kernels run each frame
 // after the guiding distribution is built:
 //   SampleScreenRepresentatives -> picks 128 stratified screen points + emits
 //                                   the downstream guiding dispatch args
 //   BuildVoxelFingerprints      -> one shadow ray per (representative, voxel);
 //                                   the visibility bits ARE the fingerprint
-// The visibility kernel uses inline RayQuery in compute (DXR 1.1) and
-// [WaveSize(32)] ballot packing, so it requires SM 6.6 + RT Tier 1.1.
+// The visibility kernel uses inline RayQuery in compute (DXR 1.1), so it requires
+// RT Tier 1.1. Its 128-bit mask is packed through groupshared, NOT a wave ballot:
+// see the note above BuildVoxelFingerprints for why, and probe mode 4 for the
+// self-test that catches a regression.
 // The visibility kernel dispatches indirectly off gGuidingDispatchArgs[2] =
 // (4, ceil(litVoxelCount/8), 1), sized to the live lit-voxel count rather than
 // the worst-case grid capacity (ADR 0003 option b retrofit).

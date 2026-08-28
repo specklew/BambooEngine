@@ -22,6 +22,10 @@ RWTexture2D<float4> gShadingPoints : BAMBOO_PASS_UAV(INJECT_REG_SHADING_POINTS);
 // hit position for cvis assignment. Written at the bounce-1 closest hit.
 RWTexture3D<float4> gVoxelRepresentative : BAMBOO_PASS_UAV(INJECT_REG_VOXEL_REPRESENTATIVE);
 RWTexture2D<float4> gVplPosition         : BAMBOO_PASS_UAV(INJECT_REG_VPL_POSITION);
+// xyz = shaded direct light leaving x2 toward x1, w = 1 when the bounce hit.
+RWTexture2D<float4> gVplRadiance         : BAMBOO_PASS_UAV(INJECT_REG_VPL_RADIANCE);
+// xyz = x2's own emission (front face), w = the NEE pdf toward it from x1.
+RWTexture2D<float4> gVplEmitter          : BAMBOO_PASS_UAV(INJECT_REG_VPL_EMITTER);
 
 // Shared primary-visibility buffer (ADR 0004): the primary hit comes from
 // here; injection no longer traces its own camera rays.
@@ -40,7 +44,6 @@ cbuffer VoxelGridCB : BAMBOO_PASS_CBV(REG_VOXEL_GRID_CB)
     uint   voxInjectUseAvg;
     uint   _voxReserved0;
     float  voxHeatScale;
-    uint   voxReuseGiVpl; // ADR 0009: 1 = GI's BSDF subtree writes the VPL data
 }
 
 // Fixed-point irradiance packing (matches SIByL VXPG: scalar = 100)
@@ -54,8 +57,14 @@ uint PackIrradiance(float unpacked)
 struct InjectPayload
 {
     float3 hitPosition;
-    float3 result;  // bounce 0: sampled BSDF direction; bounce 1: direct light RGB
-    uint   flags;   // 1 = valid hit
+    float3 result;      // bounce 0: sampled BSDF direction; bounce 1: E(x2), the Eq. 5 quantity
+    // The same vertex shaded, for reuse as the guided integrator's BSDF MIS
+    // sample (vxpg.injection.reuseInMis). Injection wants irradiance and MIS
+    // wants radiance, so both are carried rather than one derived from the other.
+    float3 shadedDirect;
+    float3 emitterLe;   // x2's own emission, front face only
+    float  emitterNeePdf;
+    uint   flags;       // 1 = valid hit
     uint   seed;
     uint   bounce;
 };
@@ -129,9 +138,21 @@ void InjectHit(inout InjectPayload payload : SV_RayPayload, in Attributes attr)
     // Eq. 5 wants E(x2), the incident irradiance — not the shaded, MIS-weighted
     // contribution. See the injection note in guidedPathTracing.hlsl.
     float3 directIrradiance;
-    SampleDirectLight(hit, surface, payload.seed, directIrradiance);
+    payload.shadedDirect = SampleDirectLight(hit, surface, payload.seed, directIrradiance);
     payload.result = directIrradiance;
     payload.flags = 1;
+
+    // x2's own emission, deferred to the consumer exactly like TraceIndirect's
+    // firstEmitterLe: its MIS weight is 3-way (this segment's two first-vertex
+    // strategies plus NEE-at-v0) and only the integrator knows the other pdfs.
+    payload.emitterLe     = float3(0, 0, 0);
+    payload.emitterNeePdf = 0.0;
+    if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0) &&
+        dot(geometricNormal, V) > 0.0)
+    {
+        payload.emitterLe     = EmitterRadiance(instance, hit.uv);
+        payload.emitterNeePdf = PdfNeeTowardHit(WorldRayOrigin(), instance, PrimitiveIndex(), hit.position);
+    }
 
     // VXPG B+: stash the representative VPL (pos + normal) for this voxel and
     // the per-pixel VPL position. N and the launch index are both available
@@ -153,15 +174,12 @@ void InjectRayGen()
     uint2 dims = DispatchRaysDimensions().xy;
     uint pixelId = launchIndex.x + launchIndex.y * dims.x;
 
-    // Reuse config (ADR 0009): the guided GI's BSDF subtree owns every VPL
-    // write (including the per-pixel clear); this pass only emits the
-    // ShadingPoints G-buffer below. Faithful config clears + traces here.
-    const bool reuseGiVpl = (voxReuseGiVpl != 0u);
-
-    // Clear this pixel's VPL position; the bounce-1 closest hit overwrites it on
-    // a hit, so pixels whose bounce misses stay zero (cvis treats zero as empty).
-    if (!reuseGiVpl)
-        gVplPosition[launchIndex] = float4(0, 0, 0, 0);
+    // Clear this pixel's VPL slots; the bounce-1 closest hit overwrites the
+    // position on a hit, so pixels whose bounce misses stay zero (cvis treats
+    // zero as empty, and so does the MIS reuse path).
+    gVplPosition[launchIndex] = float4(0, 0, 0, 0);
+    gVplRadiance[launchIndex] = float4(0, 0, 0, 0);
+    gVplEmitter[launchIndex]  = float4(0, 0, 0, 0);
 
     // Primary hit from the shared VBuffer (ADR 0004) — reconstruct instead of
     // tracing. All VBuffer consumers see the exact same hit.
@@ -188,9 +206,6 @@ void InjectRayGen()
     // Persist the primary shading point for superpixel clustering; valid
     // regardless of whether the VPL bounce below succeeds.
     gShadingPoints[launchIndex] = float4(hit.position, asfloat(UnitVectorToUnorm32Octahedron(N)));
-
-    if (reuseGiVpl)
-        return; // VPL trace + injection happen in the guided GI raygen (ADR 0009)
 
     // Sample one BSDF direction for the VPL ray (same stochastic
     // specular/diffuse selection as the path tracer)
@@ -233,12 +248,21 @@ void InjectRayGen()
     InjectPayload payload;
     payload.hitPosition = float3(0, 0, 0);
     payload.result = float3(0, 0, 0);
+    payload.shadedDirect = float3(0, 0, 0);
+    payload.emitterLe = float3(0, 0, 0);
+    payload.emitterNeePdf = 0.0;
     payload.flags = 0;
     payload.seed = seed;
     payload.bounce = 1;
     TraceRay(SceneBVH, 0, ~0, 0, 1, 0, bounceRay, payload);
     if (payload.flags == 0)
         return;
+
+    // Written on every hit, not only on a lit one: the reuse path needs to know
+    // the bounce landed somewhere even when x2 turned out to be dark, or those
+    // directions silently lose their BSDF strategy.
+    gVplRadiance[launchIndex] = float4(payload.shadedDirect, 1.0);
+    gVplEmitter[launchIndex]  = float4(payload.emitterLe, payload.emitterNeePdf);
 
     float irradiance = max(payload.result.r, max(payload.result.g, payload.result.b));
     if (irradiance <= 0.0)

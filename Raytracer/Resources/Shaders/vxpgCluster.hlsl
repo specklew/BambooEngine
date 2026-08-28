@@ -102,6 +102,8 @@ float ClusterDistance(uint4 fingerprintA, uint4 fingerprintB,
                    + INTENSITY_WEIGHT * abs(intensityA - intensityB);
 }
 
+#define CLUSTER_SEED_THREADS 1024 // numthreads of SeedClusterCenters
+
 // ---- SeedClusterCenters ----------------------------------------------------
 
 groupshared float  sWarpProbability[32];       // SIByL warp_prob
@@ -109,14 +111,23 @@ groupshared uint4  sCurrentCenterFingerprint;  // SIByL current_center
 groupshared float3 sCurrentCenterPosition;     // SIByL current_center_pos
 groupshared float  sCurrentCenterIntensity;    // SIByL current_center_intensity
 groupshared int    sSelectedWarp;              // SIByL selected_cluster
+// SIByL's subgroup reduction and shuffles are emulated through groupshared, NOT
+// wave intrinsics. The 32 "lanes" of a logical warp here are a THREAD-INDEX
+// slice, not a hardware wave: built on WaveGetLaneIndex()/WaveActiveSum() this
+// kernel was correct only at wave32, and a 64-wide wave leaves half of
+// sWarpProbability unwritten (WaveIsFirstLane fires once per 64) while summing
+// two logical warps together. Index arithmetic cannot drift with the driver's
+// wave-size choice. See the packing note in vxpgFingerprint.hlsl.
+groupshared float  sSeedExchange[CLUSTER_SEED_THREADS];
+groupshared int    sWarpNodeAtLaneZero[32];
 
 [numthreads(1024, 1, 1)]
-[WaveSize(32)]
 void SeedClusterCenters(uint3 tid : SV_DispatchThreadID)
 {
     const uint threadId = tid.x;
-    const uint laneId = WaveGetLaneIndex();
-    const uint warpId = threadId / 32u;
+    const uint laneId = threadId % 32u;      // 0..31 within the logical warp
+    const uint warpId = threadId / 32u;      // 0..31 logical warp
+    const uint warpBase = warpId * 32u;
     const int litVoxelCount = int(gGuidingDispatchArgs[0].w);
 
     // Zeroing here rather than in a node of its own: this kernel is one group and
@@ -168,9 +179,15 @@ void SeedClusterCenters(uint3 tid : SV_DispatchThreadID)
 
         // k-means++: selection probability ~ squared distance
         float weight = nearestCenterDistance * nearestCenterDistance;
-        const float warpWeightSum = WaveActiveSum(weight);
-        if (WaveIsFirstLane())
+        sSeedExchange[threadId] = weight;
+        GroupMemoryBarrierWithGroupSync();
+        if (laneId == 0u)
+        {
+            float warpWeightSum = 0.0;
+            [unroll] for (uint i = 0; i < 32u; ++i)
+                warpWeightSum += sSeedExchange[warpBase + i];
             sWarpProbability[warpId] = warpWeightSum;
+        }
 
         GroupMemoryBarrierWithGroupSync();
 
@@ -179,17 +196,21 @@ void SeedClusterCenters(uint3 tid : SV_DispatchThreadID)
         if (warpId == 0u)
         {
             weight = sWarpProbability[laneId];
-            if (WaveIsFirstLane()) weight = 0.0;
+            if (laneId == 0u) weight = 0.0;
         }
+        GroupMemoryBarrierWithGroupSync();
 
         // Butterfly reduction storing, per level, the probability of taking
         // the "left" child — 5 floats per thread instead of a shared 64-float
-        // tree. WaveReadLaneAt with a per-lane index is spec-gray in DXIL but
-        // is a real shuffle on the NV/AMD targets (Slang WaveShuffle maps to it).
+        // tree. The partner lookup goes through sSeedExchange, so the butterfly
+        // spans exactly the 32 threads of the logical warp.
         float leftProbability[6];
         for (int level = 0; level < 5; ++level)
         {
-            const float neighborWeight = WaveReadLaneAt(weight, laneId ^ (1u << level));
+            sSeedExchange[threadId] = weight;
+            GroupMemoryBarrierWithGroupSync();
+            const float neighborWeight = sSeedExchange[warpBase + (laneId ^ (1u << level))];
+            GroupMemoryBarrierWithGroupSync();
             const float weightSum = weight + neighborWeight;
             leftProbability[4 - level] = (weightSum == 0.0) ? 0.5 : weight / weightSum;
             weight = weightSum;
@@ -211,15 +232,20 @@ void SeedClusterCenters(uint3 tid : SV_DispatchThreadID)
                 nodeId += int(16u >> level);
                 rnd = (rnd - leftP) / (1.0 - leftP);
             }
-            leftProbability[level + 1] = WaveReadLaneAt(leftProbability[level + 1], nodeId);
+            sSeedExchange[threadId] = leftProbability[level + 1];
+            GroupMemoryBarrierWithGroupSync();
+            leftProbability[level + 1] = sSeedExchange[warpBase + uint(clamp(nodeId, 0, 31))];
+            GroupMemoryBarrierWithGroupSync();
         }
 
         if (threadId == 0u)
             sSelectedWarp = nodeId;
+        if (laneId == 0u)
+            sWarpNodeAtLaneZero[warpId] = nodeId;
 
         GroupMemoryBarrierWithGroupSync();
 
-        const int selectedLane = WaveReadLaneAt(nodeId, 0);
+        const int selectedLane = sWarpNodeAtLaneZero[warpId];
         if (int(warpId) == sSelectedWarp && int(laneId) == selectedLane)
         {
             gClusterSeedCompactIds[seedId] = candidateId;

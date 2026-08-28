@@ -20,7 +20,6 @@ struct VoxelGridConstants
     // hole would be a four-file edit whose only failure mode is silent.
     uint32_t          _reserved0;
     float             heatScale;
-    uint32_t          reuseGiVpl; // 1 = VPL fitting samples come from last frame's guided-GI BSDF subtree (ADR 0009)
 };
 
 // Geometry bake + per-frame injection-accumulator clear (ADR 0004). The scene
@@ -43,12 +42,11 @@ public:
     bool DidResize() const { return m_didResize; }
 
     // Runtime knobs propagated to the shared grid constant buffer each frame
-    void SetRuntimeParams(bool injectUseAvg, float heatScale, bool reuseGiVpl);
+    void SetRuntimeParams(bool injectUseAvg, float heatScale);
 
     // Zeroes the per-frame injection accumulators (irradiance + VPL count).
-    // Ordered by the graph: before injection in the faithful config, or after the
-    // guiding build when VPL data is reused from last frame's GI (ADR 0009) — the
-    // build passes must read before the wipe.
+    // Ordered by the graph, always ahead of the injection trace that refills them:
+    // no VPL data survives a frame boundary.
     void DispatchFrameClear();
 
     // The two halves of the geometry bake, one graph node each. The bake stays

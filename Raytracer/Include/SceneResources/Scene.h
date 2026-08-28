@@ -33,10 +33,11 @@ struct InstanceInfo
     // Object-to-world in DXR ObjectToWorld3x4() layout (transpose of the
     // row-vector world matrix). Lets raygen shaders reconstruct VBuffer hits.
     DirectX::XMFLOAT3X4 objectToWorld;
-    DirectX::XMFLOAT3 emissiveRadiance; // 0 = not emissive
+    DirectX::XMFLOAT3 emissiveRadiance; // constant factor; 0 = not emissive
     // -1 = not a light; else light-pool index of this instance's primitive 0
     // (lightIndex = emissiveLightOffset + PrimitiveIndex()).
     int emissiveLightOffset;
+    int emissiveTextureId; // -1 = untextured emitter, emissiveRadiance is the whole Le
 };
 
 class Scene
@@ -67,9 +68,18 @@ public:
     // Rebuilds the pool's analytic tail (entries after the fixed emissive-triangle
     // prefix) from the current GetLightDataCPU(), re-prefix-sums the whole pool's
     // CDF, and re-uploads the pool buffer. Called when light data goes dirty at
-    // runtime (headless overrides, EditorUI edits) — emissive entries are static
-    // geometry and never change.
+    // runtime (headless overrides, EditorUI edits) — the emissive prefix is static
+    // geometry, so only its per-entry power ever changes, and only via the switch below.
     void RebuildLightPoolAnalyticTail(Renderer& renderer);
+
+    // Emissive triangles off: their pool entries keep their positions and go to zero
+    // power, so NEE can no longer select one while InstanceInfo.emissiveLightOffset
+    // stays a valid index. Entries are zeroed rather than removed for exactly that
+    // reason — dropping them would slide the analytic tail under a live offset.
+    // The estimator half of the switch is the emissiveGeometryEnabled pass constant;
+    // Renderer::Update drives both from one CVar so they cannot disagree.
+    void SetEmissiveGeometryEnabled(Renderer& renderer, bool enabled);
+    [[nodiscard]] bool IsEmissiveGeometryEnabled() const { return m_emissiveGeometryEnabled; }
 
     [[nodiscard]] const DirectX::XMFLOAT3& GetAabbMin() const { return m_aabbMin; }
     [[nodiscard]] const DirectX::XMFLOAT3& GetAabbMax() const { return m_aabbMax; }
@@ -89,6 +99,10 @@ private:
     std::shared_ptr<StructuredBuffer<EmissiveTriangle>> m_emissiveTriangleBuffer;
     std::shared_ptr<StructuredBuffer<LightPoolEntry>> m_lightPoolBuffer;
     std::vector<LightPoolEntry> m_lightPoolCPU;
+    // The emissive prefix's authored powers, kept so the switch can zero them and
+    // put them back without rebuilding the scene.
+    std::vector<float> m_emissiveTrianglePower;
+    bool m_emissiveGeometryEnabled = true;
     float m_lightPoolTotalPower = 0.0f;
     uint32_t m_lightPoolCount = 0;
 

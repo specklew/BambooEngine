@@ -231,11 +231,12 @@ bool GraphicsDevice::CheckRayTracingSupport() const
 	// VXPG fingerprint / cvis visibility kernels use inline RayQuery (Tier 1.1,
 	// above) plus [WaveSize(32)] ballot packing, which needs shader model 6.6.
 	// CheckFeatureSupport clamps its answer to the model we ask about, so ask for
-	// the highest a lever can demand (lib_6_7, payload qualifiers — ADR 0020 R7) and
-	// log what came back: a lever that needs more than the driver has must be caught
-	// here, not by a state-object creation failure three seconds into a benchmark.
-	// Ask HIGH, not for what we use: the struct is capped to the value passed in, so
-	// asking for 6.7 can only ever answer "6.7" and says nothing about the driver.
+	// the highest a lever can demand (lib_6_9 — SER and its lib69 control, ADR 0020
+	// R1) and log what came back: a lever that needs more than the driver has must
+	// be caught here, not by a state-object creation failure three seconds into a
+	// benchmark. Ask HIGH, not for what we use: the struct is capped to the value
+	// passed in, so asking for 6.6 could only ever answer "6.6" and would say
+	// nothing about the driver.
 	// 0x69 is SM 6.9 (SER / DXR 1.2), which is past this Agility SDK's enum.
 	D3D12_FEATURE_DATA_SHADER_MODEL shaderModel = { static_cast<D3D_SHADER_MODEL>(0x69) };
 	if (FAILED(m_device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &shaderModel, sizeof(shaderModel))))
@@ -268,8 +269,10 @@ bool GraphicsDevice::CheckRayTracingSupport() const
 		return false;
 	}
 
-	// VXPG guided integrator carries its sampling pdfs in double, faithful to
-	// SIByL (ADR 0003 integrator-swap section).
+	// SIByL carries the guide pdf chain in double. Bamboo does NOT — the shader
+	// defines GUIDE_PDF_FP64 0 and uses float (ADR 0003), so this check is now a
+	// hard requirement the integrator no longer exercises. Kept as a capability
+	// gate so flipping the define back cannot silently produce a broken build.
 	D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
 	ThrowIfFailed(m_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)));
 	if (!options.DoublePrecisionFloatShaderOps)

@@ -1,22 +1,27 @@
 #ifndef LIGHT_TREE_NODE_HLSL
 #define LIGHT_TREE_NODE_HLSL
 
-// Byte-identical port of SIByL vxguiding/tree/shared.hlsli (TreeNode +
-// TreeConstrIndirectArgs). Native uint16_t indices — REQUIRES the global
-// -enable-16bit-types DXC flag (ShaderCompilation.cpp) and device support for
-// Native16BitShaderOps. Ported from SIByL; identifiers renamed to descriptive
-// Bamboo names (original SIByL names kept in comments for port traceability).
+// Port of SIByL vxguiding/tree/shared.hlsli (TreeNode + TreeConstrIndirectArgs).
+// SIByL stores the four indices as uint16_t; here they are uint, which lifts the
+// 2N-1 <= 65535 node ceiling that capped the tree at 32768 leaves. The node grows
+// 32 -> 40 bytes in exchange. Identifiers renamed to descriptive Bamboo names
+// (original SIByL names kept in comments for port traceability).
+
+// Sentinel for "no such node". Was 0xFFFF while the indices were 16-bit.
+#define LIGHT_TREE_NO_NODE 0xFFFFFFFFu
 
 struct LightTreeNode // SIByL TreeNode
 {
     uint2 aabbMin; // packed float3 (half x/y/z), SIByL aabbMin
     uint2 aabbMax; // SIByL aabbMax
     float intensity; // leaf: PremulIrradiance; internal: child intensity sum
-    uint flag; // leaf: clusterID; internal: merge visited-flag (0/1)
-    uint16_t parentIndex; // SIByL parent_idx (0xFFFF = none / root)
-    uint16_t leftIndex; // SIByL left_idx
-    uint16_t rightIndex; // SIByL right_idx
-    uint16_t voxelIndex; // SIByL vx_idx; 0xFFFF for internal nodes, else compactID
+    uint flag; // clusterID; 0xFFFFFFFF on an internal node whose subtree spans
+               // several clusters. NOT the merge visited-flag: that lives in its
+               // own buffer (gNodeVisited, see vxpgLightTree.hlsl).
+    uint parentIndex; // SIByL parent_idx (LIGHT_TREE_NO_NODE = none / root)
+    uint leftIndex; // SIByL left_idx
+    uint rightIndex; // SIByL right_idx
+    uint voxelIndex; // SIByL vx_idx; LIGHT_TREE_NO_NODE for internal nodes, else compactID
 };
 
 struct TreeBuildDispatchArgs // SIByL TreeConstrIndirectArgs
@@ -26,7 +31,7 @@ struct TreeBuildDispatchArgs // SIByL TreeConstrIndirectArgs
                          // this at byte offset 12 (SIByL counter_offset mechanism).
     int3 dispatchInternal; // SIByL dispatch_internal
     uint overflowFlag; // SIByL padding0 repurposed: 1 = lit voxel count exceeded
-                       // the uint16 leaf cap this frame (surfaced as debug-view magenta)
+                       // the leaf cap this frame (surfaced as debug-view magenta)
     int3 dispatchNode; // SIByL dispatch_node
     uint padding1; // SIByL padding1
     int4 drawRects; // SIByL draw_rects

@@ -12,7 +12,8 @@ class VxpgClusterPass;
 class SuperpixelBuildPass;
 class Scene;
 
-// VXPG cluster-visibility pass (MRCS "C-lean" soft visibility): fills the
+// VXPG cluster-visibility pass (average directional visibility, Wu and Chuang
+// 2013 — the soft-visibility work the VXPG paper cites in Sec. 5.2): fills the
 // per-superpixel x per-cluster visibility matrix (hard 32-bit mask + soft
 // BRDF-weighted avg-visibility) that makes the guide view-adaptive. Three
 // compute kernels run each frame after the superpixel + cluster passes:
@@ -20,8 +21,9 @@ class Scene;
 //   GatherClusterLightPoints -> file each pixel's VPL into its cluster drawer
 //                               and seed the mask bit for proven connections
 //   CheckClusterVisibility   -> 32 shadow-ray probes per (superpixel, cluster),
-//                               Cook-Torrance-weighted; needs SM 6.6 (inline
-//                               RayQuery + [WaveSize(32)] wave reductions).
+//                               Cook-Torrance-weighted; needs inline RayQuery
+//                               (RT Tier 1.1). The per-cluster sum goes through
+//                               groupshared, not a wave reduction.
 // Reuses the global SRV/CBV/UAV heap for the scene binding (camera, TLAS,
 // geometry, textures, VBuffer, superpixel textures) exactly like the guided
 // integrator; owns the cluster drawers, counts, mask, and avg buffers.

@@ -52,7 +52,9 @@ namespace
     // Diagnostic decomposition of the visibility test, read out through
     // vxpg.cluster.dumpStats' mean-popcount line. 0 = the real test, 1 = drop the
     // facing gate, 2 = drop the occlusion ray, 3 = report only which
-    // representatives landed on a surface at all.
+    // representatives landed on a surface at all, 4 = structural self-test of the
+    // mask packing (every live lane votes visible, so the line MUST read 128.0 on
+    // any scene with a lit voxel; see FINGERPRINT_PROBE_PACKING in the shader).
     // A representative that lands on the sky is not a receiver: it contributes no
     // bit to any voxel's fingerprint, so the 128-bit signature silently narrows.
     // Off restores the ported shape (one blind pick per cell) for A/B.
@@ -61,8 +63,8 @@ namespace
         1, CVarFlags::EditCheckbox);
 
     AutoCVarInt g_fingerprintProbe("vxpg.fingerprint.probe",
-        "Fingerprint visibility probe: 0 = normal, 1 = no facing gate, 2 = no occlusion, 3 = receiver validity",
-        0, CVarFlags::EditDrag, 0, 3);
+        "Fingerprint visibility probe: 0 = normal, 1 = no facing gate, 2 = no occlusion, 3 = receiver validity, 4 = packing self-test",
+        0, CVarFlags::EditDrag, 0, 4);
 
     // PCG hash — matches Random.hlsl's pcg_hash so the CPU seed decorrelates
     // the per-frame stratified picks the same way the shader RNG expects.

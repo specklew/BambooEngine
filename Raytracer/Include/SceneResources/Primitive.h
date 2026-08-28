@@ -37,6 +37,7 @@ struct Primitive
     // Local-space copies retained ONLY for emissive primitives: the light-pool
     // bake (SceneBuilder::Build) needs triangle positions after GPU upload.
     std::vector<DirectX::XMFLOAT3> m_emissiveBakePositions;
+    std::vector<DirectX::XMFLOAT2> m_emissiveBakeUvs;
     std::vector<uint32_t> m_emissiveBakeIndices;
 
     [[nodiscard]] std::shared_ptr<Material> GetMaterial() const { return m_material; }

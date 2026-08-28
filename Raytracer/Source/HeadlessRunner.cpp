@@ -83,11 +83,10 @@ HeadlessRunner::HeadlessRunner(Renderer& renderer, HeadlessArgs args, HeadlessCo
 }
 
 // Discards frames until the frame time settles, so a measurement reports the
-// technique rather than the GPU's clock ramp. Three things are being waited on at
-// once: boost clocks settling under sustained load, the one-time costs (PSO
-// creation, BVH build, first dispatch of every node), and — for VXPG — the guide
-// reaching steady state, since injection reuse (ADR 0009) makes it a frame-lagged
-// structure that is cold for the first frames after a technique switch.
+// technique rather than the GPU's clock ramp. Two things are being waited on at
+// once: boost clocks settling under sustained load, and the one-time costs (PSO
+// creation, BVH build, first dispatch of every node). The guide itself needs no
+// warm-up — it is rebuilt from scratch every frame and carries nothing forward.
 float HeadlessRunner::WarmUp()
 {
     // Always spend the one-time costs first, and spend them OUTSIDE the timed part
@@ -191,8 +190,13 @@ CaptureSchedule HeadlessRunner::BuildSchedule() const
     }
     else
     {
-        spdlog::error("--checkpoints expects log:K, every:N or list:a,b,c — got '{}'", m_args.checkpoints);
-        return CaptureSchedule::AtEnd(budget);
+        // Falling back to a single capture at the end would quietly answer a different
+        // question than the one asked — the same class of silent substitution as a
+        // malformed --budget, which used to run on the default budget and exit 0.
+        spdlog::error("--checkpoints expects log:K, every:N or list:a,b,c — got '{}'. Refusing to "
+                      "fall back to a single end-of-run capture, because that is a different measurement",
+                      m_args.checkpoints);
+        std::exit(2);
     }
 
     std::sort(points.begin(), points.end());
@@ -203,7 +207,7 @@ CaptureSchedule HeadlessRunner::BuildSchedule() const
     return { budget, points };
 }
 
-// "renderer.numBounces=1,2,4;vxpg.oneSampleMis=0,1" -> 6 points, first dimension
+// "renderer.numBounces=1,2,4;vxpg.treeWeightMode=0,1" -> 6 points, first dimension
 // varying slowest. Order matters for more than tidiness: the slowest-varying axis is
 // the one whose neighbours share a reference image, so a sweep can be scored without
 // re-rendering ground truth for every point.
@@ -273,7 +277,7 @@ void HeadlessRunner::PumpFrame()
 
 void HeadlessRunner::ApplyConfiguredLights()
 {
-    if (m_config.lights.empty())
+    if (!m_config.lightsSpecified)
         return; // keep the scene's own glTF/default lights
 
     const std::unordered_map<std::string, LightType> typeByName = {
@@ -314,8 +318,11 @@ std::vector<RenderTechnique::DebugView> HeadlessRunner::ResolveDebugViews() cons
 {
     const std::vector<RenderTechnique::DebugView> available = m_renderer.GetTechniqueDebugViews();
 
+    // No --debug-views means "whatever the config asked for", NOT view 0: hardcoding 0
+    // here silently overwrote `guidingDebugView` from the render config, so a run that
+    // asked for the symmetric baseline measured the full guided integrator instead.
     if (m_args.debugViews.empty())
-        return { {0, "None"} };
+        return { {static_cast<int>(m_config.guidingDebugView), "config"} };
 
     if (m_args.debugViews.size() == 1 && m_args.debugViews.front() == "all")
         return available;
@@ -387,7 +394,6 @@ int HeadlessRunner::Run()
     ApplyCommandLineOverrides(m_args);
 
     m_renderer.LoadScene(ResolveScenePath(m_args.scene), ResolveStatesKey(m_args));
-    ApplyConfiguredLights();
 
     if (!Validate())
         return 2;
@@ -418,6 +424,10 @@ int HeadlessRunner::Run()
         for (const std::string& place : m_args.states)
         {
             m_renderer.GoToState(place);
+            // After the state, not before: a state that carries a `lights` array replaces
+            // the light set on entry, so config lights applied earlier were silently
+            // discarded — and an empty array in the state wiped them without a word.
+            ApplyConfiguredLights();
 
             for (const RenderTechnique::DebugView& view : views)
             {
@@ -455,15 +465,29 @@ int HeadlessRunner::Run()
                 // Independent images, one process: accumulation resets between them
                 // while the frame counter — and so the per-pixel RNG stream — runs on,
                 // which is what makes their spread a real error bar.
+                //
+                // The images are CONSECUTIVE frames: nothing is rendered between them.
+                // There used to be a throwaway frame here to absorb the PNG encode,
+                // which the clock would otherwise hand to the next frame — but the
+                // encode moved to writer threads and ScreenshotManager already times
+                // its own readback and hands it to Renderer::Update to subtract
+                // (ConsumeLastCaptureCostSeconds). The throwaway had become a
+                // leftover that only made every second frame invisible, which is
+                // exactly the wrong thing for a metric defined on CONSECUTIVE frames
+                // (temporal error / temporal MSE).
+                //
+                // Capturing EVERY frame is not free, and the subtraction above does
+                // not fully hide it: measured on veach-ajar / VXPG, a run whose every
+                // frame is captured reports 6.8-10.4 ms against a 4.63 ms warm-up at
+                // 1080p, and 1.4-1.8 ms against 0.51 ms at 480x270 — so roughly a
+                // fixed ~1 ms of per-capture machinery plus a resolution-dependent
+                // readback/encode term. It does not touch the IMAGES (same frame
+                // index, same RNG, same accumulation), so a frame-indexed metric is
+                // unaffected; but neither meanFrameMs nor accumulatedTime from such a
+                // run describes the technique. Take frame cost and equal-time
+                // readings from a run that captures rarely.
                 for (uint32_t image = 0; image < m_args.images; ++image)
                 {
-                    // The frame after a capture pays for the PNG encode and the
-                    // readback map, and the clock hands that cost to the frame that
-                    // follows. Spend it on a throwaway frame, or every image after
-                    // the first reports a ~280 ms frame instead of a ~5 ms one.
-                    if (image > 0)
-                        PumpFrame();
-
                     const std::string imageStem = m_args.images > 1
                         ? fmt::format("{}-i{:04}", stem, image)
                         : stem;

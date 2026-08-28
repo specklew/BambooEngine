@@ -12,7 +12,9 @@
 #include "PassRegisters.h"
 
 // 1 = debug-view branches compiled in (default; interactive debug variant),
-// 0 = clean benchmark variant (raytracing.rg.clean.shader). The CVar-driven
+// 0 = clean benchmark variant, compiled through the "noviews" vendor lever
+// (VendorLevers::VariantAsset suffixes the raygen asset id; there is no sidecar
+// .clean.shader file any more). The CVar-driven
 // branches are wave-uniform and cheap at runtime; compiling them out removes
 // the dead code's register/I-cache footprint from the hot raygen.
 #ifndef RT_DEBUG_VIEWS
@@ -391,7 +393,10 @@ void RayGen()
             surface.roughness = roughness;
             surface.metallic  = metallic;
 
-            if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0))
+            // Same reasoning: under indirect-only the first vertex's own emission is
+            // dropped, so its NEE-pdf query is dead work too.
+            if (instance.emissiveLightOffset >= 0 && any(instance.emissiveRadiance > 0.0) &&
+                !(vertexIndex == 0u && IndirectOnly()))
             {
                 float3 geometricLightNormal = geometricN;
                 if (dot(geometricLightNormal, V) > 0.0) // front face only
@@ -402,16 +407,15 @@ void RayGen()
                         float pdfNee = PdfNeeTowardHit(previousVertexPosition, instance, p.primitiveId, hit.position);
                         weight = BalanceWeight(prevBouncePdf, pdfNee, 0.0);
                     }
-                    if (!(vertexIndex == 0u && IndirectOnly()))
-                        radiance += pathThroughput * instance.emissiveRadiance * weight;
+                    radiance += pathThroughput * EmitterRadiance(instance, hit.uv) * weight;
                 }
             }
 
-            {
-                const float3 direct = SampleDirectLight(hit, surface, seed);
-                if (!(vertexIndex == 0u && IndirectOnly()))
-                    radiance += pathThroughput * direct;
-            }
+            // Skip the CALL, not just the accumulation: SampleDirectLight samples the
+            // light pool and traces a shadow ray, and indirect-only used to pay for both
+            // and then throw the result away.
+            if (!(vertexIndex == 0u && IndirectOnly()))
+                radiance += pathThroughput * SampleDirectLight(hit, surface, seed);
 
             if (vertexIndex >= (uint)numBounces)
                 break;

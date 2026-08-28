@@ -1,4 +1,5 @@
-// VXPG cluster-visibility pass (MRCS "C-lean" soft visibility): fills the
+// VXPG cluster-visibility pass (average directional visibility, Wu and Chuang
+// 2013 — the soft-visibility work the VXPG paper cites in Sec. 5.2): fills the
 // per-superpixel x per-cluster visibility matrix that makes guiding view-
 // adaptive. Three kernels run each frame after the superpixel + cluster passes:
 //
@@ -12,7 +13,7 @@
 //     connection the pixel's own path already proved.
 //
 //   CheckClusterVisibility  (port of visibility/cvis-visibility-check-comp.slang)
-//     Per (superpixel, cluster): 32 sample lanes each trace one shadow ray
+//     Per (superpixel, cluster): 32 sample threads each trace one shadow ray
 //     from a random superpixel pixel to a random cluster VPL; the BRDF-weighted
 //     visible fraction is the soft avg-visibility, and any hit sets the mask.
 //
@@ -27,16 +28,17 @@
 #include "VBuffer.hlsl"
 
 #define CVIS_CLUSTER_COUNT 32
+#define CVIS_CHECK_ROWS_PER_GROUP 8 // numthreads.y of CheckClusterVisibility
 #define CVIS_GATHER_CAP    1024
 
 // ---- cvis-specific resources (registers chosen to avoid RaytracingUtils') ----
 // Table (global heap): per-pixel + per-superpixel textures.
-RWTexture2D<float4> gVplPosition             : BAMBOO_PASS_UAV(CVIS_REG_VPL_POSITION); // SIByL u_vpl_position (slot 526)
-RWTexture2D<uint4>  gVBuffer                 : BAMBOO_PASS_UAV(CVIS_REG_VBUFFER); // shared primary VBuffer (slot 527)
-RWTexture2D<int>    gSuperpixelIndex         : BAMBOO_PASS_UAV(CVIS_REG_SUPERPIXEL_INDEX); // SIByL u_spixelIdx (slot 523)
-RWTexture2D<int2>   gSpixelGathered          : BAMBOO_PASS_UAV(CVIS_REG_SPIXEL_GATHERED); // SIByL u_spixel_gathered (slot 528)
-RWTexture2D<uint>   gSpixelCounter           : BAMBOO_PASS_UAV(CVIS_REG_SPIXEL_COUNTER); // SIByL u_spixel_counter (slot 529)
-RWTexture2D<uint>   gClusterVisibilityMask   : BAMBOO_PASS_UAV(CVIS_REG_VISIBILITY_MASK); // SIByL u_spixel_visibility (slot 530)
+RWTexture2D<float4> gVplPosition             : BAMBOO_PASS_UAV(CVIS_REG_VPL_POSITION); // SIByL u_vpl_position (slot 525)
+RWTexture2D<uint4>  gVBuffer                 : BAMBOO_PASS_UAV(CVIS_REG_VBUFFER); // shared primary VBuffer (slot 526)
+RWTexture2D<int>    gSuperpixelIndex         : BAMBOO_PASS_UAV(CVIS_REG_SUPERPIXEL_INDEX); // SIByL u_spixelIdx (slot 522)
+RWTexture2D<int2>   gSpixelGathered          : BAMBOO_PASS_UAV(CVIS_REG_SPIXEL_GATHERED); // SIByL u_spixel_gathered (slot 527)
+RWTexture2D<uint>   gSpixelCounter           : BAMBOO_PASS_UAV(CVIS_REG_SPIXEL_COUNTER); // SIByL u_spixel_counter (slot 528)
+RWTexture2D<uint>   gClusterVisibilityMask   : BAMBOO_PASS_UAV(CVIS_REG_VISIBILITY_MASK); // SIByL u_spixel_visibility (slot 529)
 
 // Root UAVs / SRVs: structured buffers.
 RWStructuredBuffer<int>    gVoxInverseIndex          : BAMBOO_PASS_UAV(CVIS_REG_INVERSE_INDEX);  // voxelID -> compactID
@@ -131,10 +133,11 @@ float NextRandom(inout uint state)
 // maxComponent(Cook-Torrance BRDF) as the SIByL-equivalent BSDF weight.
 // DEVIATION: uses per-instance material FACTORS (base color / roughness /
 // metallic) + the geometric normal, NOT the albedo/roughness/normal textures.
-// A plain compute Dispatch can't sample the scene textures while they sit in
-// the raster path's PIXEL_SHADER_RESOURCE layout; the RT passes (DispatchRays)
-// tolerate it but this compute pass does not. The weight is a soft visibility
-// refinement, so instance constants are an acceptable stand-in.
+// The original reason — scene textures pinned to PIXEL_SHADER_RESOURCE, illegal
+// for a compute Dispatch — no longer holds (Utils.cpp creates them
+// PIXEL | NON_PIXEL). What remains is cost: sampling would drag the
+// instance/geometry/texture bindings into this kernel. The weight is a soft
+// visibility refinement, so instance constants stay an acceptable stand-in.
 float BsdfWeight(int2 pixelID, float3 lightDir)
 {
     VBufferData vb = UnpackVBufferData(gVBuffer[pixelID]);
@@ -175,9 +178,15 @@ float BsdfWeight(int2 pixelID, float3 lightDir)
 
 groupshared float sSharedVisibility[CVIS_CLUSTER_COUNT];
 groupshared uint  sGroupVisibility;
+// The 32 sample lanes of one row, reduced through groupshared rather than
+// WaveActiveSum: a wave wider than numthreads.x straddles two rows, which carry
+// two DIFFERENT clusterToCheck values, so a wave sum would mix two clusters and
+// WaveIsFirstLane would leave one of them at its cleared 0 — a superpixel told
+// it cannot see a cluster it can. numthreads.x is the reduction width by
+// construction, which no driver wave-size choice can change.
+groupshared float sLaneWeight[CVIS_CHECK_ROWS_PER_GROUP * 32];
 
 [numthreads(32, 8, 1)]
-[WaveSize(32)]
 void CheckClusterVisibility(uint3 dtid : SV_DispatchThreadID, uint gidx : SV_GroupIndex)
 {
     const int2 spixelID = int2(dtid.xy) / 32;
@@ -207,8 +216,6 @@ void CheckClusterVisibility(uint3 dtid : SV_DispatchThreadID, uint gidx : SV_Gro
         // Gather lists can hold stale/unwritten entries; clamp to a valid screen
         // pixel so a bogus coordinate can't read the VBuffer (and instance info)
         // out of bounds.
-        // Gather lists can hold stale/unwritten entries; clamp to a valid screen
-        // pixel so a bogus coordinate can't read the VBuffer out of bounds.
         const int2 pixelID = clamp(gSpixelGathered[spixelID * 32 + subtask],
                                    int2(0, 0), gResolution - int2(1, 1));
 
@@ -269,10 +276,19 @@ void CheckClusterVisibility(uint3 dtid : SV_DispatchThreadID, uint gidx : SV_Gro
         }
     }
 
-    // 32 sample lanes (one wave, fixed clusterToCheck) sum their weights.
-    float waveSum = WaveActiveSum(visible ? weight : 0.0);
-    if (WaveIsFirstLane())
-        sSharedVisibility[clusterToCheck] = waveSum;
+    // The row's 32 sample lanes (one fixed clusterToCheck) sum their weights.
+    const uint row  = gidx / 32u;
+    const uint lane = gidx % 32u;
+    sLaneWeight[gidx] = visible ? weight : 0.0;
+    GroupMemoryBarrierWithGroupSync();
+
+    if (lane == 0u)
+    {
+        float rowSum = 0.0;
+        [unroll] for (uint i = 0; i < 32u; ++i)
+            rowSum += sLaneWeight[row * 32u + i];
+        sSharedVisibility[clusterToCheck] = rowSum;
+    }
 
     GroupMemoryBarrierWithGroupSync();
 

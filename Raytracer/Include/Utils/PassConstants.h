@@ -24,7 +24,7 @@ public:
         uint32_t numSamplesPerPixel = 4;
         uint32_t numBounces = 1;
         uint32_t frameIndex = 0;
-        uint32_t guidingFlags = 0; // bit 0 = power MIS; doubles as the pad HLSL inserts before float3
+        uint32_t guidingFlags = 0; // bit 0 free since the power heuristic went; doubles as the pad HLSL inserts before float3
         DirectX::XMFLOAT3 cameraWorldPos = {0.0f, 0.0f, 0.0f};
         // 1 = per-pixel sub-pixel jitter on the shared VBuffer primaries (the
         // jitter is derived per pixel in-shader from pixel + frameIndex).
@@ -36,6 +36,12 @@ public:
         // 0 = sky stays visible as background but contributes no lighting.
         // See passConstants.hlsl.
         uint32_t skyLightingEnabled = 1;
+        // 1 = emissive triangles light the scene (default); 0 = they emit nothing
+        // and their light-pool entries carry zero power, so substituting an analytic
+        // light REPLACES the scene's own emitters rather than adding to them. The
+        // pool side is Scene::SetEmissiveGeometryEnabled — both halves are needed:
+        // this flag alone would leave NEE still sampling emitters that emit nothing.
+        uint32_t emissiveGeometryEnabled = 1;
         uint32_t lightPoolCount = 0;
         float lightPoolTotalPower = 0.0f;
     } data;

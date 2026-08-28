@@ -2,8 +2,9 @@
 // ONCE per bake (scene load / grid resize / bound-flag change), not per frame.
 // Three fixed-axis draws (x, y, z) with HW conservative raster; each fragment
 // marks its center voxel occupied and injects a quantized AABB of the geometry
-// inside that voxel (SIByL bake-injection.slang). At the shipped defaults
-// (useCompact = clipping = 0) the injected AABB is the full voxel cube.
+// inside that voxel (SIByL bake-injection.slang). Bamboo defaults useCompact = 1
+// (tight triangle bound) and clipping = 0; SIByL ships both off, which makes the
+// injected AABB the full voxel cube.
 // SIByL's z_conservative flag is subsumed by the 3-axis draw scheme.
 
 #include "PassRegisters.h"

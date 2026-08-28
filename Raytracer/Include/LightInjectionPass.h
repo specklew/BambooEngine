@@ -28,6 +28,10 @@ public:
     // fingerprint pass; per-pixel VPL hit position (Texture2D), consumed by cvis assignment.
     Microsoft::WRL::ComPtr<ID3D12Resource> GetVoxelRepresentativeTexture() const { return m_voxelRepresentativeTex; }
     Microsoft::WRL::ComPtr<ID3D12Resource> GetVplPositionTexture() const { return m_vplPositionTex; }
+    // The injected sample in the form the guided integrator can reuse as its own
+    // BSDF MIS sample (vxpg.injection.reuseInMis).
+    Microsoft::WRL::ComPtr<ID3D12Resource> GetVplRadianceTexture() const { return m_vplRadianceTex; }
+    Microsoft::WRL::ComPtr<ID3D12Resource> GetVplEmitterTexture() const { return m_vplEmitterTex; }
 
     // Recreates the grid-sized representative texture after a voxel-grid resize.
     // Caller must have flushed the GPU first (the old texture may be in flight).
@@ -46,4 +50,6 @@ private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_shadingPointsTex;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_voxelRepresentativeTex;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_vplPositionTex;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_vplRadianceTex;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_vplEmitterTex;
 };

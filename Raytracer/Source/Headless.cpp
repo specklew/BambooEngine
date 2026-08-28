@@ -5,6 +5,7 @@
 #include "VendorLevers.h"
 #include "rapidjson/document.h"
 
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 
@@ -61,7 +62,15 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
             const std::string value  = colon == std::string::npos ? std::string{} : budget.substr(colon + 1);
             if (kind == "frames")       args.budgetFrames = static_cast<uint32_t>(std::stoul(value));
             else if (kind == "seconds") args.seconds      = std::stof(value);
-            else spdlog::error("--budget expects frames:N or seconds:T, got '{}'", budget);
+            else
+            {
+                // Same class as an unparseable config: a rejected budget used to leave the
+                // built-in default in place, so the run measured a budget nobody asked for
+                // and still exited 0 with images on disk.
+                spdlog::error("--budget expects frames:N or seconds:T, got '{}' — refusing to fall "
+                              "back to the default budget, because that is a different measurement", budget);
+                std::exit(2);
+            }
         }
         else if (flag == "--images")      args.images = static_cast<uint32_t>(std::stoul(valueOf(i)));
         else if (flag == "--checkpoints") args.checkpoints = valueOf(i);
@@ -147,13 +156,27 @@ HeadlessConfig LoadHeadlessConfig(const std::string& path)
 
     std::stringstream ss;
     ss << file.rdbuf();
-    const std::string json = ss.str();
+    std::string json = ss.str();
+
+    // PowerShell's Set-Content and Out-File write a UTF-8 BOM by default, and
+    // rapidjson treats it as a parse error. These files get edited from a shell as
+    // often as from an editor, so skip it rather than reject the file.
+    if (json.size() >= 3 && static_cast<unsigned char>(json[0]) == 0xEF
+                         && static_cast<unsigned char>(json[1]) == 0xBB
+                         && static_cast<unsigned char>(json[2]) == 0xBF)
+        json.erase(0, 3);
 
     rapidjson::Document doc;
     if (doc.Parse(json.c_str()).HasParseError() || !doc.IsObject())
     {
-        spdlog::warn("Headless config at {} is not valid JSON, using built-in defaults", path);
-        return config;
+        // Fatal, not a fallback. The built-in defaults are a DIFFERENT measurement
+        // (720p, exposure 1.0, sky lighting on, the scene's own lights), so a run
+        // that quietly swapped them in would report conditions it never rendered
+        // under. The old behaviour warned and continued, which is the same failure
+        // with a line in the log.
+        spdlog::error("Headless config at {} is not valid JSON — refusing to fall back to built-in "
+                      "defaults, because those are a different measurement", path);
+        std::exit(2);
     }
 
     auto readUint  = [&](const char* key, uint32_t& out) { if (doc.HasMember(key) && doc[key].IsUint())   out = doc[key].GetUint(); };
@@ -171,18 +194,41 @@ HeadlessConfig LoadHeadlessConfig(const std::string& path)
     readFloat("lift",       config.lift);
     readFloat("indirectSkyClamp", config.indirectSkyClamp);
     readBool ("skyLighting", config.skyLighting);
+    readBool ("injectionReuseInMis", config.injectionReuseInMis);
+    readBool ("indirectOnly", config.indirectOnly);
+    readBool ("emissiveGeometry", config.emissiveGeometry);
     readUint ("guidingDebugView", config.guidingDebugView);
     readUint ("treeWeightMode", config.treeWeightMode);
-    readBool ("secondBounce", config.secondBounce);
-    readBool ("oneSampleMis", config.oneSampleMis);
-    readBool ("oneSampleAdaptiveQ", config.oneSampleAdaptiveQ);
-    readBool ("injectionReuse", config.injectionReuse);
     readFloat("defaultSeconds", config.defaultSeconds);
     if (doc.HasMember("outputDir") && doc["outputDir"].IsString())
         config.outputDir = doc["outputDir"].GetString();
 
+    // A key this parser does not know is silently ignored, which is how
+    // "injectionReuse": true sat in the evaluation config for weeks reading like a
+    // record of the conditions a run was measured under while doing nothing at all.
+    // A config file IS the record of a measurement's conditions, so a key that does
+    // not reach the renderer has to be loud.
+    static constexpr const char* kKnownKeys[] = {
+        "width", "height", "spp", "bounces", "postProcessEnabled", "exposure", "contrast",
+        "saturation", "lift", "indirectSkyClamp", "skyLighting", "injectionReuseInMis",
+        "indirectOnly", "emissiveGeometry", "guidingDebugView", "treeWeightMode", "defaultSeconds",
+        "outputDir",
+        "lights",
+    };
+    for (auto member = doc.MemberBegin(); member != doc.MemberEnd(); ++member)
+    {
+        const std::string name = member->name.GetString();
+        bool known = false;
+        for (const char* key : kKnownKeys)
+            known = known || name == key;
+        if (!known)
+            spdlog::warn("Headless config {}: key '{}' is not recognised and does nothing", path, name);
+    }
+
     if (doc.HasMember("lights") && doc["lights"].IsArray())
     {
+        config.lightsSpecified = true;
+
         auto readVec3 = [](const rapidjson::Value& entry, const char* key, float out[3]) {
             if (entry.HasMember(key) && entry[key].IsArray() && entry[key].Size() == 3)
                 for (rapidjson::SizeType i = 0; i < 3; ++i)

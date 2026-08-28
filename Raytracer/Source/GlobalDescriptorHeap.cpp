@@ -41,6 +41,8 @@ namespace
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // SuperpixelCenter
         { NullViewKind::UavTexture3D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // VoxelRepresentative
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // VplPosition
+        { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // VplRadiance
+        { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // VplEmitter
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_UINT },       // VBuffer
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32_SINT },             // SpixelGathered
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32_UINT },                // SpixelCounter

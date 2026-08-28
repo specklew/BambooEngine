@@ -22,6 +22,8 @@ enum class GlobalDescriptor : uint32_t
     SuperpixelCenter,
     VoxelRepresentative,
     VplPosition,
+    VplRadiance,
+    VplEmitter,
     VBuffer,
     SpixelGathered,
     SpixelCounter,
@@ -57,6 +59,8 @@ inline constexpr uint32_t GlobalDescriptorSlotCounts[] = {
     1,                                 // SuperpixelCenter
     1,                                 // VoxelRepresentative
     1,                                 // VplPosition
+    1,                                 // VplRadiance
+    1,                                 // VplEmitter
     1,                                 // VBuffer
     1,                                 // SpixelGathered
     1,                                 // SpixelCounter

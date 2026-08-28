@@ -13,8 +13,13 @@ struct Material
     std::shared_ptr<Texture> m_normalTexture;
     std::shared_ptr<Texture> m_metallicRoughnessTexture;
     // CPU-only (raster untouched): >0 marks every triangle of the primitive an
-    // area light with this constant radiance.
+    // area light. glTF emission is emissiveFactor * emissiveStrength * emissiveTexture,
+    // so this holds the constant factor and the texture modulates it per texel.
     DirectX::XMFLOAT3 m_emissiveRadiance{ 0.0f, 0.0f, 0.0f };
+    std::shared_ptr<Texture> m_emissiveTexture;
+    // Whole-image mean of m_emissiveTexture in linear space, multiplicative identity
+    // when there is no texture. Light-pool selection weight only.
+    DirectX::XMFLOAT3 m_emissiveTextureAverage{ 1.0f, 1.0f, 1.0f };
 
     struct MaterialData
     {
