@@ -108,6 +108,15 @@ void InjectTriangleVoxelBound(float3 triangleVoxelSpace[3], int3 voxelId)
     InterlockedMax(gBakedBoundMax[flatId * 4 + 2], quantizedMax.z, previous);
 }
 
+// Marks one voxel occupied and injects this triangle's bound into it.
+void InjectIntoVoxel(float3 triangleVoxelSpace[3], int3 voxelId)
+{
+    if (!VoxelInBounds(gGrid, voxelId)) return;
+    uint previous;
+    InterlockedOr(gOccupancy[voxelId], 1u, previous);
+    InjectTriangleVoxelBound(triangleVoxelSpace, voxelId);
+}
+
 void pixel(VsOut pin, float3 bary : SV_Barycentrics)
 {
     float3 posW0 = GetAttributeAtVertex(pin.PosW, 0);
@@ -118,12 +127,52 @@ void pixel(VsOut pin, float3 bary : SV_Barycentrics)
     int3 idx = WorldToVoxelIndex(gGrid, posW);
     if (!VoxelInBounds(gGrid, idx)) return;
 
-    uint old;
-    InterlockedOr(gOccupancy[idx], 1u, old);
-
     float3 triangleVoxelSpace[3];
     triangleVoxelSpace[0] = (posW0 - gGrid.gridMin) / gGrid.voxelSize;
     triangleVoxelSpace[1] = (posW1 - gGrid.gridMin) / gGrid.voxelSize;
     triangleVoxelSpace[2] = (posW2 - gGrid.gridMin) / gGrid.voxelSize;
-    InjectTriangleVoxelBound(triangleVoxelSpace, idx);
+
+    // This fragment owns one voxel column: its cell in the two rasterized axes, the whole grid
+    // along the axis being projected away. Clipping the triangle to that column gives the exact
+    // range of voxels it crosses here.
+    const uint depthAxis = axisIndex;
+    float3 columnMin = float3(idx);
+    float3 columnMax = columnMin + 1.0f;
+    columnMin[depthAxis] = 0.0f;
+    columnMax[depthAxis] = float(gGrid.gridDim);
+
+    float3 clipped[9];
+    clipped[0] = triangleVoxelSpace[0];
+    clipped[1] = triangleVoxelSpace[1];
+    clipped[2] = triangleVoxelSpace[2];
+    int clippedCount = 3;
+    ClipTriangleAgainstAABB(clipped, clippedCount, columnMin, columnMax);
+
+    if (clippedCount < 1)
+    {
+        // The interpolated position can sit just outside the triangle (conservative
+        // rasterization extrapolates attributes), leaving an empty clip. Keep the old behaviour
+        // rather than dropping the fragment.
+        InjectIntoVoxel(triangleVoxelSpace, idx);
+        return;
+    }
+
+    float depthMin = clipped[0][depthAxis];
+    float depthMax = depthMin;
+    for (int i = 1; i < clippedCount; ++i)
+    {
+        depthMin = min(depthMin, clipped[i][depthAxis]);
+        depthMax = max(depthMax, clipped[i][depthAxis]);
+    }
+
+    const int lastVoxel = int(gGrid.gridDim) - 1;
+    const int firstDepth = clamp(int(floor(depthMin)), 0, lastVoxel);
+    const int lastDepth  = clamp(int(floor(depthMax)), 0, lastVoxel);
+
+    int3 voxelId = idx;
+    for (int depth = firstDepth; depth <= lastDepth; ++depth)
+    {
+        voxelId[depthAxis] = depth;
+        InjectIntoVoxel(triangleVoxelSpace, voxelId);
+    }
 }
