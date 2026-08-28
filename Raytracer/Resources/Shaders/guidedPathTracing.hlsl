@@ -1311,7 +1311,10 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 // Semi-NEE gate: the claimed pdf belongs to the chosen
                 // voxel, so only count hits inside its AABB.
                 bool accepted = didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax);
-                guideOutcome = accepted ? 2u : 1u;
+                // Two reject causes, kept apart because they call for different fixes: 1 = something
+                // was hit but outside the voxel (a blocker in front), 8 = the ray crossed the voxel
+                // and hit nothing. View 4 paints them red and white.
+                guideOutcome = accepted ? 2u : (didHit ? 1u : 8u);
 
                 if (accepted)
                 {
@@ -1351,6 +1354,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         else if (guideOutcome == 5u) radiance = float3(1, 0.5, 0);  // pdf <= 0
         else if (guideOutcome == 6u) radiance = float3(0.5, 0, 1);  // below horizon
         else if (guideOutcome == 7u) radiance = float3(1, 1, 0);    // zero BRDF
+        else if (guideOutcome == 8u) radiance = float3(1, 1, 1);    // reached the voxel, hit nothing
         else                         radiance = float3(0, 0, 1);    // guide dead
     }
 
