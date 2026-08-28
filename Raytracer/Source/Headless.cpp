@@ -5,6 +5,7 @@
 #include "VendorLevers.h"
 #include "rapidjson/document.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -110,9 +111,28 @@ void ApplyCVarAssignment(const std::string& name, const std::string& value)
         CVarSystem::Get()->SetCVarFloat(id, std::stof(value));
     else if (CVarSystem::Get()->GetIntCVar(id))
         CVarSystem::Get()->SetCVarInt(id, std::stoi(value));
+    else if (CVarEnum* enumCVar = CVarSystem::Get()->GetEnumCVar(id))
+    {
+        // An enum CVar is selected by POSITION in its value list, not by the enumerator's own
+        // value, so neither of the branches above can reach one. Both spellings resolve here: the
+        // enumerator name, and the number written in the enum declaration.
+        const auto byName = std::find(enumCVar->names.begin(), enumCVar->names.end(), value);
+        size_t position = static_cast<size_t>(std::distance(enumCVar->names.begin(), byName));
+        if (byName == enumCVar->names.end())
+        {
+            const auto byValue = std::find(enumCVar->values.begin(), enumCVar->values.end(), std::atoi(value.c_str()));
+            if (byValue == enumCVar->values.end())
+            {
+                spdlog::error("CVar '{}' has no value '{}'", name, value);
+                return;
+            }
+            position = static_cast<size_t>(std::distance(enumCVar->values.begin(), byValue));
+        }
+        CVarSystem::Get()->SetCVarEnum(id, static_cast<uint32_t>(position));
+    }
     else
     {
-        spdlog::error("CVar '{}' is not a float or int CVar", name);
+        spdlog::error("CVar '{}' is not a float, int or enum CVar", name);
         return;
     }
     spdlog::info("cvar {} = {}", name, value);
