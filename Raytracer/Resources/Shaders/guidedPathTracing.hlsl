@@ -686,6 +686,17 @@ float3 SampleVoxelSolidAngle(
     return mul(localDir, kVoxelFaceRotations[selectedFace] * dirSign[selectedFace]);
 }
 
+// Distance at which a ray leaves an AABB. Used to end a guided sample's ray at the voxel it
+// claims, which is exact because the semi-NEE gate rejects everything past that face anyway.
+float AabbExitDistance(float3 origin, float3 dir, float3 aabbMin, float3 aabbMax)
+{
+    // A zero component would make the slab test 0 * inf = NaN, and min() propagates it.
+    const float3 safeDir = select(dir >= 0.0, max(dir, 1e-8), min(dir, -1e-8));
+    const float3 inverseDir = 1.0 / safeDir;
+    const float3 farSlabs = max((aabbMin - origin) * inverseDir, (aabbMax - origin) * inverseDir);
+    return min(min(farSlabs.x, farSlabs.y), farSlabs.z);
+}
+
 // ---- Continuation trace (deeper bounces, vanilla logic) ----
 
 // Sky reached by an indirect ray: sky-lighting switch + firefly clamp applied
@@ -790,7 +801,8 @@ static uint2 gLaunchDims;
 // emission is 2-way MIS'd (PT-style) inline, everything known here.
 float3 TraceIndirect(float3 origin, float3 dir, inout uint seed,
                      out float3 hitPos, out bool didHit,
-                     out float3 firstEmitterLe, out float firstEmitterNeePdf)
+                     out float3 firstEmitterLe, out float firstEmitterNeePdf,
+                     float firstSegmentTMax = RAY_TMAX)
 {
     float3 radiance = float3(0, 0, 0);
     float3 pathThroughput = float3(1, 1, 1);
@@ -812,7 +824,9 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed,
         ray.Origin = rayOrigin;
         ray.Direction = rayDir;
         ray.TMin = RAY_TMIN;
-        ray.TMax = RAY_TMAX;
+        // Only the first segment may be shortened; a continuation from an accepted hit is
+        // an ordinary path segment with nothing bounding it.
+        ray.TMax = (bounce == 1u) ? firstSegmentTMax : RAY_TMAX;
 
         GuidedPayload p = TraceBounceRay(ray);
 
@@ -1286,7 +1300,13 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 float3 hitPos;
                 bool didHit;
                 float3 firstLe; float firstNeePdf;
-                float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit, firstLe, firstNeePdf);
+                // End the ray at the far face of the voxel it was sampled toward: the gate
+                // below discards any hit past it, so tracing further is work with no result.
+                // The margin keeps a hit exactly on that face inside the ray.
+                const float voxelExit = AabbExitDistance(hit.position, dir, aabbMin, aabbMax);
+                const float guideTMax = clamp(voxelExit * 1.0001 + 1e-4, RAY_TMIN, RAY_TMAX);
+                float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit,
+                                                firstLe, firstNeePdf, guideTMax);
 
                 // Semi-NEE gate: the claimed pdf belongs to the chosen
                 // voxel, so only count hits inside its AABB.
