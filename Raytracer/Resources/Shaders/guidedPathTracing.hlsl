@@ -1337,7 +1337,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 // Two reject causes, kept apart because they call for different fixes: 1 = something
                 // was hit but outside the voxel (a blocker in front), 8 = the ray crossed the voxel
                 // and hit nothing. View 4 paints them red and white.
-                guideOutcome = accepted ? 2u : (didHit ? 1u : 8u);
+                guideOutcome = accepted ? 2u : ((blocked || didHit) ? 1u : 8u);
 
                 if (accepted)
                 {
