@@ -79,6 +79,33 @@ SphericalQuad CreateSphericalQuad(float3 local, float2 extend)
     return squad;
 }
 
+// ---- Solid angle without the spherical excess ------------------------------
+// SphericalQuadInit's S is g0 + g1 + g2 + g3 - 2*PI: four angles near PI/2, each an acos of a dot
+// of two normalized crosses of nearly parallel vectors. The cross cancels once and the excess
+// cancels again, so what survives is a roughly CONSTANT absolute error of ~2e-7 sr - measured, see
+// the GuideSolidAngleConditioning debug view - and the relative error is that divided by the solid
+// angle itself. Van Oosterom & Strackee compute the same quantity as one triple product over a
+// denominator near 4, which never cancels: measured relative error stays at ~1e-7 across four
+// decades of distance and two of aspect ratio.
+
+// tan(Omega/2) = |a.(b x c)| / (1 + a.b + b.c + c.a), for unit a, b, c.
+float TriangleSolidAngle(float3 a, float3 b, float3 c)
+{
+    return 2.0 * atan2(abs(dot(a, cross(b, c))), 1.0 + dot(a, b) + dot(b, c) + dot(c, a));
+}
+
+// Solid angle of the same rectangle CreateSphericalQuad describes - spanning [-extend, +extend] in
+// the local xy plane at z = 0 - seen from `local`. Cheaper than the init that returns it: no
+// spherical excess, so two atan2 instead of four acos, and two crosses instead of four.
+float SphericalQuadSolidAngle(float3 local, float2 extend)
+{
+    const float3 v00 = normalize(float3(-extend.x, -extend.y, 0) - local);
+    const float3 v10 = normalize(float3(+extend.x, -extend.y, 0) - local);
+    const float3 v11 = normalize(float3(+extend.x, +extend.y, 0) - local);
+    const float3 v01 = normalize(float3(-extend.x, +extend.y, 0) - local);
+    return TriangleSolidAngle(v00, v10, v11) + TriangleSolidAngle(v00, v11, v01);
+}
+
 // Draws a direction uniformly distributed over the quad's solid angle.
 // SIByL SampleSphQuad.
 void SampleSphericalQuad(

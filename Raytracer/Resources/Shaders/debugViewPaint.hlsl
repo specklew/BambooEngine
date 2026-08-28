@@ -158,24 +158,6 @@ float RectangleSolidAngleOnAxis(float halfWidth, float halfHeight, float viewDis
                       (viewDistance * sqrt(halfWidth * halfWidth + halfHeight * halfHeight + viewDistance * viewDistance)));
 }
 
-// Van Oosterom & Strackee: tan(Omega/2) = |a.(b x c)| / (1 + a.b + b.c + c.a) for unit a, b, c. The
-// denominator is ~4 and never cancels, so the entire error budget sits in one triple product rather
-// than in a difference of four angles - one factor of the angular size better conditioned.
-float TriangleSolidAngle(float3 a, float3 b, float3 c)
-{
-    return 2.0 * atan2(abs(dot(a, cross(b, c))), 1.0 + dot(a, b) + dot(b, c) + dot(c, a));
-}
-
-float RectangleSolidAngleVos(float halfWidth, float halfHeight, float viewDistance)
-{
-    const float3 observer = float3(0, 0, viewDistance);
-    const float3 v00 = normalize(float3(-halfWidth, -halfHeight, 0) - observer);
-    const float3 v10 = normalize(float3(+halfWidth, -halfHeight, 0) - observer);
-    const float3 v11 = normalize(float3(+halfWidth, +halfHeight, 0) - observer);
-    const float3 v01 = normalize(float3(-halfWidth, +halfHeight, 0) - observer);
-    return TriangleSolidAngle(v00, v10, v11) + TriangleSolidAngle(v00, v11, v01);
-}
-
 float SolidAngleErrorRamp(float relativeError)
 {
     return saturate((log10(max(relativeError, 1e-9)) + 7.0) / 7.0);
@@ -192,7 +174,7 @@ float3 PaintGuideSolidAngleConditioning(uint2 pixel)
     const float halfHeight = 0.5 * pow(10.0, -2.0 * v);
 
     const float reference = RectangleSolidAngleOnAxis(halfWidth, halfHeight, viewDistance);
-    const float vos = RectangleSolidAngleVos(halfWidth, halfHeight, viewDistance);
+    const float vos = SphericalQuadSolidAngle(float3(0, 0, viewDistance), float2(halfWidth, halfHeight));
     SphericalQuad squad = CreateSphericalQuad(float3(0, 0, viewDistance), float2(halfWidth, halfHeight));
 
     // A NaN here is the same failure one step further along: production turns it into a zero solid
