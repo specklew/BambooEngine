@@ -47,15 +47,6 @@
 // floor, ADR 0003). 1 = SIByL-faithful double, 0 = float (measured deviation).
 #define GUIDE_PDF_FP64 0
 
-// Measurement variant: 1 removes the guide STRATEGY from the compiled kernel — both the
-// forward chain (SampleGuideDirection) and the reverse pdf queries that pair with it —
-// leaving a weight-1 BSDF estimator inside the full guided frame. Estimator-identical to
-// debug view 15, which skips the same work at RUNTIME; the pair isolates what the code's
-// mere presence costs in raygen registers. Unbiased: with no second strategy there is no
-// second pdf in any balance denominator.
-#ifndef GUIDE_STRATEGY_COMPILED_OUT
-#define GUIDE_STRATEGY_COMPILED_OUT 0
-#endif
 #if GUIDE_PDF_FP64
 typedef double GuidePdf;
 #else
@@ -1109,11 +1100,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     const uint litVoxelCount = LitVoxelCount();
     // Guide-dead pixels (no lit voxels, or every fuzzy parent's heap empty) run
     // BSDF-only at full MIS weight — no uniform fallback (faithful, see header).
-#if GUIDE_STRATEGY_COMPILED_OUT
-    const bool guideAlive = false;
-#else
     const bool guideAlive = (litVoxelCount > 0u) && any(fuzzyWeights > 0.0);
-#endif
 
     // Bottom light-tree branch weighting (vxpg.tree.weightMode, guidingFlags
     // bits 5-6): 0 = intensity-only, 1 = geometry + avg-minmax distance (paper).
