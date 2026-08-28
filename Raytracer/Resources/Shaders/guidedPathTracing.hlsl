@@ -1323,38 +1323,44 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 hitPos = float3(0, 0, 0);
                 firstLe = float3(0, 0, 0);
                 firstNeePdf = 0.0;
-                const bool blocked = guideTMin > RAY_TMIN &&
-                                     TraceShadowSegment(hit.position, dir, guideTMin) == 0.0;
-                if (!blocked)
+                // Everything the trace yields is consumed inside the branch that traced. A value
+                // written before TraceRay and read after it must survive the call on the
+                // continuation stack; one such value measured 0.40 ms here, 16 % of this node.
+                if (guideTMin > RAY_TMIN &&
+                    TraceShadowSegment(hit.position, dir, guideTMin) == 0.0)
+                {
+                    guideOutcome = 1u;     // blocked short of the voxel, nothing to weigh
+                    seed = pcg_hash(seed); // keep the stream aligned with the traced branch
+                }
+                else
+                {
                     incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit,
                                              firstLe, firstNeePdf, guideTMax, guideTMin);
-                else
-                    seed = pcg_hash(seed); // keep the stream aligned with the traced branch
 
-                // Semi-NEE gate: the claimed pdf belongs to the chosen
-                // voxel, so only count hits inside its AABB.
-                bool accepted = didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax);
-                // Two reject causes, kept apart because they call for different fixes: 1 = something
-                // was hit but outside the voxel (a blocker in front), 8 = the ray crossed the voxel
-                // and hit nothing. View 4 paints them red and white.
-                guideOutcome = accepted ? 2u : ((blocked || didHit) ? 1u : 8u);
+                    // Semi-NEE gate: the claimed pdf belongs to the chosen
+                    // voxel, so only count hits inside its AABB.
+                    bool accepted = didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax);
+                    // Two reject causes, kept apart because they call for different fixes:
+                    // 1 = hit something outside the voxel, 8 = crossed the voxel and hit nothing.
+                    guideOutcome = accepted ? 2u : (didHit ? 1u : 8u);
 
-                if (accepted)
-                {
-                    float pdfBAtDir = PdfBsdfMixture(surface, specularProb, dir);
-                    if (isnan(pdfBAtDir)) pdfBAtDir = 0.0; // SIByL w1 guard
-                    float weight = BalanceWeight(float(pdfG), pdfBAtDir, 0.0);
-                    misWeightG = weight;
-                    if (debugView < 3u)
+                    if (accepted)
                     {
-                        float NdotL = dot(surface.N, dir);
-                        radiance += f * NdotL * incoming * weight / float(pdfG);
-                        // First-segment emissive hit: 3-way (guide self + BSDF + NEE-at-v0).
-                        // Gated by the semi-NEE acceptance, like all guided contribution.
-                        if (any(firstLe > 0.0))
+                        float pdfBAtDir = PdfBsdfMixture(surface, specularProb, dir);
+                        if (isnan(pdfBAtDir)) pdfBAtDir = 0.0; // SIByL w1 guard
+                        float weight = BalanceWeight(float(pdfG), pdfBAtDir, 0.0);
+                        misWeightG = weight;
+                        if (debugView < 3u)
                         {
-                            float wLe = BalanceWeight(float(pdfG), pdfBAtDir + firstNeePdf, 0.0);
-                            radiance += f * NdotL * firstLe * wLe / float(pdfG);
+                            float NdotL = dot(surface.N, dir);
+                            radiance += f * NdotL * incoming * weight / float(pdfG);
+                            // First-segment emissive hit: 3-way (guide self + BSDF + NEE-at-v0).
+                            // Gated by the semi-NEE acceptance, like all guided contribution.
+                            if (any(firstLe > 0.0))
+                            {
+                                float wLe = BalanceWeight(float(pdfG), pdfBAtDir + firstNeePdf, 0.0);
+                                radiance += f * NdotL * firstLe * wLe / float(pdfG);
+                            }
                         }
                     }
                 }
