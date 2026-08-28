@@ -697,6 +697,15 @@ float AabbExitDistance(float3 origin, float3 dir, float3 aabbMin, float3 aabbMax
     return min(min(farSlabs.x, farSlabs.y), farSlabs.z);
 }
 
+// Distance at which a ray enters an AABB; 0 when the origin is already inside it.
+float AabbEntryDistance(float3 origin, float3 dir, float3 aabbMin, float3 aabbMax)
+{
+    const float3 safeDir = select(dir >= 0.0, max(dir, 1e-8), min(dir, -1e-8));
+    const float3 inverseDir = 1.0 / safeDir;
+    const float3 nearSlabs = min((aabbMin - origin) * inverseDir, (aabbMax - origin) * inverseDir);
+    return max(max(max(nearSlabs.x, nearSlabs.y), nearSlabs.z), 0.0);
+}
+
 // ---- Continuation trace (deeper bounces, vanilla logic) ----
 
 // Sky reached by an indirect ray: sky-lighting switch + firefly clamp applied
@@ -802,7 +811,7 @@ static uint2 gLaunchDims;
 float3 TraceIndirect(float3 origin, float3 dir, inout uint seed,
                      out float3 hitPos, out bool didHit,
                      out float3 firstEmitterLe, out float firstEmitterNeePdf,
-                     float firstSegmentTMax = RAY_TMAX)
+                     float firstSegmentTMax = RAY_TMAX, float firstSegmentTMin = RAY_TMIN)
 {
     float3 radiance = float3(0, 0, 0);
     float3 pathThroughput = float3(1, 1, 1);
@@ -823,9 +832,9 @@ float3 TraceIndirect(float3 origin, float3 dir, inout uint seed,
         RayDesc ray;
         ray.Origin = rayOrigin;
         ray.Direction = rayDir;
-        ray.TMin = RAY_TMIN;
-        // Only the first segment may be shortened; a continuation from an accepted hit is
-        // an ordinary path segment with nothing bounding it.
+        // Only the first segment may be bounded; a continuation from an accepted hit is an
+        // ordinary path segment with nothing bounding it.
+        ray.TMin = (bounce == 1u) ? firstSegmentTMin : RAY_TMIN;
         ray.TMax = (bounce == 1u) ? firstSegmentTMax : RAY_TMAX;
 
         GuidedPayload p = TraceBounceRay(ray);
@@ -1300,13 +1309,27 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 float3 hitPos;
                 bool didHit;
                 float3 firstLe; float firstNeePdf;
-                // End the ray at the far face of the voxel it was sampled toward: the gate
-                // below discards any hit past it, so tracing further is work with no result.
-                // The margin keeps a hit exactly on that face inside the ray.
+                // The ray is bounded by the voxel it was sampled toward: the gate below discards
+                // any hit past the far face, and any hit before the near face rejects the sample
+                // whatever it is. So only the span inside the voxel needs a nearest-hit search;
+                // the approach is an occlusion query, which stops at the first blocker it meets.
                 const float voxelExit = AabbExitDistance(hit.position, dir, aabbMin, aabbMax);
+                const float voxelEntry = AabbEntryDistance(hit.position, dir, aabbMin, aabbMax);
                 const float guideTMax = clamp(voxelExit * 1.0001 + 1e-4, RAY_TMIN, RAY_TMAX);
-                float3 incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit,
-                                                firstLe, firstNeePdf, guideTMax);
+                const float guideTMin = clamp(voxelEntry * 0.9999 - 1e-4, RAY_TMIN, guideTMax);
+
+                float3 incoming = float3(0, 0, 0);
+                didHit = false;
+                hitPos = float3(0, 0, 0);
+                firstLe = float3(0, 0, 0);
+                firstNeePdf = 0.0;
+                const bool blocked = guideTMin > RAY_TMIN &&
+                                     TraceShadowSegment(hit.position, dir, guideTMin) == 0.0;
+                if (!blocked)
+                    incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit,
+                                             firstLe, firstNeePdf, guideTMax, guideTMin);
+                else
+                    seed = pcg_hash(seed); // keep the stream aligned with the traced branch
 
                 // Semi-NEE gate: the claimed pdf belongs to the chosen
                 // voxel, so only count hits inside its AABB.
