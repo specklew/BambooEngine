@@ -174,6 +174,12 @@ static AutoCVarFloat g_superpixelWeight("superpixel.weight", "SLIC coherence wei
 static AutoCVarFloat g_superpixelPosNormalizer("superpixel.posNormalizer",
 	"SLIC world-position distance normalizer (squared)", 8.3329f, CVarFlags::EditDrag, 0.001f, 1000.0f);
 static AutoCVarFloat g_voxelHeatScale("voxel.heatScale", "Irradiance heat map scale", 1.0f, CVarFlags::EditDrag, 0.001f, 100.0f);
+// Injection traces one bounce ray per screen pixel, which is orders of magnitude more rays than
+// there are lit voxels to fill. A stride of N traces every Nth pixel in each axis (N^2 fewer
+// rays) with a per-frame offset, so the guide is fitted from a moving subset instead of all of it.
+static AutoCVarInt   g_injectionPixelStride("vxpg.injection.pixelStride",
+                                            "Trace the injection bounce every Nth pixel per axis",
+                                            1, CVarFlags::EditDrag, 1, 8);
 // Supplemental Sec. 2's biased shortcut, made measurable: 1 = the light-injection
 // sample doubles as the guided integrator's BSDF MIS sample IN THE SAME FRAME, so
 // the guiding pdf is conditioned on the very sample it weights. Halves the BSDF ray
@@ -1352,7 +1358,8 @@ void Renderer::BuildVxpgGraph()
 	if (!FrameUsesVoxelGuiding() || !m_voxelizationPass || !m_scene)
 		return;
 
-	m_voxelizationPass->SetRuntimeParams(g_voxelInjectUseAvg.Get() != 0, g_voxelHeatScale.Get());
+	m_voxelizationPass->SetRuntimeParams(g_voxelInjectUseAvg.Get() != 0, g_voxelHeatScale.Get(),
+	                                     static_cast<uint32_t>(g_injectionPixelStride.Get()));
 
 	// A grid resize destroys grid-sized resources that in-flight frames may
 	// still reference — wait for the GPU before recreating anything. Clamp the

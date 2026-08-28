@@ -42,7 +42,7 @@ cbuffer VoxelGridCB : BAMBOO_PASS_CBV(REG_VOXEL_GRID_CB)
     float3 voxGridMax;
     uint   voxGridDim;
     uint   voxInjectUseAvg;
-    uint   _voxReserved0;
+    uint   voxInjectPixelStride;
     float  voxHeatScale;
 }
 
@@ -206,6 +206,18 @@ void InjectRayGen()
     // Persist the primary shading point for superpixel clustering; valid
     // regardless of whether the VPL bounce below succeeds.
     gShadingPoints[launchIndex] = float4(hit.position, asfloat(UnitVectorToUnorm32Octahedron(N)));
+
+    // Thin the bounce ray, not the G-buffer: everything above this line runs for every pixel
+    // because the superpixel and fingerprint passes read ShadingPoints densely. The offset walks
+    // with the frame, so a stride of N covers all pixels over N^2 frames instead of freezing on
+    // one lattice.
+    const uint stride = max(voxInjectPixelStride, 1u);
+    if (stride > 1u)
+    {
+        const uint2 offset = uint2(frameIndex % stride, (frameIndex / stride) % stride);
+        if (any((launchIndex + offset) % stride != 0u))
+            return;
+    }
 
     // Sample one BSDF direction for the VPL ray (same stochastic
     // specular/diffuse selection as the path tracer)

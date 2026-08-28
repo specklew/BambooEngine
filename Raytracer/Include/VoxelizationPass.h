@@ -15,10 +15,8 @@ struct VoxelGridConstants
     DirectX::XMFLOAT3 gridMax;
     uint32_t          gridDim;
     uint32_t          injectUseAvg;
-    // Held rather than removed: every shader mirroring this struct already names
-    // it _voxReserved0, and nothing checks the two layouts agree — closing the
-    // hole would be a four-file edit whose only failure mode is silent.
-    uint32_t          _reserved0;
+    // Trace the injection bounce for every Nth pixel in each axis (1 = every pixel).
+    uint32_t          injectPixelStride;
     float             heatScale;
 };
 
@@ -42,7 +40,7 @@ public:
     bool DidResize() const { return m_didResize; }
 
     // Runtime knobs propagated to the shared grid constant buffer each frame
-    void SetRuntimeParams(bool injectUseAvg, float heatScale);
+    void SetRuntimeParams(bool injectUseAvg, float heatScale, uint32_t injectPixelStride);
 
     // Zeroes the per-frame injection accumulators (irradiance + VPL count).
     // Ordered by the graph, always ahead of the injection trace that refills them:
