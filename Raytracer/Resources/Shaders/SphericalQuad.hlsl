@@ -106,6 +106,59 @@ float SphericalQuadSolidAngle(float3 local, float2 extend)
     return TriangleSolidAngle(v00, v10, v11) + TriangleSolidAngle(v00, v11, v01);
 }
 
+// Everything SampleSphericalQuad reads EXCEPT S, which the caller supplies from
+// SphericalQuadSolidAngle. n1 is gone with it: the original forms n1 only to build g0 and g1, and
+// nothing but the spherical excess ever read those - so this drops one cross, one normalize and
+// two acos against SphericalQuadInit, on top of being the accurate S.
+void SphericalQuadInitForSampling(float3 s, float3 ex, float3 ey, float3 o, out SphericalQuad squad)
+{
+    squad.o = o;
+    float exl = length(ex);
+    float eyl = length(ey);
+    squad.x = ex / exl;
+    squad.y = ey / eyl;
+    squad.z = cross(squad.x, squad.y);
+    float3 d = s - o;
+    squad.z0 = dot(d, squad.z);
+    if (squad.z0 > 0.0)
+    {
+        squad.z *= -1.0;
+        squad.z0 *= -1.0;
+    }
+    squad.z0sq = squad.z0 * squad.z0;
+    squad.x0 = dot(d, squad.x);
+    squad.y0 = dot(d, squad.y);
+    squad.x1 = squad.x0 + exl;
+    squad.y1 = squad.y0 + eyl;
+    squad.y0sq = squad.y0 * squad.y0;
+    squad.y1sq = squad.y1 * squad.y1;
+
+    float3 v00 = float3(squad.x0, squad.y0, squad.z0);
+    float3 v01 = float3(squad.x0, squad.y1, squad.z0);
+    float3 v10 = float3(squad.x1, squad.y0, squad.z0);
+    float3 v11 = float3(squad.x1, squad.y1, squad.z0);
+
+    float3 n0 = normalize(cross(v00, v10));
+    float3 n2 = normalize(cross(v11, v01));
+    float3 n3 = normalize(cross(v01, v00));
+    float g2 = acos(-dot(n2, n3));
+    float g3 = acos(-dot(n3, n0));
+
+    squad.b0 = n0.z;
+    squad.b1 = n2.z;
+    squad.b0sq = squad.b0 * squad.b0;
+    squad.k = 2.0 * PI - g2 - g3;
+    squad.S = 0.0; // caller's, from SphericalQuadSolidAngle
+}
+
+SphericalQuad CreateSphericalQuadForSampling(float3 local, float2 extend)
+{
+    const float2 extend2 = extend + extend;
+    SphericalQuad squad;
+    SphericalQuadInitForSampling(float3(-extend, 0), float3(extend2.x, 0, 0), float3(0, extend2.y, 0), local, squad);
+    return squad;
+}
+
 // Draws a direction uniformly distributed over the quad's solid angle.
 // SIByL SampleSphQuad.
 void SampleSphericalQuad(

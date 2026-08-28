@@ -47,6 +47,13 @@
 // floor, ADR 0003). 1 = SIByL-faithful double, 0 = float (measured deviation).
 #define GUIDE_PDF_FP64 0
 
+// A/B control for the solid-angle change: 1 restores the shipped spherical-excess path, three full
+// SphericalQuadInit per sample, so the two can be measured in one interleaved session. Delete this
+// and the blocks it guards once the lever has served its purpose.
+#ifndef GUIDE_LEGACY_SOLID_ANGLE
+#define GUIDE_LEGACY_SOLID_ANGLE 0
+#endif
+
 #if GUIDE_PDF_FP64
 typedef double GuidePdf;
 #else
@@ -225,9 +232,12 @@ static const float3x3 kVoxelFaceRotations[3] = {
 // must map the sampled direction back with the same signs the quads were folded
 // with; re-deriving it from the cube centre mirrors the direction whenever the
 // shading point lies between the two centres.
-void BuildVoxelFaceQuads(
+void BuildVoxelFaceGeometry(
     float3 shadingPos, int3 v,
-    out SphericalQuad squads[3], out float3 locals[3], out float3 faceSolidAngles,
+#if GUIDE_LEGACY_SOLID_ANGLE
+    out SphericalQuad squads[3],
+#endif
+    out float3 locals[3], out float2 extends[3], out float3 faceSolidAngles,
     out float3 aabbMin, out float3 aabbMax, out float3 faceSign)
 {
     aabbMin = voxGridMin + float3(v) * voxVoxelSize;
@@ -249,15 +259,30 @@ void BuildVoxelFaceQuads(
     const float3 zFaceCenter = center + float3(0, 0, dirSign.z * extend.z);
 
     locals[0] = mul(kVoxelFaceRotations[0] * dirSign.x, shadingPos - xFaceCenter);
-    squads[0] = CreateSphericalQuad(locals[0], extend.yz);
+    extends[0] = extend.yz;
     locals[1] = mul(kVoxelFaceRotations[1] * dirSign.y, shadingPos - yFaceCenter);
-    squads[1] = CreateSphericalQuad(locals[1], extend.xz);
+    extends[1] = extend.xz;
     locals[2] = mul(kVoxelFaceRotations[2] * dirSign.z, shadingPos - zFaceCenter);
-    squads[2] = CreateSphericalQuad(locals[2], extend.xy);
+    extends[2] = extend.xy;
 
-    faceSolidAngles.x = (dirSign.x == 0) || isnan(squads[0].S) ? 0 : squads[0].S;
-    faceSolidAngles.y = (dirSign.y == 0) || isnan(squads[1].S) ? 0 : squads[1].S;
-    faceSolidAngles.z = (dirSign.z == 0) || isnan(squads[2].S) ? 0 : squads[2].S;
+#if GUIDE_LEGACY_SOLID_ANGLE
+    squads[0] = CreateSphericalQuad(locals[0], extends[0]);
+    squads[1] = CreateSphericalQuad(locals[1], extends[1]);
+    squads[2] = CreateSphericalQuad(locals[2], extends[2]);
+    const float3 solidAngles = float3(squads[0].S, squads[1].S, squads[2].S);
+#else
+    // Solid angle only — the spherical quad the sampler needs is built for the ONE face the CDF
+    // picks, in SampleVoxelSolidAngle. Two of the three inits were pure waste, and the third's own
+    // S is the spherical excess, which carries ~2e-7 sr of absolute error whatever the face is
+    // worth (measured: BufferDebugView::GuideSolidAngleConditioning).
+    const float3 solidAngles = float3(SphericalQuadSolidAngle(locals[0], extends[0]),
+                                      SphericalQuadSolidAngle(locals[1], extends[1]),
+                                      SphericalQuadSolidAngle(locals[2], extends[2]));
+#endif
+
+    faceSolidAngles.x = (dirSign.x == 0) || isnan(solidAngles.x) ? 0 : solidAngles.x;
+    faceSolidAngles.y = (dirSign.y == 0) || isnan(solidAngles.y) ? 0 : solidAngles.y;
+    faceSolidAngles.z = (dirSign.z == 0) || isnan(solidAngles.z) ? 0 : solidAngles.z;
 }
 
 // Reverse-query pdf of the voxel solid-angle distribution: 1 / total visible
@@ -266,11 +291,16 @@ void BuildVoxelFaceQuads(
 // inside the voxel) returns +inf, which zeroes the BSDF sample's MIS weight.
 float PdfVoxelSolidAngle(float3 shadingPos, int3 v)
 {
-    SphericalQuad squads[3];
     float3 locals[3];
+    float2 extends[3];
     float3 faceSolidAngles;
     float3 aabbMin, aabbMax, faceSign;
-    BuildVoxelFaceQuads(shadingPos, v, squads, locals, faceSolidAngles, aabbMin, aabbMax, faceSign);
+#if GUIDE_LEGACY_SOLID_ANGLE
+    SphericalQuad squads[3];
+    BuildVoxelFaceGeometry(shadingPos, v, squads, locals, extends, faceSolidAngles, aabbMin, aabbMax, faceSign);
+#else
+    BuildVoxelFaceGeometry(shadingPos, v, locals, extends, faceSolidAngles, aabbMin, aabbMax, faceSign);
+#endif
     return 1.0f / (faceSolidAngles.x + faceSolidAngles.y + faceSolidAngles.z);
 }
 
@@ -638,11 +668,16 @@ float3 SampleVoxelSolidAngle(
     float3 shadingPos, int3 v, float3 xi,
     out float pdfDir, out float3 aabbMin, out float3 aabbMax)
 {
-    SphericalQuad squads[3];
     float3 locals[3];
+    float2 extends[3];
     float3 faceSolidAngles;
     float3 dirSign;
-    BuildVoxelFaceQuads(shadingPos, v, squads, locals, faceSolidAngles, aabbMin, aabbMax, dirSign);
+#if GUIDE_LEGACY_SOLID_ANGLE
+    SphericalQuad squads[3];
+    BuildVoxelFaceGeometry(shadingPos, v, squads, locals, extends, faceSolidAngles, aabbMin, aabbMax, dirSign);
+#else
+    BuildVoxelFaceGeometry(shadingPos, v, locals, extends, faceSolidAngles, aabbMin, aabbMax, dirSign);
+#endif
 
     float cdfs[3];
     float sum = 0.0f;
@@ -669,9 +704,18 @@ float3 SampleVoxelSolidAngle(
         }
     }
 
+#if GUIDE_LEGACY_SOLID_ANGLE
+    SphericalQuad squad = squads[selectedFace];
+#else
+    // The one quad this sample actually draws from. Its S comes from the CDF above rather than from
+    // its own init, so the direction and the pdf reported for it are built on the same number.
+    SphericalQuad squad = CreateSphericalQuadForSampling(locals[selectedFace], extends[selectedFace]);
+    squad.S = faceSolidAngles[selectedFace];
+#endif
+
     float3 localDir;
     float faceQuadPdf;
-    SampleSphericalQuad(locals[selectedFace], squads[selectedFace], xi.yz, localDir, faceQuadPdf);
+    SampleSphericalQuad(locals[selectedFace], squad, xi.yz, localDir, faceQuadPdf);
 
     pdfDir = facePickPdf * faceQuadPdf; // telescopes to 1 / sum
     return mul(localDir, kVoxelFaceRotations[selectedFace] * dirSign[selectedFace]);

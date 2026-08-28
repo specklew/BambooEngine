@@ -51,6 +51,10 @@ VendorLevers::VendorLevers()
         { "ser", "renderer.shaderExecutionReordering",
           "PAYLOAD_QUALIFIERS=1 RAYGEN_SER=1", LeverScope::ShaderVariant, false, true, "lib_6_9", "dxrprofile",
           "dx::MaybeReorderThread between traversal and shading (ADR 0020 R1). Needs SM 6.9." },
+        { "legacysolidangle", "renderer.legacySolidAngle",
+          "GUIDE_LEGACY_SOLID_ANGLE=1", LeverScope::ShaderVariant, false, false, nullptr, nullptr,
+          "Restore the spherical-excess solid angle: three full SphericalQuadInit per guided sample "
+          "instead of one triple product each. The A/B control for that change, not an optimization." },
         { "lib69", "renderer.forceLib69",
           "PAYLOAD_QUALIFIERS=1", LeverScope::ShaderVariant, false, true, "lib_6_9", "dxrprofile",
           "Compile the DXR libraries as lib_6_9 without the reorder call (ADR 0020 R1 control)." },

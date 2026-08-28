@@ -115,6 +115,11 @@ static AutoCVarInt g_shaderExecutionReordering("renderer.shaderExecutionReorderi
 	"1 = dx::MaybeReorderThread between traversal and shading (needs SM 6.9)", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_forceLib69("renderer.forceLib69",
 	"1 = compile the DXR libraries as lib_6_9 without the reorder call", 0, CVarFlags::EditCheckbox);
+// A/B control for the guide's solid-angle form. The default computes each voxel face's solid angle
+// as one triple product; this restores the spherical excess, which needs a full spherical-quad init
+// per face and carries ~2e-7 sr of absolute error (BufferDebugView::GuideSolidAngleConditioning).
+static AutoCVarInt g_legacySolidAngle("renderer.legacySolidAngle",
+	"1 = solid angle from the spherical excess, three full quad inits per sample", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);
