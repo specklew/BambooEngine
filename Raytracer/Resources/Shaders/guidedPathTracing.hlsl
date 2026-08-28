@@ -1324,12 +1324,14 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                     incoming = TraceIndirect(hit.position, dir, seed, hitPos, didHit,
                                              firstLe, firstNeePdf, guideTMax, guideTMin);
 
-                    // Semi-NEE gate: the claimed pdf belongs to the chosen
-                    // voxel, so only count hits inside its AABB.
-                    bool accepted = didHit && all(hitPos >= aabbMin) && all(hitPos <= aabbMax);
-                    // Two reject causes, kept apart because they call for different fixes:
-                    // 1 = hit something outside the voxel, 8 = crossed the voxel and hit nothing.
-                    guideOutcome = accepted ? 2u : (didHit ? 1u : 8u);
+                    // Semi-NEE gate: the claimed pdf belongs to the chosen voxel, so only hits
+                    // inside it count — and the ray was cut to that voxel's own entry and exit
+                    // distances, so a hit IS inside it. The old explicit box test is therefore
+                    // redundant, and dropping it takes the two bounds off the continuation stack
+                    // (six floats that had to survive the trace above).
+                    bool accepted = didHit;
+                    // 1 = blocked short of the voxel, 8 = crossed the voxel and hit nothing.
+                    guideOutcome = accepted ? 2u : 8u;
 
                     if (accepted)
                     {
