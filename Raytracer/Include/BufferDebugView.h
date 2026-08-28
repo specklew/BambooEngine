@@ -22,6 +22,7 @@ enum class BufferDebugView : int
 	ShadingPointsPos = 5,
 	SuperpixelId = 6,
 	SuperpixelRepresentative = 7,
+	GuideSolidAngleConditioning = 8,
 };
 
 // Runtime docs, one per enum entry in order (FormatDebugViewDocs static_asserts the count).
@@ -41,6 +42,9 @@ inline constexpr DebugViewDoc kBufferDebugViewDocs[] = {
 	{"SuperpixelPass (SLIC)", "~32px mosaic cells hugging geometry edges", "hash-colors the per-pixel superpixel id"},
 	{"SuperpixelPass (SLIC)", "mosaic of direction colors, one normal per cell",
 	 "paints each pixel with its superpixel's representative normal"},
+	{"guide solid-angle conditioning", "synthetic sweep: red = the shipped acos chain is wrong, green = the "
+	 "Van Oosterom-Strackee form is wrong, black = both exact; x = log distance, y = log aspect ratio",
+	 "reads no scene buffer at all - evaluates one voxel face three ways per pixel and paints the FP32 error"},
 };
 
 // A buffer view runs the VXPG chain in place of the technique, so the renderer
@@ -58,5 +62,6 @@ inline AutoCVarEnum g_bufferDebugView("renderer.bufferDebugView", "Buffer debug 
 #define BUFFER_VIEW_SHADING_POS       5
 #define BUFFER_VIEW_SUPERPIXEL_ID     6
 #define BUFFER_VIEW_SUPERPIXEL_REP    7
+#define BUFFER_VIEW_GUIDE_SOLID_ANGLE 8
 
 #endif

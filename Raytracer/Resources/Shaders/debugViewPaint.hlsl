@@ -7,6 +7,8 @@
 #include "PassRegisters.h"
 #include "BufferDebugView.h"
 #include "Octahedral.hlsl"
+#include "consts.hlsl"
+#include "SphericalQuad.hlsl"
 
 RWTexture2D<float4> gDebugOutput    : BAMBOO_PASS_UAV(DEBUG_VIEW_REG_OUTPUT);
 RWTexture2D<float4> gShadingPoints  : BAMBOO_PASS_UAV(DEBUG_VIEW_REG_SHADING_POINTS);
@@ -133,6 +135,76 @@ float3 PaintSuperpixelViews(uint2 pixel)
     return n * 0.5 + 0.5;
 }
 
+// ---- Guide solid-angle conditioning sweep (BUFFER_VIEW_GUIDE_SOLID_ANGLE) ----
+// The guided integrator's pdf is 1 / (sum of the visible faces' solid angles), and each of those
+// comes out of SphericalQuadInit as a spherical excess: four internal angles near PI/2 summed, then
+// 2*PI subtracted. Each angle is an acos of a dot of two normalized cross products of nearly
+// parallel vectors, so the cross cancels once and the excess cancels again. The surviving relative
+// error therefore grows as the face shrinks in the sky, and the guide aims at small far faces.
+//
+// This view measures that error and reads NO scene buffer: it evaluates one rectangle three ways.
+//   x -> viewing distance, log10 from 10^0.5 to 10^3 face half-widths
+//   y -> aspect ratio, the second half-extent shrinking 1:1 -> 1:100 (the compact-bake sliver case)
+//   red   = relative error of the shipped acos chain, green = of the Van Oosterom-Strackee form
+//   blue  = one column per distance decade, so the x axis is readable off the image
+// Ramp on both channels: black at 1e-7 relative, full at 1e0.
+
+// Exact and single-term, so it cannot be the thing that is wrong: for a point on the normal through
+// a rectangle's centre the solid angle is 4*atan(a*b / (d*sqrt(a^2+b^2+d^2))). No sum, no
+// difference, nothing to cancel.
+float RectangleSolidAngleOnAxis(float halfWidth, float halfHeight, float viewDistance)
+{
+    return 4.0 * atan(halfWidth * halfHeight /
+                      (viewDistance * sqrt(halfWidth * halfWidth + halfHeight * halfHeight + viewDistance * viewDistance)));
+}
+
+// Van Oosterom & Strackee: tan(Omega/2) = |a.(b x c)| / (1 + a.b + b.c + c.a) for unit a, b, c. The
+// denominator is ~4 and never cancels, so the entire error budget sits in one triple product rather
+// than in a difference of four angles - one factor of the angular size better conditioned.
+float TriangleSolidAngle(float3 a, float3 b, float3 c)
+{
+    return 2.0 * atan2(abs(dot(a, cross(b, c))), 1.0 + dot(a, b) + dot(b, c) + dot(c, a));
+}
+
+float RectangleSolidAngleVos(float halfWidth, float halfHeight, float viewDistance)
+{
+    const float3 observer = float3(0, 0, viewDistance);
+    const float3 v00 = normalize(float3(-halfWidth, -halfHeight, 0) - observer);
+    const float3 v10 = normalize(float3(+halfWidth, -halfHeight, 0) - observer);
+    const float3 v11 = normalize(float3(+halfWidth, +halfHeight, 0) - observer);
+    const float3 v01 = normalize(float3(-halfWidth, +halfHeight, 0) - observer);
+    return TriangleSolidAngle(v00, v10, v11) + TriangleSolidAngle(v00, v11, v01);
+}
+
+float SolidAngleErrorRamp(float relativeError)
+{
+    return saturate((log10(max(relativeError, 1e-9)) + 7.0) / 7.0);
+}
+
+float3 PaintGuideSolidAngleConditioning(uint2 pixel)
+{
+    const float u = (float(pixel.x) + 0.5) / float(gOutputWidth);
+    const float v = (float(pixel.y) + 0.5) / float(gOutputHeight);
+
+    const float logDistance = 0.5 + 2.5 * u;
+    const float viewDistance = pow(10.0, logDistance);
+    const float halfWidth = 0.5;
+    const float halfHeight = 0.5 * pow(10.0, -2.0 * v);
+
+    const float reference = RectangleSolidAngleOnAxis(halfWidth, halfHeight, viewDistance);
+    const float vos = RectangleSolidAngleVos(halfWidth, halfHeight, viewDistance);
+    SphericalQuad squad = CreateSphericalQuad(float3(0, 0, viewDistance), float2(halfWidth, halfHeight));
+
+    // A NaN here is the same failure one step further along: production turns it into a zero solid
+    // angle, which drops the face from the pdf without saying so. Paint it as full error.
+    const float shippedError = isnan(squad.S) ? 1.0 : abs(squad.S - reference) / reference;
+    const float vosError = abs(vos - reference) / reference;
+
+    const float3 color = float3(SolidAngleErrorRamp(shippedError), SolidAngleErrorRamp(vosError), 0);
+    const bool decadeTick = frac(logDistance) < (2.5 / float(gOutputWidth));
+    return decadeTick ? float3(color.rg, 1) : color;
+}
+
 [numthreads(8, 8, 1)]
 void DebugViewPaint(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -142,7 +214,12 @@ void DebugViewPaint(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 color = float3(0, 0, 0);
 
-    if (gDebugView == BUFFER_VIEW_SUPERPIXEL_ID || gDebugView == BUFFER_VIEW_SUPERPIXEL_REP)
+    if (gDebugView == BUFFER_VIEW_GUIDE_SOLID_ANGLE)
+    {
+        // Synthetic sweep: no scene buffer is read, so this view says the same thing whatever is loaded.
+        color = PaintGuideSolidAngleConditioning(pixel);
+    }
+    else if (gDebugView == BUFFER_VIEW_SUPERPIXEL_ID || gDebugView == BUFFER_VIEW_SUPERPIXEL_REP)
     {
         color = PaintSuperpixelViews(pixel);
     }

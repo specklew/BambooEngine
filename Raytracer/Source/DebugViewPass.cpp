@@ -147,6 +147,9 @@ void DebugViewPass::DeclareGraphResources(RenderGraphPassBuilder& pass, GraphRes
         pass.Declare(kSuperpixelIndex, vxpg.superpixelIndex);
         pass.Declare(kSuperpixelCenter, vxpg.superpixelCenter);
         break;
+    // Reads no VXPG product at all — it evaluates the guide's own solid-angle math on a synthetic
+    // rectangle — so declaring nothing lets culling drop the whole chain behind it.
+    case BufferDebugView::GuideSolidAngleConditioning:
     case BufferDebugView::None:
         break;
     }
