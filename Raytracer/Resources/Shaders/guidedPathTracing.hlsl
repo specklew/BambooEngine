@@ -230,11 +230,14 @@ static const float3x3 kVoxelFaceRotations[3] = {
 // Sampling targets the voxel's COMPACT geometry bounds (SIByL UnpackCompactAABB
 // on u_pMin/u_pMax); the semi-NEE gate aabb stays the FULL cube — SIByL
 // semantics (gi.slang gates on the VoxelToBound out param). Under useCompact = 0
-// compact == cube and the two coincide.
+// compact == cube and the two coincide. faceSign is an OUTPUT because the caller
+// must map the sampled direction back with the same signs the quads were folded
+// with; re-deriving it from the cube centre mirrors the direction whenever the
+// shading point lies between the two centres.
 void BuildVoxelFaceQuads(
     float3 shadingPos, int3 v,
     out SphericalQuad squads[3], out float3 locals[3], out float3 faceSolidAngles,
-    out float3 aabbMin, out float3 aabbMax)
+    out float3 aabbMin, out float3 aabbMax, out float3 faceSign)
 {
     aabbMin = voxGridMin + float3(v) * voxVoxelSize;
     aabbMax = aabbMin + voxVoxelSize;
@@ -249,6 +252,7 @@ void BuildVoxelFaceQuads(
 
     // sign() = 0 exactly on a face plane => that face contributes nothing.
     const float3 dirSign = sign(shadingPos - center);
+    faceSign = dirSign;
     const float3 xFaceCenter = center + float3(dirSign.x * extend.x, 0, 0);
     const float3 yFaceCenter = center + float3(0, dirSign.y * extend.y, 0);
     const float3 zFaceCenter = center + float3(0, 0, dirSign.z * extend.z);
@@ -274,8 +278,8 @@ float PdfVoxelSolidAngle(float3 shadingPos, int3 v)
     SphericalQuad squads[3];
     float3 locals[3];
     float3 faceSolidAngles;
-    float3 aabbMin, aabbMax;
-    BuildVoxelFaceQuads(shadingPos, v, squads, locals, faceSolidAngles, aabbMin, aabbMax);
+    float3 aabbMin, aabbMax, faceSign;
+    BuildVoxelFaceQuads(shadingPos, v, squads, locals, faceSolidAngles, aabbMin, aabbMax, faceSign);
     return 1.0f / (faceSolidAngles.x + faceSolidAngles.y + faceSolidAngles.z);
 }
 
@@ -646,12 +650,8 @@ float3 SampleVoxelSolidAngle(
     SphericalQuad squads[3];
     float3 locals[3];
     float3 faceSolidAngles;
-    BuildVoxelFaceQuads(shadingPos, v, squads, locals, faceSolidAngles, aabbMin, aabbMax);
-
-    // sign() of the shading point relative to the voxel center, rebuilt for
-    // the local->world transform of the sampled direction.
-    const float3 center = 0.5f * (aabbMin + aabbMax);
-    const float3 dirSign = sign(shadingPos - center);
+    float3 dirSign;
+    BuildVoxelFaceQuads(shadingPos, v, squads, locals, faceSolidAngles, aabbMin, aabbMax, dirSign);
 
     float cdfs[3];
     float sum = 0.0f;
