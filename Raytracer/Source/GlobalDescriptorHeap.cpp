@@ -13,6 +13,7 @@ namespace
         SrvAccelerationStructure,
         Cbv,
         UavTexture2D,
+        UavTexture2DArray,
         UavTexture3D
     };
 
@@ -49,8 +50,8 @@ namespace
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32_UINT },                // ClusterVisibilityMask
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // FuzzyWeight
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_SINT },       // FuzzyIndex
-        { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // GuideSampleDirPdf
-        { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // GuideSampleSpan
+        { NullViewKind::UavTexture2DArray, DXGI_FORMAT_R32G32B32A32_FLOAT }, // GuideSampleDirPdf
+        { NullViewKind::UavTexture2DArray, DXGI_FORMAT_R32G32B32A32_FLOAT }, // GuideSampleSpan
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R8G8B8A8_UNORM },          // DebugViewOutput
         { NullViewKind::SrvTexture2D, DXGI_FORMAT_R16G16B16A16_FLOAT },      // AccumulationInput
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // AccumulationTargets
@@ -168,6 +169,9 @@ void GlobalDescriptorHeap::ClearSlot(GlobalDescriptor slot)
             break;
         case NullViewKind::UavTexture2D:
             m_allocator.CreateNullUnorderedAccessView(base + i, nullView.format, D3D12_UAV_DIMENSION_TEXTURE2D);
+            break;
+        case NullViewKind::UavTexture2DArray:
+            m_allocator.CreateNullUnorderedAccessView(base + i, nullView.format, D3D12_UAV_DIMENSION_TEXTURE2DARRAY);
             break;
         case NullViewKind::UavTexture3D:
             m_allocator.CreateNullUnorderedAccessView(base + i, nullView.format, D3D12_UAV_DIMENSION_TEXTURE3D);

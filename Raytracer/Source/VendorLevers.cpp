@@ -51,15 +51,10 @@ VendorLevers::VendorLevers()
         { "ser", "renderer.shaderExecutionReordering",
           "PAYLOAD_QUALIFIERS=1 RAYGEN_SER=1", LeverScope::ShaderVariant, false, true, "lib_6_9", "dxrprofile",
           "dx::MaybeReorderThread between traversal and shading (ADR 0020 R1). Needs SM 6.9." },
-        { "legacysolidangle", "renderer.legacySolidAngle",
-          "GUIDE_LEGACY_SOLID_ANGLE=1", LeverScope::ShaderVariant, false, false, nullptr, nullptr,
-          "Restore the spherical-excess solid angle: three full SphericalQuadInit per guided sample "
-          "instead of one triple product each. The A/B control for that change, not an optimization." },
-        { "guidechainpass", "renderer.guideChainPass",
-          "GUIDE_CHAIN_IN_PASS=1", LeverScope::ShaderVariant, false, false, nullptr, nullptr,
-          "Run the forward guide chain in its own compute dispatch and have the raygen read the "
-          "result. Aimed at the raygen's register allocation, not its instruction count (ADR 0023): "
-          "231 -> 205 VGPRs is 6 -> 7 waves per SIMD on gfx1201. spp 1 only." },
+        // `legacysolidangle` and `guidechainpass` lived here while ADR 0023 was being measured. Both
+        // won on all six scenes and both are unconditional now, so the levers are gone with the
+        // branches they selected — a lever whose off state nobody wants is a second code path to
+        // keep alive for nothing.
         { "lib69", "renderer.forceLib69",
           "PAYLOAD_QUALIFIERS=1", LeverScope::ShaderVariant, false, true, "lib_6_9", "dxrprofile",
           "Compile the DXR libraries as lib_6_9 without the reorder call (ADR 0020 R1 control)." },

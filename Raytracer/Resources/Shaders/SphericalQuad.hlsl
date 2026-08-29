@@ -95,8 +95,12 @@ float TriangleSolidAngle(float3 a, float3 b, float3 c)
 }
 
 // Solid angle of the same rectangle CreateSphericalQuad describes - spanning [-extend, +extend] in
-// the local xy plane at z = 0 - seen from `local`. Cheaper than the init that returns it: no
-// spherical excess, so two atan2 instead of four acos, and two crosses instead of four.
+// the local xy plane at z = 0 - seen from `local`. NOT cheaper in arithmetic: two atan2 replace four
+// acos, and the ISA says that is a wash (acos lowers to a sqrt plus a polynomial, atan2 to a
+// division plus a polynomial plus quadrant fixup; counted over the whole raygen, 89 sqrt + 269 rcp
+// became 55 + 305). What it buys is that Omega no longer requires the four edge normals and four
+// interior angles, so the caller can weigh three faces without keeping three SphericalQuad structs
+// live - which is where the 1200 bytes of scratch went.
 float SphericalQuadSolidAngle(float3 local, float2 extend)
 {
     const float3 v00 = normalize(float3(-extend.x, -extend.y, 0) - local);

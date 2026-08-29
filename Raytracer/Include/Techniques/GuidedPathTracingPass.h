@@ -58,9 +58,6 @@ public:
 
     void OnResize() override;
 
-    // The forward guide chain runs as its own dispatch (ADR 0023, lever `guidechainpass`).
-    static bool UseGuideChainPass();
-
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;

@@ -271,12 +271,6 @@ void GuidedPathTracingPass::AppendPostDispatchNodes(RenderGraph&)
 
 // ---- Forward guide chain as its own dispatch (ADR 0023) --------------------
 
-bool GuidedPathTracingPass::UseGuideChainPass()
-{
-    const int32_t* value = CVarSystem::Get()->GetIntCVar(StringId("renderer.guideChainPass"));
-    return value != nullptr && *value != 0;
-}
-
 void GuidedPathTracingPass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                                        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
                                        std::shared_ptr<Scene> initialScene,
@@ -313,7 +307,7 @@ void GuidedPathTracingPass::CreateGuideChainTargets()
         desc.Format           = DXGI_FORMAT_R32G32B32A32_FLOAT;
         desc.Width            = Window::Get().GetWidth();
         desc.Height           = Window::Get().GetHeight();
-        desc.DepthOrArraySize = 1;
+        desc.DepthOrArraySize = GUIDE_CHAIN_SAMPLE_SLICES;
         desc.MipLevels        = 1;
         desc.SampleDesc.Count = 1;
         desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
@@ -325,8 +319,9 @@ void GuidedPathTracingPass::CreateGuideChainTargets()
         (*target.resource)->SetName(target.name);
 
         D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-        uavDesc.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
-        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        uavDesc.Format                    = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        uavDesc.ViewDimension             = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+        uavDesc.Texture2DArray.ArraySize  = GUIDE_CHAIN_SAMPLE_SLICES;
         m_device->CreateUnorderedAccessView(target.resource->Get(), nullptr, &uavDesc,
             globalHeap.CpuHandle(target.slot));
     }
@@ -358,16 +353,31 @@ void GuidedPathTracingPass::RenderGuideChain()
     BindGuidingResources();
     EnsureGuideChainPso();
     m_commandList->SetPipelineState(m_guideChainProgram->GetPipelineState());
+
+    // One slice per per-pixel sample, so a run at spp 1 does not draw the second slice at all.
+    // Samples past the last slice reuse it; the warning fires once because that is a quality
+    // question the reader has to be told about, not a crash.
+    const int32_t* spp = CVarSystem::Get()->GetIntCVar(StringId("renderer.samplesPerPixel"));
+    const uint32_t requested = spp != nullptr ? static_cast<uint32_t>(*spp) : 1u;
+    const uint32_t slices = std::min<uint32_t>(requested, GUIDE_CHAIN_SAMPLE_SLICES);
+    static bool warned = false;
+    if (requested > GUIDE_CHAIN_SAMPLE_SLICES && !warned)
+    {
+        warned = true;
+        spdlog::warn("GuidedPathTracingPass: spp {} exceeds the {} guide-chain slices; samples past "
+                     "the last one repeat its guide draw", requested, GUIDE_CHAIN_SAMPLE_SLICES);
+    }
+
     // The image, not the raygen's padded launch extent: the hand-off is indexed by pixel and the
     // swizzle only reorders which thread reaches which pixel.
-    CommandContext::Get().Dispatch((Window::Get().GetWidth() + 7) / 8, (Window::Get().GetHeight() + 7) / 8, 1);
+    CommandContext::Get().Dispatch((Window::Get().GetWidth() + 7) / 8, (Window::Get().GetHeight() + 7) / 8, slices);
 }
 
 void GuidedPathTracingPass::AppendPreDispatchNodes(RenderGraph& graph)
 {
     m_guideSampleDirPdfHandle = InvalidGraphResource;
     m_guideSampleSpanHandle   = InvalidGraphResource;
-    if (!UseGuideChainPass() || !m_guideSampleDirPdfTex || !m_lightTreePass)
+    if (!m_guideSampleDirPdfTex || !m_lightTreePass)
         return;
 
     m_guideSampleDirPdfHandle = graph.ImportRaw(m_guideSampleDirPdfTex.Get(), "VXPG GuideSampleDirPdf");

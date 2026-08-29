@@ -264,12 +264,16 @@
 // Read-only here; written by the injection pass (see INJECT_REG_VPL_RADIANCE).
 #define GUIDED_REG_VPL_RADIANCE         21 // u
 #define GUIDED_REG_VPL_EMITTER          22 // u
-// Forward-chain hand-off (GUIDE_CHAIN_IN_PASS): the guide's sampled direction plus its pdf, and the
+// Forward-chain hand-off: the guide's sampled direction plus its pdf, and the
 // voxel span the ray is cut to plus the chain's result code.
 #define GUIDED_REG_GUIDE_SAMPLE_DIR     23 // u
 #define GUIDED_REG_GUIDE_SAMPLE_SPAN    24 // u
 // The chain kernel's shading point; the raygen reconstructs its own from the VBuffer.
 #define GUIDED_REG_SHADING_POINTS       25 // u
+// Slices in the hand-off, i.e. how many per-pixel samples get their own guide draw. Two covers the
+// values this project renders at (benchmarks 1, the settings sweep's best 2); each slice costs two
+// screen-sized RGBA32F images, so this is a memory decision, not an algorithmic one.
+#define GUIDE_CHAIN_SAMPLE_SLICES       2
 // Tile edge for the "swizzle" vendor lever (ADR 0020 R2): launch indices are
 // remapped to pixels in Morton order inside a tile of this size, so a wave's
 // pixels form a compact block instead of a 32- or 64-wide scanline strip. Must

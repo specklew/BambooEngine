@@ -47,21 +47,6 @@
 // floor, ADR 0003). 1 = SIByL-faithful double, 0 = float (measured deviation).
 #define GUIDE_PDF_FP64 0
 
-// A/B control for the solid-angle change: 1 restores the shipped spherical-excess path, three full
-// SphericalQuadInit per sample, so the two can be measured in one interleaved session. Delete this
-// and the blocks it guards once the lever has served its purpose.
-#ifndef GUIDE_LEGACY_SOLID_ANGLE
-#define GUIDE_LEGACY_SOLID_ANGLE 0
-#endif
-
-// 1 = the forward guide chain ran in its own pass and the raygen only reads its result. The point is
-// register allocation, not instruction count: this raygen is occupancy-quantized at 6 of 16 waves on
-// gfx1201 and the next wave slot sits at 219 VGPRs (ADR 0023). ONE SAMPLE PER PIXEL — the hand-off
-// buffers hold one, so spp > 1 is wrong under this variant.
-#ifndef GUIDE_CHAIN_IN_PASS
-#define GUIDE_CHAIN_IN_PASS 0
-#endif
-
 #if GUIDE_PDF_FP64
 typedef double GuidePdf;
 #else
@@ -131,9 +116,11 @@ RWStructuredBuffer<uint4>         gVoxelLiveBoundMax : BAMBOO_PASS_UAV(GUIDED_RE
 // their normalized 1/dist^2 weights. Top-level cluster selection becomes a
 // mixture over these parents. Global-heap slots 530/531.
 // Forward-chain hand-off. xyz = the sampled direction, w = its guiding pdf; then the voxel span the
-// ray is cut to (tMax, tMin) and the chain's result code and view-4 outcome, bit-cast.
-RWTexture2D<float4> gGuideSampleDirPdf : BAMBOO_PASS_UAV(GUIDED_REG_GUIDE_SAMPLE_DIR);
-RWTexture2D<float4> gGuideSampleSpan   : BAMBOO_PASS_UAV(GUIDED_REG_GUIDE_SAMPLE_SPAN);
+// ray is cut to (tMax, tMin) and the chain's result code and view-4 outcome, bit-cast. One slice per
+// per-pixel sample, so spp > 1 gets an independent guide draw per sample like the in-raygen chain
+// did; samples past the last slice reuse it (GuidedPathTracingPass says so once, at startup).
+RWTexture2DArray<float4> gGuideSampleDirPdf : BAMBOO_PASS_UAV(GUIDED_REG_GUIDE_SAMPLE_DIR);
+RWTexture2DArray<float4> gGuideSampleSpan   : BAMBOO_PASS_UAV(GUIDED_REG_GUIDE_SAMPLE_SPAN);
 // Read by the chain kernel only — the raygen rebuilds the first vertex from the VBuffer.
 RWTexture2D<float4> gShadingPoints : BAMBOO_PASS_UAV(GUIDED_REG_SHADING_POINTS);
 
@@ -249,9 +236,6 @@ static const float3x3 kVoxelFaceRotations[3] = {
 // shading point lies between the two centres.
 void BuildVoxelFaceGeometry(
     float3 shadingPos, int3 v,
-#if GUIDE_LEGACY_SOLID_ANGLE
-    out SphericalQuad squads[3],
-#endif
     out float3 locals[3], out float2 extends[3], out float3 faceSolidAngles,
     out float3 aabbMin, out float3 aabbMax, out float3 faceSign)
 {
@@ -280,20 +264,13 @@ void BuildVoxelFaceGeometry(
     locals[2] = mul(kVoxelFaceRotations[2] * dirSign.z, shadingPos - zFaceCenter);
     extends[2] = extend.xy;
 
-#if GUIDE_LEGACY_SOLID_ANGLE
-    squads[0] = CreateSphericalQuad(locals[0], extends[0]);
-    squads[1] = CreateSphericalQuad(locals[1], extends[1]);
-    squads[2] = CreateSphericalQuad(locals[2], extends[2]);
-    const float3 solidAngles = float3(squads[0].S, squads[1].S, squads[2].S);
-#else
     // Solid angle only — the spherical quad the sampler needs is built for the ONE face the CDF
-    // picks, in SampleVoxelSolidAngle. Two of the three inits were pure waste, and the third's own
-    // S is the spherical excess, which carries ~2e-7 sr of absolute error whatever the face is
-    // worth (measured: BufferDebugView::GuideSolidAngleConditioning).
+    // picks, in SampleVoxelSolidAngle. Building all three kept three 17-float structs live to the
+    // face pick and spilled 1200 bytes to scratch; and the excess-derived S carries ~2e-7 sr of
+    // absolute error whatever the face is worth (BufferDebugView::GuideSolidAngleConditioning).
     const float3 solidAngles = float3(SphericalQuadSolidAngle(locals[0], extends[0]),
                                       SphericalQuadSolidAngle(locals[1], extends[1]),
                                       SphericalQuadSolidAngle(locals[2], extends[2]));
-#endif
 
     faceSolidAngles.x = (dirSign.x == 0) || isnan(solidAngles.x) ? 0 : solidAngles.x;
     faceSolidAngles.y = (dirSign.y == 0) || isnan(solidAngles.y) ? 0 : solidAngles.y;
@@ -310,12 +287,7 @@ float PdfVoxelSolidAngle(float3 shadingPos, int3 v)
     float2 extends[3];
     float3 faceSolidAngles;
     float3 aabbMin, aabbMax, faceSign;
-#if GUIDE_LEGACY_SOLID_ANGLE
-    SphericalQuad squads[3];
-    BuildVoxelFaceGeometry(shadingPos, v, squads, locals, extends, faceSolidAngles, aabbMin, aabbMax, faceSign);
-#else
     BuildVoxelFaceGeometry(shadingPos, v, locals, extends, faceSolidAngles, aabbMin, aabbMax, faceSign);
-#endif
     return 1.0f / (faceSolidAngles.x + faceSolidAngles.y + faceSolidAngles.z);
 }
 
@@ -687,12 +659,7 @@ float3 SampleVoxelSolidAngle(
     float2 extends[3];
     float3 faceSolidAngles;
     float3 dirSign;
-#if GUIDE_LEGACY_SOLID_ANGLE
-    SphericalQuad squads[3];
-    BuildVoxelFaceGeometry(shadingPos, v, squads, locals, extends, faceSolidAngles, aabbMin, aabbMax, dirSign);
-#else
     BuildVoxelFaceGeometry(shadingPos, v, locals, extends, faceSolidAngles, aabbMin, aabbMax, dirSign);
-#endif
 
     float cdfs[3];
     float sum = 0.0f;
@@ -719,14 +686,10 @@ float3 SampleVoxelSolidAngle(
         }
     }
 
-#if GUIDE_LEGACY_SOLID_ANGLE
-    SphericalQuad squad = squads[selectedFace];
-#else
     // The one quad this sample actually draws from. Its S comes from the CDF above rather than from
     // its own init, so the direction and the pdf reported for it are built on the same number.
     SphericalQuad squad = CreateSphericalQuadForSampling(locals[selectedFace], extends[selectedFace]);
     squad.S = faceSolidAngles[selectedFace];
-#endif
 
     float3 localDir;
     float faceQuadPdf;
@@ -1092,7 +1055,7 @@ int SampleGuideDirection(float3 shadingPos, float3 shadingNormal, float4 fuzzyWe
 
 float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, uint debugView,
                         float4 fuzzyWeights, int4 fuzzyIndices, int spixelFlat,
-                        InstanceInfo instance, float3 geometricN, inout uint seed)
+                        InstanceInfo instance, float3 geometricN, uint sampleIndex, inout uint seed)
 {
     // A4: primary-visible emitter (PT raytracing.hlsl:394-407 vertex-0 term).
     // The guide integrator never continued a camera ray onto an emitter, so a
@@ -1319,25 +1282,18 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     // -> tree -> voxel -> solid-angle sample)
     if (debugView != 1u && guideAlive)
     {
-#if GUIDE_CHAIN_IN_PASS
-        // Read what the chain pass drew for this pixel. The RNG still advances by the three pairs
-        // SampleGuideDirection would have drawn, so everything downstream sees the same stream.
-        const float4 guideSample = gGuideSampleDirPdf[gLaunchIndex];
-        const float4 guideSpan   = gGuideSampleSpan[gLaunchIndex];
+        // Read what the chain dispatch drew for this pixel and sample (ADR 0023). The chain left the
+        // raygen so its live state would leave with it: 231 -> 205 VGPRs, 6 -> 7 waves per SIMD.
+        // The RNG still advances by the three pairs SampleGuideDirection would have drawn, so
+        // everything downstream sees a stream of the same length.
+        const uint3 guideSlot = uint3(gLaunchIndex, min(sampleIndex, GUIDE_CHAIN_SAMPLE_SLICES - 1u));
+        const float4 guideSample = gGuideSampleDirPdf[guideSlot];
+        const float4 guideSpan   = gGuideSampleSpan[guideSlot];
         const float3 dir  = guideSample.xyz;
         const GuidePdf pdfG = GuidePdf(guideSample.w);
         const int chain = int(asuint(guideSpan.z));
         guideOutcome = asuint(guideSpan.w);
         seed = pcg_hash(pcg_hash(pcg_hash(seed)));
-#else
-        float3 dir;
-        GuidePdf pdfG;
-        float3 aabbMin, aabbMax;
-        const int chain = SampleGuideDirection(hit.position, surface.N, fuzzyWeights,
-                                               fuzzyIndices, spixelFlat, treeWeightMode,
-                                               litVoxelCount, seed,
-                                               dir, pdfG, aabbMin, aabbMax, guideOutcome);
-#endif
         // View 4 exists to classify guide failures, so it must NOT take the early exits
         // below — they used to return before its colour branch, leaving 80-99% of the
         // image black and the probe useless.
@@ -1371,15 +1327,8 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 // any hit past the far face, and any hit before the near face rejects the sample
                 // whatever it is. So only the span inside the voxel needs a nearest-hit search;
                 // the approach is an occlusion query, which stops at the first blocker it meets.
-#if GUIDE_CHAIN_IN_PASS
                 const float guideTMax = guideSpan.x;
                 const float guideTMin = guideSpan.y;
-#else
-                const float voxelExit = AabbExitDistance(hit.position, dir, aabbMin, aabbMax);
-                const float voxelEntry = AabbEntryDistance(hit.position, dir, aabbMin, aabbMax);
-                const float guideTMax = clamp(voxelExit * 1.0001 + 1e-4, RAY_TMIN, RAY_TMAX);
-                const float guideTMin = clamp(voxelEntry * 0.9999 - 1e-4, RAY_TMIN, guideTMax);
-#endif
 
                 float3 incoming = float3(0, 0, 0);
                 didHit = false;
@@ -1935,7 +1884,7 @@ void GuidedIntegratorMain()
         seed = pcg_hash(seed);
         accumulated += ShadeFirstVertex(hit, surface, specularProb, debugView,
                                         fuzzyWeights, fuzzyIndices, spixelFlat,
-                                        instance, geometricN, seed);
+                                        instance, geometricN, i, seed);
     }
 
     gOutput[launchIndex] = float4(accumulated / samplesPerPixel, 1.0);
@@ -2056,20 +2005,22 @@ void GuidedHit(inout GuidedPayload payload : SV_RayPayload, in Attributes attr)
 // difference is the octahedral round-trip on the normal, and the normal is read here for the
 // horizon test alone (intensity-only tree weighting does not use it).
 //
-// One sample per pixel: the hand-off holds one, so this variant is wrong at spp > 1.
+// z is the per-pixel sample index: one independent draw per slice, so spp keeps reducing the guide
+// half's variance the way the in-raygen chain did.
 [numthreads(8, 8, 1)]
 void GuideChainMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint width, height;
-    gGuideSampleDirPdf.GetDimensions(width, height);
-    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+    uint width, height, slices;
+    gGuideSampleDirPdf.GetDimensions(width, height, slices);
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height || dispatchThreadId.z >= slices)
         return;
 
     const uint2 pixel = dispatchThreadId.xy;
+    const uint3 slot  = dispatchThreadId;
     // Default is "no live parent", the code that makes the raygen leave the guide branch without
     // reading anything else, so every early exit below can simply return.
-    gGuideSampleDirPdf[pixel] = float4(0, 0, 0, 0);
-    gGuideSampleSpan[pixel]   = float4(0, 0, asfloat(uint(GUIDE_CHAIN_NO_PARENT)), 0);
+    gGuideSampleDirPdf[slot] = float4(0, 0, 0, 0);
+    gGuideSampleSpan[slot]   = float4(0, 0, asfloat(uint(GUIDE_CHAIN_NO_PARENT)), 0);
 
     const float4 shadingPoint = gShadingPoints[pixel];
     if (shadingPoint.x > 1e29)
@@ -2087,7 +2038,8 @@ void GuideChainMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     // Its own stream. Reproducing the raygen's seed state at this point would mean replaying every
     // branch that draws before the guide, and any independent stream is equally valid.
-    uint seed = pcg_hash((pixel.x + pixel.y * width) ^ (frameIndex * 805459861u) ^ 0x51ED270Bu);
+    uint seed = pcg_hash((pixel.x + pixel.y * width) ^ (slot.z * 2654435761u)
+                                                     ^ (frameIndex * 805459861u) ^ 0x51ED270Bu);
 
     float3 dir;
     GuidePdf pdfG;
@@ -2108,8 +2060,8 @@ void GuideChainMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         tMin = clamp(voxelEntry * 0.9999 - 1e-4, RAY_TMIN, tMax);
     }
 
-    gGuideSampleDirPdf[pixel] = float4(dir, float(pdfG));
-    gGuideSampleSpan[pixel]   = float4(tMax, tMin, asfloat(uint(chain)), asfloat(outcome));
+    gGuideSampleDirPdf[slot] = float4(dir, float(pdfG));
+    gGuideSampleSpan[slot]   = float4(tMax, tMin, asfloat(uint(chain)), asfloat(outcome));
 }
 #endif // GUIDE_CHAIN_ENTRY
 
