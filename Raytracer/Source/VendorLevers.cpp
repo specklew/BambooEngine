@@ -55,6 +55,11 @@ VendorLevers::VendorLevers()
           "GUIDE_LEGACY_SOLID_ANGLE=1", LeverScope::ShaderVariant, false, false, nullptr, nullptr,
           "Restore the spherical-excess solid angle: three full SphericalQuadInit per guided sample "
           "instead of one triple product each. The A/B control for that change, not an optimization." },
+        { "guidechainpass", "renderer.guideChainPass",
+          "GUIDE_CHAIN_IN_PASS=1", LeverScope::ShaderVariant, false, false, nullptr, nullptr,
+          "Run the forward guide chain in its own compute dispatch and have the raygen read the "
+          "result. Aimed at the raygen's register allocation, not its instruction count (ADR 0023): "
+          "231 -> 205 VGPRs is 6 -> 7 waves per SIMD on gfx1201. spp 1 only." },
         { "lib69", "renderer.forceLib69",
           "PAYLOAD_QUALIFIERS=1", LeverScope::ShaderVariant, false, true, "lib_6_9", "dxrprofile",
           "Compile the DXR libraries as lib_6_9 without the reorder call (ADR 0020 R1 control)." },

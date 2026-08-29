@@ -54,6 +54,14 @@
 #define GUIDE_LEGACY_SOLID_ANGLE 0
 #endif
 
+// 1 = the forward guide chain ran in its own pass and the raygen only reads its result. The point is
+// register allocation, not instruction count: this raygen is occupancy-quantized at 6 of 16 waves on
+// gfx1201 and the next wave slot sits at 219 VGPRs (ADR 0023). ONE SAMPLE PER PIXEL — the hand-off
+// buffers hold one, so spp > 1 is wrong under this variant.
+#ifndef GUIDE_CHAIN_IN_PASS
+#define GUIDE_CHAIN_IN_PASS 0
+#endif
+
 #if GUIDE_PDF_FP64
 typedef double GuidePdf;
 #else
@@ -122,6 +130,13 @@ RWStructuredBuffer<uint4>         gVoxelLiveBoundMax : BAMBOO_PASS_UAV(GUIDED_RE
 // by the superpixel pass): the 4 nearest superpixel centers per pixel and
 // their normalized 1/dist^2 weights. Top-level cluster selection becomes a
 // mixture over these parents. Global-heap slots 530/531.
+// Forward-chain hand-off. xyz = the sampled direction, w = its guiding pdf; then the voxel span the
+// ray is cut to (tMax, tMin) and the chain's result code and view-4 outcome, bit-cast.
+RWTexture2D<float4> gGuideSampleDirPdf : BAMBOO_PASS_UAV(GUIDED_REG_GUIDE_SAMPLE_DIR);
+RWTexture2D<float4> gGuideSampleSpan   : BAMBOO_PASS_UAV(GUIDED_REG_GUIDE_SAMPLE_SPAN);
+// Read by the chain kernel only — the raygen rebuilds the first vertex from the VBuffer.
+RWTexture2D<float4> gShadingPoints : BAMBOO_PASS_UAV(GUIDED_REG_SHADING_POINTS);
+
 RWTexture2D<float4> gFuzzyWeights : BAMBOO_PASS_UAV(GUIDED_REG_FUZZY_WEIGHT);
 RWTexture2D<int4>   gFuzzyIndices : BAMBOO_PASS_UAV(GUIDED_REG_FUZZY_INDEX);
 
@@ -1304,6 +1319,17 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
     // -> tree -> voxel -> solid-angle sample)
     if (debugView != 1u && guideAlive)
     {
+#if GUIDE_CHAIN_IN_PASS
+        // Read what the chain pass drew for this pixel. The RNG still advances by the three pairs
+        // SampleGuideDirection would have drawn, so everything downstream sees the same stream.
+        const float4 guideSample = gGuideSampleDirPdf[gLaunchIndex];
+        const float4 guideSpan   = gGuideSampleSpan[gLaunchIndex];
+        const float3 dir  = guideSample.xyz;
+        const GuidePdf pdfG = GuidePdf(guideSample.w);
+        const int chain = int(asuint(guideSpan.z));
+        guideOutcome = asuint(guideSpan.w);
+        seed = pcg_hash(pcg_hash(pcg_hash(seed)));
+#else
         float3 dir;
         GuidePdf pdfG;
         float3 aabbMin, aabbMax;
@@ -1311,6 +1337,7 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                                                fuzzyIndices, spixelFlat, treeWeightMode,
                                                litVoxelCount, seed,
                                                dir, pdfG, aabbMin, aabbMax, guideOutcome);
+#endif
         // View 4 exists to classify guide failures, so it must NOT take the early exits
         // below — they used to return before its colour branch, leaving 80-99% of the
         // image black and the probe useless.
@@ -1344,10 +1371,15 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                 // any hit past the far face, and any hit before the near face rejects the sample
                 // whatever it is. So only the span inside the voxel needs a nearest-hit search;
                 // the approach is an occlusion query, which stops at the first blocker it meets.
+#if GUIDE_CHAIN_IN_PASS
+                const float guideTMax = guideSpan.x;
+                const float guideTMin = guideSpan.y;
+#else
                 const float voxelExit = AabbExitDistance(hit.position, dir, aabbMin, aabbMax);
                 const float voxelEntry = AabbEntryDistance(hit.position, dir, aabbMin, aabbMax);
                 const float guideTMax = clamp(voxelExit * 1.0001 + 1e-4, RAY_TMIN, RAY_TMAX);
                 const float guideTMin = clamp(voxelEntry * 0.9999 - 1e-4, RAY_TMIN, guideTMax);
+#endif
 
                 float3 incoming = float3(0, 0, 0);
                 didHit = false;
@@ -2012,5 +2044,73 @@ void GuidedHit(inout GuidedPayload payload : SV_RayPayload, in Attributes attr)
 }
 
 #endif // GUIDED_TRACE_RQ (pipeline-only hit/miss shaders)
+
+#ifdef GUIDE_CHAIN_ENTRY
+// ---- Forward guide chain as its own dispatch (ADR 0023) --------------------
+// Register allocation is the whole reason this exists, not instruction count: with the chain gone
+// the raygen drops 231 -> 205 VGPRs, which on gfx1201 is 6 -> 7 waves per SIMD. The work itself is
+// unchanged and merely moves to a kernel that can run at a much higher occupancy than the raygen.
+//
+// The shading point comes from the ShadingPoints G-buffer rather than a second VBuffer
+// reconstruction — it is the same primary hit, written from the same GetHitData call, so the only
+// difference is the octahedral round-trip on the normal, and the normal is read here for the
+// horizon test alone (intensity-only tree weighting does not use it).
+//
+// One sample per pixel: the hand-off holds one, so this variant is wrong at spp > 1.
+[numthreads(8, 8, 1)]
+void GuideChainMain(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint width, height;
+    gGuideSampleDirPdf.GetDimensions(width, height);
+    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+        return;
+
+    const uint2 pixel = dispatchThreadId.xy;
+    // Default is "no live parent", the code that makes the raygen leave the guide branch without
+    // reading anything else, so every early exit below can simply return.
+    gGuideSampleDirPdf[pixel] = float4(0, 0, 0, 0);
+    gGuideSampleSpan[pixel]   = float4(0, 0, asfloat(uint(GUIDE_CHAIN_NO_PARENT)), 0);
+
+    const float4 shadingPoint = gShadingPoints[pixel];
+    if (shadingPoint.x > 1e29)
+        return; // primary ray missed
+
+    const uint litVoxelCount = LitVoxelCount();
+    const float4 fuzzyWeights = gFuzzyWeights[pixel];
+    const int4 fuzzyIndices = gFuzzyIndices[pixel];
+    if (litVoxelCount == 0u || !any(fuzzyWeights > 0.0))
+        return; // guideAlive is false; the raygen skips the branch on its own copy of this test
+
+    const float3 shadingPos = shadingPoint.xyz;
+    const float3 shadingNormal = Unorm32OctahedronToUnitVector(asuint(shadingPoint.w));
+    const uint treeWeightMode = (guidingFlags >> 5) & 3u;
+
+    // Its own stream. Reproducing the raygen's seed state at this point would mean replaying every
+    // branch that draws before the guide, and any independent stream is equally valid.
+    uint seed = pcg_hash((pixel.x + pixel.y * width) ^ (frameIndex * 805459861u) ^ 0x51ED270Bu);
+
+    float3 dir;
+    GuidePdf pdfG;
+    float3 aabbMin, aabbMax;
+    uint outcome;
+    const int chain = SampleGuideDirection(shadingPos, shadingNormal, fuzzyWeights,
+                                           gFuzzyIndices[pixel], gSpixelIndexImage[int2(pixel)],
+                                           treeWeightMode, litVoxelCount, seed,
+                                           dir, pdfG, aabbMin, aabbMax, outcome);
+
+    float tMax = 0.0;
+    float tMin = 0.0;
+    if (chain == GUIDE_CHAIN_OK)
+    {
+        const float voxelExit = AabbExitDistance(shadingPos, dir, aabbMin, aabbMax);
+        const float voxelEntry = AabbEntryDistance(shadingPos, dir, aabbMin, aabbMax);
+        tMax = clamp(voxelExit * 1.0001 + 1e-4, RAY_TMIN, RAY_TMAX);
+        tMin = clamp(voxelEntry * 0.9999 - 1e-4, RAY_TMIN, tMax);
+    }
+
+    gGuideSampleDirPdf[pixel] = float4(dir, float(pdfG));
+    gGuideSampleSpan[pixel]   = float4(tMax, tMin, asfloat(uint(chain)), asfloat(outcome));
+}
+#endif // GUIDE_CHAIN_ENTRY
 
 #endif // GUIDED_PATH_TRACING_HLSL

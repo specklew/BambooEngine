@@ -30,6 +30,9 @@ enum class GlobalDescriptor : uint32_t
     ClusterVisibilityMask,
     FuzzyWeight,
     FuzzyIndex,
+    // Forward guide chain hand-off (ADR 0023): written by the chain dispatch, read by the raygen.
+    GuideSampleDirPdf,
+    GuideSampleSpan,
     DebugViewOutput, // painted by DebugViewPass, copied to the back buffer
     // The display chain's two passes rebind their input every frame — it is
     // whichever image the active technique produced — so unlike every slot above,
@@ -67,6 +70,8 @@ inline constexpr uint32_t GlobalDescriptorSlotCounts[] = {
     1,                                 // ClusterVisibilityMask
     1,                                 // FuzzyWeight
     1,                                 // FuzzyIndex
+    1,                                 // GuideSampleDirPdf
+    1,                                 // GuideSampleSpan
     1,                                 // DebugViewOutput
     Constants::Graphics::NUM_FRAMES,     // AccumulationInput
     Constants::Graphics::NUM_FRAMES * 2, // AccumulationTargets

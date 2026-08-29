@@ -88,6 +88,16 @@ constexpr BindingSlot kImportanceHeap      = Accesses(PassUav("gSpixelClusterImp
 constexpr BindingSlot kLiveBoundMin        = Accesses(PassUav("gVoxelLiveBoundMin", GUIDED_REG_LIVE_BOUND_MIN), kRead);
 constexpr BindingSlot kLiveBoundMax        = Accesses(PassUav("gVoxelLiveBoundMax", GUIDED_REG_LIVE_BOUND_MAX), kRead);
 
+// Forward-chain hand-off (ADR 0023). The raygen reads both; the chain dispatch writes them and says
+// so with the graph's own Write, so the slot carries one access and not two. ShadingPoints is the
+// chain kernel's first vertex — the raygen rebuilds its own from the VBuffer and never reads this.
+constexpr BindingSlot kGuideSampleDirPdf = Accesses(PassTableEntry("gGuideSampleDirPdf", BindingKind::Uav,
+    GUIDED_REG_GUIDE_SAMPLE_DIR, GlobalDescriptor::GuideSampleDirPdf), kRead);
+constexpr BindingSlot kGuideSampleSpan = Accesses(PassTableEntry("gGuideSampleSpan", BindingKind::Uav,
+    GUIDED_REG_GUIDE_SAMPLE_SPAN, GlobalDescriptor::GuideSampleSpan), kRead);
+constexpr BindingSlot kShadingPoints = Accesses(PassTableEntry("gShadingPoints", BindingKind::Uav,
+    GUIDED_REG_SHADING_POINTS, GlobalDescriptor::ShadingPoints), kRead);
+
 // No graph access: constants have no producer.
 constexpr BindingSlot kVoxelGridConstants = PassCbv("VoxelGridCB", REG_VOXEL_GRID_CB);
 
@@ -97,7 +107,7 @@ constexpr BindingSlot kGuidedSlots[] = {
     kVBuffer,             kVisibilityMask,  kFuzzyWeights,     kFuzzyIndices,        kVoxelGridConstants,
     kGuidingCounters,     kGuidingCompactIds, kGuidingInverseIndex, kVoxelFingerprints, kClusterAssignments,
     kClusterSeeds,        kLightTreeNodes,  kCompactToLeaf,    kClusterRoots,        kImportanceHeap,
-    kLiveBoundMin,        kLiveBoundMax};
+    kLiveBoundMin,        kLiveBoundMax,    kGuideSampleDirPdf, kGuideSampleSpan,    kShadingPoints};
 
 // The graph-visible subset, paired with the frame's handles below. Everything the
 // signature binds appears here exactly once — that is the property that made the
@@ -108,7 +118,7 @@ constexpr BindingSlot kGuidedGraphSlots[] = {
     kVBuffer,           kVisibilityMask,    kFuzzyWeights,        kFuzzyIndices,    kGuidingCounters,
     kGuidingCompactIds, kGuidingInverseIndex, kVoxelFingerprints, kClusterAssignments, kClusterSeeds,
     kLightTreeNodes,    kCompactToLeaf,     kClusterRoots,        kImportanceHeap,  kLiveBoundMin,
-    kLiveBoundMax};
+    kLiveBoundMax,      kShadingPoints};
 
 bool IsAmdDevice(ID3D12Device* device)
 {
@@ -221,6 +231,15 @@ void GuidedPathTracingPass::CreateGlobalRootSignature()
 void GuidedPathTracingPass::DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass)
 {
     DeclareVoxelGuidingReads(dispatchPass);
+
+    // The chain's hand-off is imported by this technique, not the renderer, so it is not in the
+    // table above — and only the raygen reads it, which is why it is declared here and not in
+    // DeclareVoxelGuidingReads, which the chain node shares.
+    if (m_guideSampleDirPdfHandle != InvalidGraphResource)
+    {
+        dispatchPass.Declare(kGuideSampleDirPdf, m_guideSampleDirPdfHandle);
+        dispatchPass.Declare(kGuideSampleSpan, m_guideSampleSpanHandle);
+    }
 }
 
 // Every VXPG resource the integrator's signature binds, paired with this frame's
@@ -238,7 +257,8 @@ void GuidedPathTracingPass::DeclareVoxelGuidingReads(RenderGraphPassBuilder& pas
         vxpg.vbuffer,         vxpg.clusterVisibilityMask, vxpg.superpixelFuzzyWeight, vxpg.superpixelFuzzyIndex,
         vxpg.counters,        vxpg.compactIds,    vxpg.inverseIndex,       vxpg.voxelFingerprints,
         vxpg.clusterAssignments, vxpg.clusterSeedCompactIds, vxpg.lightTreeNodes, vxpg.lightTreeCompactToLeaf,
-        vxpg.lightTreeClusterRoots, vxpg.superpixelClusterHeap, vxpg.liveBoundMin, vxpg.liveBoundMax};
+        vxpg.lightTreeClusterRoots, vxpg.superpixelClusterHeap, vxpg.liveBoundMin, vxpg.liveBoundMax,
+        vxpg.shadingPoints};
     static_assert(std::size(handles) == std::size(kGuidedGraphSlots), "one handle per graph-visible slot");
 
     for (size_t i = 0; i < std::size(kGuidedGraphSlots); ++i)
@@ -247,6 +267,120 @@ void GuidedPathTracingPass::DeclareVoxelGuidingReads(RenderGraphPassBuilder& pas
 
 void GuidedPathTracingPass::AppendPostDispatchNodes(RenderGraph&)
 {
+}
+
+// ---- Forward guide chain as its own dispatch (ADR 0023) --------------------
+
+bool GuidedPathTracingPass::UseGuideChainPass()
+{
+    const int32_t* value = CVarSystem::Get()->GetIntCVar(StringId("renderer.guideChainPass"));
+    return value != nullptr && *value != 0;
+}
+
+void GuidedPathTracingPass::Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
+                                       Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
+                                       std::shared_ptr<Scene> initialScene,
+                                       std::shared_ptr<PassConstants> passConstants)
+{
+    DxrTechnique::Initialize(device, commandList, initialScene, passConstants);
+    // Always created, whatever the lever says: a flip must not need a resource rebuild, and the
+    // global-heap descriptor has to be a real view before any dispatch binds the table.
+    CreateGuideChainTargets();
+}
+
+void GuidedPathTracingPass::CreateGuideChainTargets()
+{
+    GlobalDescriptorHeap& globalHeap = GlobalDescriptorHeap::Get();
+    const D3D12_HEAP_PROPERTIES heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+    struct Target
+    {
+        Microsoft::WRL::ComPtr<ID3D12Resource>* resource;
+        GlobalDescriptor                        slot;
+        const wchar_t*                          name;
+    };
+    const Target targets[] = {
+        { &m_guideSampleDirPdfTex, GlobalDescriptor::GuideSampleDirPdf, L"VXPG GuideSampleDirPdf" },
+        { &m_guideSampleSpanTex,   GlobalDescriptor::GuideSampleSpan,   L"VXPG GuideSampleSpan" },
+    };
+
+    for (const Target& target : targets)
+    {
+        target.resource->Reset();
+
+        D3D12_RESOURCE_DESC desc = {};
+        desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        desc.Format           = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        desc.Width            = Window::Get().GetWidth();
+        desc.Height           = Window::Get().GetHeight();
+        desc.DepthOrArraySize = 1;
+        desc.MipLevels        = 1;
+        desc.SampleDesc.Count = 1;
+        desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(target.resource->GetAddressOf())));
+        (*target.resource)->SetName(target.name);
+
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+        uavDesc.Format        = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        m_device->CreateUnorderedAccessView(target.resource->Get(), nullptr, &uavDesc,
+            globalHeap.CpuHandle(target.slot));
+    }
+}
+
+void GuidedPathTracingPass::OnResize()
+{
+    DxrTechnique::OnResize();
+    CreateGuideChainTargets();
+}
+
+void GuidedPathTracingPass::EnsureGuideChainPso()
+{
+    // Same key as the raygen: the chain kernel shares the integrator body, so a lever that changes
+    // the body must rebuild both. `guidechainpass` is itself in that key, which is what makes the
+    // raygen compile its hand-off read at the same time this kernel starts writing it.
+    if (m_guideChainProgram && m_guideChainVariantKey == m_shaderVariantKey)
+        return;
+
+    const std::string asset = VendorLevers::VariantAsset("resources/shaders/guidedPathTracing.chain.shader", m_shaderVariantKey);
+    m_guideChainProgram = ShaderProgramCache::Get().GetOrCreateCompute(m_device.Get(), m_globalRootSignature.Get(),
+        asset.c_str(), L"GuidedPathTracing GuideChain PSO");
+    m_guideChainVariantKey = m_shaderVariantKey;
+    spdlog::info("GuidedPathTracingPass: guide-chain compute PSO created ({})", asset);
+}
+
+void GuidedPathTracingPass::RenderGuideChain()
+{
+    BindGuidingResources();
+    EnsureGuideChainPso();
+    m_commandList->SetPipelineState(m_guideChainProgram->GetPipelineState());
+    // The image, not the raygen's padded launch extent: the hand-off is indexed by pixel and the
+    // swizzle only reorders which thread reaches which pixel.
+    CommandContext::Get().Dispatch((Window::Get().GetWidth() + 7) / 8, (Window::Get().GetHeight() + 7) / 8, 1);
+}
+
+void GuidedPathTracingPass::AppendPreDispatchNodes(RenderGraph& graph)
+{
+    m_guideSampleDirPdfHandle = InvalidGraphResource;
+    m_guideSampleSpanHandle   = InvalidGraphResource;
+    if (!UseGuideChainPass() || !m_guideSampleDirPdfTex || !m_lightTreePass)
+        return;
+
+    m_guideSampleDirPdfHandle = graph.ImportRaw(m_guideSampleDirPdfTex.Get(), "VXPG GuideSampleDirPdf");
+    m_guideSampleSpanHandle   = graph.ImportRaw(m_guideSampleSpanTex.Get(), "VXPG GuideSampleSpan");
+
+    graph.AddPass("VXPG Guide Chain",
+        [&](RenderGraphPassBuilder& pass)
+        {
+            pass.Write(m_guideSampleDirPdfHandle, GraphAccess::ComputeWrite);
+            pass.Write(m_guideSampleSpanHandle, GraphAccess::ComputeWrite);
+            DeclareVoxelGuidingReads(pass);
+        },
+        [this]() { RenderGuideChain(); });
 }
 
 void GuidedPathTracingPass::BindGuidingResources()

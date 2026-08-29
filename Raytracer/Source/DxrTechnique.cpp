@@ -67,6 +67,8 @@ GraphResourceHandle DxrTechnique::BuildGraph(RenderGraph& graph, const FrameGrap
 
     const GraphResourceHandle output = graph.Import(*m_outputResource, "Raytrace Output");
 
+    AppendPreDispatchNodes(graph);
+
     graph.AddPass("Raytrace Technique",
         [&](RenderGraphPassBuilder& pass)
         {

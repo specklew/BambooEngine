@@ -35,6 +35,12 @@ public:
         m_lightTreePass = lightTreePass;
     }
 
+    void Initialize(
+        Microsoft::WRL::ComPtr<ID3D12Device5> device,
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
+        std::shared_ptr<Scene> initialScene,
+        std::shared_ptr<PassConstants> passConstants) override;
+
     void Render() override;
 
     // Consumes voxelize -> inject -> guiding distribution -> fingerprint ->
@@ -50,15 +56,36 @@ public:
     bool HasActiveDebugView() const override;
     int  GetDebugMode() const override { return 0; } // guided views ride guidingFlags, not debugMode
 
+    void OnResize() override;
+
+    // The forward guide chain runs as its own dispatch (ADR 0023, lever `guidechainpass`).
+    static bool UseGuideChainPass();
+
 protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;
 
+    void AppendPreDispatchNodes(RenderGraph& graph) override;
     void DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass) override;
     void AppendPostDispatchNodes(RenderGraph& graph) override;
 
 private:
     void DeclareVoxelGuidingReads(RenderGraphPassBuilder& pass) const;
+
+    // Screen-sized hand-off from the chain dispatch to the raygen: sampled direction + pdf, and the
+    // voxel span the ray is cut to + the chain's result code. Owned here because both ends are this
+    // technique; nothing outside it reads them.
+    void CreateGuideChainTargets();
+    void EnsureGuideChainPso();
+    void RenderGuideChain();
+
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_guideSampleDirPdfTex;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_guideSampleSpanTex;
+    ComputeProgram* m_guideChainProgram = nullptr;
+    std::string     m_guideChainVariantKey;
+    // This frame's imports of the two above, valid only for the duration of BuildGraph.
+    GraphResourceHandle m_guideSampleDirPdfHandle = InvalidGraphResource;
+    GraphResourceHandle m_guideSampleSpanHandle   = InvalidGraphResource;
 
 private:
     // Inline-RayQuery compute build of the integrator (ADR 0011), created

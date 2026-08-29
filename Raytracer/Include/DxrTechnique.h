@@ -37,6 +37,7 @@ protected:
     // that runs it, and the nodes that run after it — the second half is separate
     // because a node cannot be added while another node's declaration is open.
     // A technique that needs neither places no barriers at all.
+    virtual void AppendPreDispatchNodes(RenderGraph& graph) {}
     virtual void DeclareDispatchResources(RenderGraph& graph, RenderGraphPassBuilder& dispatchPass) {}
     virtual void AppendPostDispatchNodes(RenderGraph& graph) {}
 

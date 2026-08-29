@@ -120,6 +120,11 @@ static AutoCVarInt g_forceLib69("renderer.forceLib69",
 // per face and carries ~2e-7 sr of absolute error (BufferDebugView::GuideSolidAngleConditioning).
 static AutoCVarInt g_legacySolidAngle("renderer.legacySolidAngle",
 	"1 = solid angle from the spherical excess, three full quad inits per sample", 0, CVarFlags::EditCheckbox);
+// The forward guide chain as its own dispatch (ADR 0023). Register allocation is the point: with the
+// chain out of the raygen it drops 231 -> 205 VGPRs, which on gfx1201 is 6 -> 7 waves per SIMD.
+// One sample per pixel — the hand-off holds one, so this is wrong at spp > 1.
+static AutoCVarInt g_guideChainPass("renderer.guideChainPass",
+	"1 = run the forward guide chain in its own compute dispatch (spp 1 only)", 0, CVarFlags::EditCheckbox);
 static AutoCVarInt g_numSamplesPerPixel("renderer.samplesPerPixel", "Number of samples per pixel", 1, CVarFlags::EditDrag, 1, 64);
 static AutoCVarInt g_numBounces("renderer.numBounces", "Number of bounces", 1, CVarFlags::EditDrag, 0, 7);
 static AutoCVarInt   g_accumulationEnabled("renderer.accumulation.enabled","Enable temporal frame accumulation when camera is still", 0, CVarFlags::EditCheckbox);

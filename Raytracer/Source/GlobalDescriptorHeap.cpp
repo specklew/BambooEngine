@@ -49,6 +49,8 @@ namespace
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32_UINT },                // ClusterVisibilityMask
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // FuzzyWeight
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_SINT },       // FuzzyIndex
+        { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // GuideSampleDirPdf
+        { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // GuideSampleSpan
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R8G8B8A8_UNORM },          // DebugViewOutput
         { NullViewKind::SrvTexture2D, DXGI_FORMAT_R16G16B16A16_FLOAT },      // AccumulationInput
         { NullViewKind::UavTexture2D, DXGI_FORMAT_R32G32B32A32_FLOAT },      // AccumulationTargets
