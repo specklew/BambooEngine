@@ -7,6 +7,7 @@
 #include "Resources/RWStructuredBuffer.h"
 
 class VoxelizationPass;
+class GpuMemoryReport;
 
 // VXPG guiding distribution build (compute): reloads baked per-voxel bounds
 // for lit voxels and compacts nonzero-irradiance voxels into a flat list (with
@@ -17,6 +18,10 @@ class VoxelizationPass;
 class VoxelGuidingBuildPass
 {
 public:
+    // P5: the resources this stage holds, for the guiding chain's memory report.
+    // Declared per pass rather than collected from a base class because ADR 0017 left
+    // most of this chain as raw ComPtr, which no base class ever sees.
+    void ReportMemory(GpuMemoryReport& report) const;
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5>              device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
@@ -32,7 +37,15 @@ public:
     // have flushed the GPU first (the old buffers may be in flight).
     void OnVoxelGridResize();
 
-    // [0] = compacted voxel count ([1] retired with the flat CDF)
+    // One-shot accumulator diagnostics (vxpg.guiding.probe). The compaction kernel already
+    // visits every lit cell, so it is the cheapest place to ask two questions the image cannot
+    // answer: how close the uint32 irradiance accumulator came to wrapping, and how many cells
+    // caught VPLs but packed to zero and were therefore dropped from the guide.
+    [[nodiscard]] static bool IsProbeArmed();
+    void RecordProbeCopy();
+    void ResolveProbe();
+
+    // [0] = compacted voxel count ([1] retired with the flat CDF, [2] and [3] are the probe)
     RWStructuredBuffer<uint32_t>* GetCountersBuffer() const { return m_counters.get(); }
     RWStructuredBuffer<uint32_t>* GetCompactIdsBuffer() const { return m_compactIds.get(); }
     RWStructuredBuffer<int32_t>*  GetInverseIndexBuffer() const { return m_inverseIndex.get(); }
@@ -41,7 +54,11 @@ public:
     RWStructuredBuffer<DirectX::XMUINT4>* GetLiveBoundMinBuffer() const { return m_liveBoundMin.get(); }
     RWStructuredBuffer<DirectX::XMUINT4>* GetLiveBoundMaxBuffer() const { return m_liveBoundMax.get(); }
 
+
 private:
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_countersReadback;
+    uint32_t m_probeRetries = 0;
+
     void CreateBuffers();
     void CreateGridSizedBuffers();
     void CreateRootSignature();

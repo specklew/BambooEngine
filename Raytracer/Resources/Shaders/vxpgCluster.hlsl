@@ -169,9 +169,7 @@ void SeedClusterCenters(uint3 tid : SV_DispatchThreadID)
     for (int seedId = 1; seedId < CLUSTER_COUNT; ++seedId)
     {
         // Distance to the newest center only — the running min makes it the
-        // nearest over all picked centers. Port-faithful quirk: SIByL refreshes
-        // only the center FINGERPRINT after each pick; the position/intensity
-        // compared against stay those of seed 0.
+        // nearest over all picked centers.
         const float d = ClusterDistance(candidateFingerprint, sCurrentCenterFingerprint,
                                         candidatePosition, sCurrentCenterPosition,
                                         candidateIntensity, sCurrentCenterIntensity);
@@ -204,7 +202,12 @@ void SeedClusterCenters(uint3 tid : SV_DispatchThreadID)
         // the "left" child — 5 floats per thread instead of a shared 64-float
         // tree. The partner lookup goes through sSeedExchange, so the butterfly
         // spans exactly the 32 threads of the logical warp.
+        // Slot 5 is never written by the reduction below (it fills 4-level, so 4..0), yet the
+        // traversal's last round reads leftProbability[level + 1] with level == 4 and pushes it
+        // through shared memory. Nothing consumes the result, but reading it uninitialized is
+        // undefined, so it starts at the same "no information" value the reduction uses.
         float leftProbability[6];
+        leftProbability[5] = 0.5;
         for (int level = 0; level < 5; ++level)
         {
             sSeedExchange[threadId] = weight;
@@ -254,7 +257,15 @@ void SeedClusterCenters(uint3 tid : SV_DispatchThreadID)
             center.position = candidatePosition;
             center.intensity = candidateIntensity;
             gClusterCenters[seedId] = center;
-            sCurrentCenterFingerprint = candidateFingerprint; // SIByL: fingerprint only
+            // DEVIATION from SIByL: all three fields of the running center are refreshed, not
+            // the fingerprint alone. Eq. (4) weights an intensity difference at weight 1, and
+            // leaving that field at seed 0's value makes every later round measure a distance
+            // to a center that was never picked — a constant offset instead of a separation by
+            // brightness. Since there is no Lloyd iteration, the seeds ARE the cluster
+            // descriptors, so the error would propagate straight into the assignment.
+            sCurrentCenterFingerprint = candidateFingerprint;
+            sCurrentCenterPosition    = candidatePosition;
+            sCurrentCenterIntensity   = candidateIntensity;
         }
 
         GroupMemoryBarrierWithGroupSync();

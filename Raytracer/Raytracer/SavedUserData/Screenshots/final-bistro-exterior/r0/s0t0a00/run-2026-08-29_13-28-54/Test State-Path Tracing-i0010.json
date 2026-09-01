@@ -1,0 +1,56 @@
+{
+    "camera": {
+        "position": [
+            -19.63772964477539,
+            3.750678300857544,
+            -1.0571895837783813
+        ],
+        "rotation": [
+            0.031615402549505234,
+            0.7103633880615234,
+            -0.03197396174073219,
+            0.7023972868919373
+        ],
+        "fov": 1.0471975803375244
+    },
+    "scene": {
+        "model": "BistroExterior_CONV.nogit",
+        "place": "Test State"
+    },
+    "technique": "Path Tracing",
+    "postProcess": {
+        "enabled": true,
+        "exposure": 10.0,
+        "contrast": 0.800000011920929,
+        "saturation": 1.0,
+        "lift": 0.0
+    },
+    "raytracing": {
+        "spp": 1,
+        "bounces": 1,
+        "frameIndex": 262,
+        "accumulatedTime": 3.008251428604126
+    },
+    "render": {
+        "width": 1920,
+        "height": 1080
+    },
+    "benchmark": {
+        "budgetKind": "seconds",
+        "budgetValue": 3.0,
+        "checkpoints": 1,
+        "checkpointIndex": 0,
+        "imageIndex": 10,
+        "imageCount": 20,
+        "meanFrameMs": 11.4818754196167,
+        "warmupSeconds": 1.0093578100204468,
+        "levers": "",
+        "shaderVariant": "",
+        "settings": "",
+        "varianceMean": 4.704798470811511e-7,
+        "varianceRelative": 0.32505524158477783
+    },
+    "capture": {
+        "timestamp": "2026-08-29T13:29:28"
+    }
+}

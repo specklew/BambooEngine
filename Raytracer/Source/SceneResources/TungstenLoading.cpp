@@ -526,9 +526,10 @@ std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const Asse
         return nullptr;
     }
 
-    // v1: no Tungsten analytic lights/env imported. Only fall back to the engine
-    // default directional light when the scene has no light source at all —
-    // i.e. no emissive material was imported either (Task 3: quad emitters).
+    // v1: no Tungsten analytic lights/env imported, and no fabricated fallback either
+    // (matches ModelLoading): an invented directional sun only ever added dead weight to
+    // the NEE selection CDF. A Tungsten scene whose emitters did not import comes out
+    // black, which is the honest signal that the import lost the light.
     bool anyEmissive = false;
     for (const auto& model : sceneBuilder.GetModels())
         for (const auto& primitive : model->GetMeshes())
@@ -537,16 +538,7 @@ std::shared_ptr<Scene> TungstenLoading::LoadScene(Renderer& renderer, const Asse
                 anyEmissive = true;
 
     if (!anyEmissive)
-    {
-        LightData defaultLight;
-        defaultLight.type = Directional;
-        defaultLight.position = { 0, 0, 0 };
-        defaultLight.direction = { -0.5f, -0.7071f, -0.067f };
-        defaultLight.color = { 1, 1, 1 };
-        defaultLight.intensity = 3.0f;
-        defaultLight.range = 0.0f;
-        sceneBuilder.AddLightData(defaultLight);
-    }
+        spdlog::warn("Tungsten scene imported no emissive material and no light: it will render black");
 
     auto vertexIndexPair = renderer.CreateSceneResources(vertices, indices);
     auto vertexBuffer = vertexIndexPair.first;

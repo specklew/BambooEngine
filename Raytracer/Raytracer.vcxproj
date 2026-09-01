@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\packages\Microsoft.Direct3D.D3D12.1.721.3-preview\build\native\Microsoft.Direct3D.D3D12.props" Condition="Exists('..\packages\Microsoft.Direct3D.D3D12.1.721.3-preview\build\native\Microsoft.Direct3D.D3D12.props')" />
   <ItemGroup Label="ProjectConfigurations">
@@ -179,6 +179,7 @@
     <ClInclude Include="Include\Shader.h" />
     <ClInclude Include="Include\ShaderCompilation.h" />
     <ClInclude Include="Include\Utils\CVars.h" />
+    <ClInclude Include="Include\Utils\GpuMemoryReport.h" />
     <ClInclude Include="Include\Utils\GpuMarker.h" />
     <ClInclude Include="Include\Utils\CameraConstants.h" />
     <ClInclude Include="Include\Utils\FrameConstantRing.h" />
@@ -454,6 +455,7 @@
     <ClCompile Include="Source\Shader.cpp" />
     <ClCompile Include="Source\ShaderCompilation.cpp" />
     <ClCompile Include="Source\Utils\CVars.cpp"/>
+    <ClCompile Include="Source\Utils\GpuMemoryReport.cpp" />
     <ClCompile Include="Source\Utils\CameraConstants.cpp"/>
     <ClCompile Include="Source\Utils\FrameConstantRing.cpp"/>
     <ClCompile Include="Source\Utils\PassConstants.cpp"/>

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "LightInjectionPass.h"
 
@@ -264,4 +265,16 @@ void LightInjectionPass::Render()
     // No tail barriers: every output this pass writes (ShadingPoints, irradiance,
     // VPL count, representative, VPL position) is declared on the graph, which
     // emits the barrier where a reader actually needs it.
+}
+
+// P5. Screen-sized G-buffers plus the per-voxel representative. These scale with the
+// render resolution, not with the grid, which is the other half of the P5 answer.
+void LightInjectionPass::ReportMemory(GpuMemoryReport& report) const
+{
+    using namespace GpuMemoryStage;
+    report.Add(Injection, "shading points",        m_shadingPointsTex.Get());
+    report.Add(Injection, "voxel representative",  m_voxelRepresentativeTex.Get());
+    report.Add(Injection, "VPL position",          m_vplPositionTex.Get());
+    report.Add(Injection, "VPL radiance",          m_vplRadianceTex.Get());
+    report.Add(Injection, "VPL emitter",           m_vplEmitterTex.Get());
 }

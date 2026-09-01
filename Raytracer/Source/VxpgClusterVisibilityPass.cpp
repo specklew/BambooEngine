@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "VxpgClusterVisibilityPass.h"
 
@@ -218,4 +219,14 @@ void VxpgClusterVisibilityPass::RunCheck(uint32_t frameIndex)
 
     m_commandList->SetPipelineState(m_checkProgram->GetPipelineState());
     CommandContext::Get().Dispatch(m_mapX, m_mapY * 4, 1);
+}
+
+// P5.
+void VxpgClusterVisibilityPass::ReportMemory(GpuMemoryReport& report) const
+{
+    using namespace GpuMemoryStage;
+    report.Add(ClusterVis, "cluster gathered light points", m_clusterGatheredLightPoints.get());
+    report.Add(ClusterVis, "cluster light point counts",    m_clusterLightPointCounts.get());
+    report.Add(ClusterVis, "average visibility",            m_avgVisibility.get());
+    report.Add(ClusterVis, "visibility mask",               m_mask.Get());
 }

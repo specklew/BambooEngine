@@ -62,8 +62,7 @@ void VBufferAnyHit(inout VBufferPayload payload : SV_RayPayload, in Attributes a
     uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
     HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
 
-    float4 albedo = SampleTextureColor(hit) * instance.baseColorFactor;
-    if (albedo.a < 0.001)
+    if (IsAlphaCutoutTransparent(hit.uv))
     {
         IgnoreHit();
     }

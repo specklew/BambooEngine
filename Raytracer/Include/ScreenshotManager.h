@@ -10,6 +10,29 @@
 
 class FrameAccumulationPass;
 
+// What the warm-up actually achieved, carried into EVERY capture's sidecar rather than
+// only into the log. "Settled" is a criterion, not a fact, so a frame cost quoted without
+// it is not reproducible: the reader has to see which criterion was applied and whether
+// the run met it or merely ran out of budget. Criterion per PLAN_BADAWCZY 7.7.
+struct WarmUpReport
+{
+    float seconds       = 0.0f;  // wall time actually spent warming up
+    float meanFrameMs   = 0.0f;  // mean frame over the last complete criterion window
+    // Two different things, and only the second is what warming up is about. `variation`
+    // is the coefficient of variation of individual frame deltas INSIDE one window — it
+    // measures jitter, and on this machine it sits near 3% however long the run warms up,
+    // because that is simply how much consecutive frames scatter. `drift` is the relative
+    // change between consecutive disjoint window MEANS — it measures the clock ramp, which
+    // is the thing that has to stop before a frame cost describes the technique. The
+    // settle test uses drift; variation is recorded beside it as the jitter floor.
+    float variation     = 0.0f;
+    float drift         = 0.0f;
+    bool  settled       = false; // false = the cap ran out before the criterion was met
+    float windowSeconds = 0.0f;  // the criterion itself travels with the result, because
+    float threshold     = 0.0f;  //   these three are what "settled" means and tightening
+    float minSeconds    = 0.0f;  //   them later must not silently reinterpret old data
+};
+
 struct ScreenshotMetadata
 {
     DirectX::XMFLOAT3 cameraPosition{};
@@ -43,7 +66,7 @@ struct ScreenshotMetadata
     // different frame, so the ordinal is what lines curves up across images.
     uint32_t checkpointIndex = 0;
     float    meanFrameMs     = 0.0f;
-    float    warmupSeconds   = 0.0f; // what the run actually spent warming up
+    WarmUpReport warmup;
 
     // Estimator variance over this image's accumulation window, measured without
     // a reference (renderer.accumulation.variance). Absent when the feature is off.
@@ -59,6 +82,12 @@ struct ScreenshotMetadata
     // A sweep varies these between images of one process, so the run's own arguments no
     // longer identify a capture — this does.
     std::string settings;
+
+    // P5: what the guiding chain held when this image was taken. Stage totals only —
+    // the per-resource inventory goes to the log, because a sidecar is a record of the
+    // measurement's conditions and the chain's shape is not one of them.
+    std::vector<std::pair<std::string, uint64_t>> memoryByStage;
+    uint64_t memoryTotalBytes = 0;
 };
 
 // A capture's stopping condition. Seconds is the equal-time axis, frames the
@@ -100,7 +129,10 @@ public:
     void Arm(FrameAccumulationPass& accum, CaptureSchedule schedule, ScreenshotMetadata metadata);
 
     // Call each frame BEFORE accumulationPass.Update(elapsedTime)
-    void Tick(FrameAccumulationPass& accum, double elapsedTime);
+    // accumulating=false when the frame is painted by a buffer debug view: that chain
+    // has no accumulation pass, so the pass counters stay at zero and a budget read
+    // from them never completes. The manager then counts frames and time itself.
+    void Tick(FrameAccumulationPass& accum, double elapsedTime, bool accumulating);
 
     // Issue CopyTextureRegion into the readback buffer.
     void RecordCopy(const Microsoft::WRL::ComPtr<ID3D12Resource>& source);

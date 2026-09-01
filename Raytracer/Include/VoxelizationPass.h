@@ -7,6 +7,7 @@
 #include "Resources/RWStructuredBuffer.h"
 
 class Scene;
+class GpuMemoryReport;
 
 struct VoxelGridConstants
 {
@@ -27,6 +28,10 @@ struct VoxelGridConstants
 class VoxelizationPass
 {
 public:
+    // P5: the resources this stage holds, for the guiding chain's memory report.
+    // Declared per pass rather than collected from a base class because ADR 0017 left
+    // most of this chain as raw ComPtr, which no base class ever sees.
+    void ReportMemory(GpuMemoryReport& report) const;
     void Initialize(Microsoft::WRL::ComPtr<ID3D12Device5> device,
                     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList);
 
@@ -68,6 +73,7 @@ public:
     void WriteOccupancyUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
     void WriteIrradianceUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
     void WriteVplCountUavTo(D3D12_CPU_DESCRIPTOR_HANDLE dest) const;
+
 
 private:
     void CreateResources();

@@ -3,6 +3,7 @@
 
 #include "FrameBindings.hlsl"
 #include "Random.hlsl"
+#include "consts.hlsl"
 
 #define VERTEX_STRIDE 48 // float3 pos + float3 normal + float4 tangent + float2 uv
 
@@ -359,6 +360,22 @@ float3 EmitterRadiance(InstanceInfo instance, float2 uv)
     if (instance.emissiveTextureIndex < 0)
         return instance.emissiveRadiance;
     return instance.emissiveRadiance * SrgbToLinear(SampleTexture(instance.emissiveTextureIndex, uv).rgb);
+}
+
+// The ONE alpha decision in the engine. Alpha is a cutout test, never a transmission
+// model: the integrator evaluates a BRDF, not a BSDF, so nothing is allowed to be
+// partially see-through. Only a texel that is fully transparent lets a ray pass, which
+// is what Sponza's leaf and chain cards need. A material-CONSTANT alpha is deliberately
+// not read here: Mitsuba's `mask` opacity imports as glTF BLEND with baseColorFactor.a
+// below 1 (bedroom's curtains, 0.531), and such a surface occludes like a wall.
+bool IsAlphaCutoutTransparent(InstanceInfo instance, float2 uv)
+{
+    return SampleTexture(instance.textureIndex, uv).a < EPSILON;
+}
+
+bool IsAlphaCutoutTransparent(float2 uv)
+{
+    return IsAlphaCutoutTransparent(g_instanceInfo[NonUniformResourceIndex(InstanceID())], uv);
 }
 
 float3 SampleWorldSpaceNormal(HitData data)

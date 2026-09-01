@@ -1,0 +1,67 @@
+{
+  "counts": {
+    "approximation": 10
+  },
+  "entries": [
+    {
+      "level": "approximation",
+      "plugin": "RoughPlastic",
+      "id": null,
+      "message": "beckmann distribution converted as ggx with the same alpha"
+    },
+    {
+      "level": "approximation",
+      "plugin": "BitmapTextureImpl[uint8]",
+      "id": null,
+      "message": "sampler wrap/filter mode could not be recovered from Mitsuba; glTF defaults (repeat wrap, linear/linear-mipmap-linear filtering) were used"
+    },
+    {
+      "level": "approximation",
+      "plugin": "RoughDielectric",
+      "id": null,
+      "message": "beckmann distribution converted as ggx with the same alpha"
+    },
+    {
+      "level": "approximation",
+      "plugin": "RoughDielectric",
+      "id": null,
+      "message": "KHR_materials_volume.thicknessFactor left at 0 (no attenuation): the real interior thickness depends on the shape this material is attached to, which is not available while converting the BSDF alone"
+    },
+    {
+      "level": "approximation",
+      "plugin": "BitmapTextureImpl[uint8]",
+      "id": "WoodFloor",
+      "message": "sampler wrap/filter mode could not be recovered from Mitsuba; glTF defaults (repeat wrap, linear/linear-mipmap-linear filtering) were used"
+    },
+    {
+      "level": "approximation",
+      "plugin": "BitmapTextureImpl[uint8]",
+      "id": null,
+      "message": "sampler wrap/filter mode could not be recovered from Mitsuba; glTF defaults (repeat wrap, linear/linear-mipmap-linear filtering) were used"
+    },
+    {
+      "level": "approximation",
+      "plugin": "SmoothDielectric",
+      "id": null,
+      "message": "KHR_materials_volume.thicknessFactor left at 0 (no attenuation): the real interior thickness depends on the shape this material is attached to, which is not available while converting the BSDF alone"
+    },
+    {
+      "level": "approximation",
+      "plugin": "RoughPlastic",
+      "id": "WoodFurniture_0006",
+      "message": "beckmann distribution converted as ggx with the same alpha"
+    },
+    {
+      "level": "approximation",
+      "plugin": "RoughConductor",
+      "id": "PictureFrame",
+      "message": "beckmann distribution converted as ggx with the same alpha"
+    },
+    {
+      "level": "approximation",
+      "plugin": "BitmapTextureImpl[uint8]",
+      "id": "Picture",
+      "message": "sampler wrap/filter mode could not be recovered from Mitsuba; glTF defaults (repeat wrap, linear/linear-mipmap-linear filtering) were used"
+    }
+  ]
+}

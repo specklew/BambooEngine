@@ -87,8 +87,7 @@ void InjectAnyHit(inout InjectPayload payload : SV_RayPayload, in Attributes att
     uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
     HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
 
-    float4 albedo = SampleTextureColor(hit) * instance.baseColorFactor;
-    if (albedo.a < EPSILON)
+    if (IsAlphaCutoutTransparent(hit.uv))
     {
         IgnoreHit();
     }

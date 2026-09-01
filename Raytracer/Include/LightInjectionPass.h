@@ -5,6 +5,7 @@
 #include "VxpgGraphHandles.h"
 
 class VoxelizationPass;
+class GpuMemoryReport;
 
 // VXPG light injection (step 2): per frame, traces camera ray + one BSDF
 // bounce per pixel, evaluates direct light at the second path vertex and
@@ -13,6 +14,10 @@ class VoxelizationPass;
 class LightInjectionPass : public DxrPass
 {
 public:
+    // P5: the resources this stage holds, for the guiding chain's memory report.
+    // Declared per pass rather than collected from a base class because ADR 0017 left
+    // most of this chain as raw ComPtr, which no base class ever sees.
+    void ReportMemory(GpuMemoryReport& report) const;
     void SetVoxelizationPass(const std::shared_ptr<VoxelizationPass>& voxelPass) { m_voxelPass = voxelPass; }
 
     void Render() override;
@@ -41,6 +46,7 @@ protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;
     void CreateShaderResourceHeap() override;
+
 
 private:
     void CreateShadingPointsResource();

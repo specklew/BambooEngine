@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "VoxelizationPass.h"
 
@@ -417,4 +418,17 @@ bool VoxelizationPass::PrepareFrame(const Scene& scene, uint32_t requestedGridDi
     }
 
     return !m_bakeValid;
+}
+
+// P5. The grid itself: three 3D textures whose footprint is cubic in the grid dimension,
+// which is why the resolution axis of K5 is a memory question as much as a quality one.
+void VoxelizationPass::ReportMemory(GpuMemoryReport& report) const
+{
+    using namespace GpuMemoryStage;
+    report.Add(Voxelization, "voxel occupancy",    m_occupancyTex.Get());
+    report.Add(Voxelization, "voxel irradiance",   m_irradianceTex.Get());
+    report.Add(Voxelization, "voxel VPL count",    m_vplCountTex.Get());
+    report.Add(Voxelization, "grid constants",     m_gridConstantsCB.Get());
+    report.Add(Voxelization, "baked bound min",    m_bakedBoundMin.get());
+    report.Add(Voxelization, "baked bound max",    m_bakedBoundMax.get());
 }

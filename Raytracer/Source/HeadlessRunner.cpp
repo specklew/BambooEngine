@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
+#include <deque>
 #include <filesystem>
 #include <sstream>
 #include <unordered_map>
@@ -87,7 +88,7 @@ HeadlessRunner::HeadlessRunner(Renderer& renderer, HeadlessArgs args, HeadlessCo
 // once: boost clocks settling under sustained load, and the one-time costs (PSO
 // creation, BVH build, first dispatch of every node). The guide itself needs no
 // warm-up — it is rebuilt from scratch every frame and carries nothing forward.
-float HeadlessRunner::WarmUp()
+WarmUpReport HeadlessRunner::WarmUp()
 {
     // Always spend the one-time costs first, and spend them OUTSIDE the timed part
     // below. A compile-time vendor lever swaps the raygen variant, which routes
@@ -99,48 +100,90 @@ float HeadlessRunner::WarmUp()
     for (int i = 0; i < 16; ++i)
         PumpFrame();
 
+    // PLAN_BADAWCZY 7.7, tightened 2026-08-30. The old criterion (30 FRAMES, CV 2%, floor
+    // 1 s) was measured declaring "settled" after 1.0 s — i.e. on its floor — because at
+    // 0.8 ms/frame a 30-frame window spans 24 ms and a boost clock does not move within
+    // it. A window in SECONDS is what the criterion needs: it has to be long enough for a
+    // clock ramp to show up inside it, whatever the frame rate.
+    WarmUpReport report;
+    report.windowSeconds = 2.0f;
+    report.threshold     = 0.01f;
+    report.minSeconds    = 30.0f;
+
     if (m_args.warmupSeconds <= 0.0f)
-        return 0.0f;
+        return report;
 
-    constexpr size_t kWindow      = 30;   // frames the stability test looks at
-    constexpr double kMaxVariation = 0.02; // coefficient of variation to call it settled
-    constexpr double kMinSeconds  = 1.0;  // never declare stability off a handful of frames
+    // The cap has to leave room ABOVE the floor, or the criterion is never even reached:
+    // settling requires elapsed >= minSeconds while the loop runs only below the cap.
+    if (m_args.warmupSeconds <= report.minSeconds)
+        spdlog::warn("Warm-up cap {:.1f}s leaves no room above the {:.0f}s floor the protocol "
+                     "requires; this run cannot report a settled state",
+                     m_args.warmupSeconds, report.minSeconds);
 
-    std::vector<double> window;
-    window.reserve(kWindow);
-    double elapsed = 0.0;
-    size_t next    = 0;
+    // One bucket = one disjoint windowSeconds of frames. Disjoint rather than sliding
+    // because the statistic that matters is how the MEAN moves from one window to the
+    // next, and overlapping windows share most of their frames, which hides exactly that.
+    std::vector<double> bucket;
+    double bucketSpan   = 0.0;
+    double previousMean = 0.0;
+    bool   havePrevious = false;
+
+    double elapsed   = 0.0;
+    double mean      = 0.0;
+    double variation = 0.0;
+    double drift     = 1.0; // no verdict yet reads as "still moving"
 
     while (elapsed < m_args.warmupSeconds)
     {
         PumpFrame();
         const double delta = m_clock.GetDeltaSeconds();
-        elapsed += delta;
+        elapsed    += delta;
+        bucketSpan += delta;
+        bucket.push_back(delta);
 
-        if (window.size() < kWindow) window.push_back(delta);
-        else { window[next] = delta; next = (next + 1) % kWindow; }
-
-        if (window.size() < kWindow || elapsed < kMinSeconds)
+        if (bucketSpan < report.windowSeconds || bucket.size() < 2)
             continue;
 
         double sum = 0.0;
-        for (double d : window) sum += d;
-        const double mean = sum / window.size();
+        for (double d : bucket) sum += d;
+        mean = sum / bucket.size();
         double variance = 0.0;
-        for (double d : window) variance += (d - mean) * (d - mean);
-        const double coefficientOfVariation = mean > 0.0 ? std::sqrt(variance / window.size()) / mean : 0.0;
+        for (double d : bucket) variance += (d - mean) * (d - mean);
+        variation = mean > 0.0 ? std::sqrt(variance / bucket.size()) / mean : 0.0;
+        if (havePrevious && previousMean > 0.0)
+            drift = std::abs(mean - previousMean) / previousMean;
 
-        if (coefficientOfVariation < kMaxVariation)
+        spdlog::debug("Warm-up {:.1f}s: {:.3f} ms/frame, drift {:.4f}, jitter CV {:.4f}",
+                      elapsed, mean * 1000.0, drift, variation);
+
+        previousMean = mean;
+        havePrevious = true;
+        bucket.clear();
+        bucketSpan = 0.0;
+
+        if (elapsed >= report.minSeconds && drift < report.threshold)
         {
-            spdlog::info("Warm-up settled after {:.2f}s at {:.3f} ms/frame (CV {:.3f})",
-                         elapsed, mean * 1000.0, coefficientOfVariation);
-            return static_cast<float>(elapsed);
+            report.seconds     = static_cast<float>(elapsed);
+            report.meanFrameMs = static_cast<float>(mean * 1000.0);
+            report.variation   = static_cast<float>(variation);
+            report.drift       = static_cast<float>(drift);
+            report.settled     = true;
+            spdlog::info("Warm-up settled after {:.2f}s at {:.3f} ms/frame "
+                         "(drift {:.4f} between {:.1f}s windows, jitter CV {:.4f})",
+                         elapsed, mean * 1000.0, drift, report.windowSeconds, variation);
+            return report;
         }
     }
 
-    spdlog::warn("Warm-up hit its {:.2f}s cap without settling — frame time is still moving",
-                 m_args.warmupSeconds);
-    return static_cast<float>(elapsed);
+    report.seconds     = static_cast<float>(elapsed);
+    report.meanFrameMs = static_cast<float>(mean * 1000.0);
+    report.variation   = static_cast<float>(variation);
+    report.drift       = static_cast<float>(drift);
+    report.settled     = false;
+    spdlog::warn("Warm-up hit its {:.2f}s cap without settling — drift {:.4f} against a {:.3f} "
+                 "threshold (jitter CV {:.4f}); the capture records this as unsettled",
+                 m_args.warmupSeconds, drift, report.threshold, variation);
+    return report;
 }
 
 // --checkpoints log:K | every:N | list:a,b,c, in the budget's own unit. Always
@@ -450,7 +493,7 @@ int HeadlessRunner::Run()
                 // trigger an immediate single-frame capture (observed as frameIndex 0
                 // for VXPG at --seconds 1). A view switch can also swap the raygen
                 // variant, which rebuilds the pipeline — same reason, same warm-up.
-                const float warmupSpent = WarmUp();
+                const WarmUpReport warmup = WarmUp();
 
                 // A sweep writes several points into one run folder, so the point's
                 // index joins the name. The index alone is not the record of what was
@@ -493,7 +536,7 @@ int HeadlessRunner::Run()
                         : stem;
 
                     m_renderer.ArmScreenshot(schedule, model, place, runDir, imageStem,
-                                             image, m_args.images, warmupSpent);
+                                             image, m_args.images, warmup);
                     while (!m_renderer.ScreenshotIdle())
                         PumpFrame();
                 }

@@ -53,6 +53,8 @@ float UnpackIrradiance(uint packed)
 void ClearCounters(uint3 tid : SV_DispatchThreadID)
 {
     gCounters[0] = 0u;
+    gCounters[2] = 0u; // voxels dropped by the fixed-point truncation (probe)
+    gCounters[3] = 0u; // largest accumulated packed irradiance seen (probe)
 }
 
 // Copy baked per-voxel bounds into the live buffers for voxels that received
@@ -90,7 +92,16 @@ void CompactVoxels(uint3 tid : SV_DispatchThreadID)
     uint count = gVoxVplCount[tid];
     if (count == 0u) return;
 
-    float weight = UnpackIrradiance(gVoxIrradiance[tid]) / float(count);
+    // Probe for the fixed-point accumulator (vxpg.guiding.probe). [3] bounds how close the
+    // uint32 sum came to wrapping; [2] counts cells that caught VPLs yet packed to zero,
+    // which is the truncation in PackIrradiance dropping a cell out of the guide entirely.
+    const uint packedSum = gVoxIrradiance[tid];
+    uint previous;
+    InterlockedMax(gCounters[3], packedSum, previous);
+    if (packedSum == 0u)
+        InterlockedAdd(gCounters[2], 1u, previous);
+
+    float weight = UnpackIrradiance(packedSum) / float(count);
     if (weight <= 0.0f) return;
 
     uint slot;

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 
 #include "Renderer.h"
 
@@ -161,8 +162,12 @@ static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accum
 // everywhere; tight bounds turned the lit half of Sponza green (2026-07-09).
 static AutoCVarInt   g_voxelBakeUseCompact("voxel.bake.useCompact",
 	"Bake tight per-voxel triangle AABBs instead of full cubes (SIByL default: off)", 1, CVarFlags::EditCheckbox);
+// Default ON, second deviation from SIByL: without clipping the bound is the whole triangle's
+// AABB cropped to the cube, so a floor or a wall degenerates to the full cube and the sampler
+// aims at empty space again. Interleaved A/B 2026-08-31 (30 s, 10 images per arm): FLIP -1.0 %
+// on veach-ajar and -1.1 % on kitchen at equal frame count; the clip runs once per bake.
 static AutoCVarInt   g_voxelBakeClipping("voxel.bake.clipping",
-	"Clip triangles against the voxel cube before the tight AABB (SIByL default: off)", 0, CVarFlags::EditCheckbox);
+	"Clip triangles against the voxel cube before the tight AABB (SIByL default: off)", 1, CVarFlags::EditCheckbox);
 // Jitter ON is a deliberate deviation (SIByL uses pixel centers): the PT
 // reference anti-aliases its primaries, so a pixel-center VBuffer leaves a
 // constant silhouette mismatch vs the reference (measured 2026-07-10: RMSE
@@ -608,7 +613,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	const double renderElapsed = std::max(0.0, elapsedTime - m_screenshotManager->ConsumeLastCaptureCostSeconds());
 
 	// Tick screenshot before advancing accumulatedTime so the check reads the pre-update value
-	m_screenshotManager->Tick(*m_accumulationPass, renderElapsed);
+	m_screenshotManager->Tick(*m_accumulationPass, renderElapsed, !DebugViewPass::IsActive());
 
 	m_accumulationPass->Update(renderElapsed);
 
@@ -634,6 +639,10 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		static_cast<RenderGraph::BarrierPlacement>(std::clamp(g_barrierPlacement.Get(), 0, 2)));
 	m_renderGraph.SetAsyncCompute(g_asyncCompute.Get() != 0);
 	BuildVxpgGraph();
+
+	// After the chain has been built at least once, so the inventory describes what the
+	// frame actually holds rather than what had been created by init time.
+	LogGpuMemoryOnce();
 
 	SetViewport();
 	SetScissorRect();
@@ -746,6 +755,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	m_renderGraph.ResolveTimings();
 	if (m_clusterStatsPending && m_clusterPass)
 		m_clusterPass->ResolveStats();
+	if (m_guidingProbePending && m_voxelGuidingBuildPass)
+		m_voxelGuidingBuildPass->ResolveProbe();
 	DumpRenderGraphIfRequested();
 
 	if (m_screenshotManager->IsCaptureDue())
@@ -772,6 +783,7 @@ void Renderer::CleanUp()
 
 void Renderer::OnResize()
 {
+	m_gpuMemoryReportPending = true; // the chain's shape can change here (P5 inventory)
 	assert(g_device && "Attempted to resize window without device.");
 	assert(m_graphicsDevice->GetSwapChain() && "Attempted to resize window without swap chain.");
 	
@@ -1163,6 +1175,7 @@ void Renderer::InitializeEditorUI()
 
 void Renderer::LoadScene(const std::wstring& path, const std::string& statesKey)
 {
+	m_gpuMemoryReportPending = true; // the chain's shape can change here (P5 inventory)
 	char pathUtf8[MAX_PATH];
 	WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, pathUtf8, sizeof(pathUtf8), nullptr, nullptr);
 	spdlog::info("Scene has been changed. Loading: {}", pathUtf8);
@@ -1192,6 +1205,7 @@ void Renderer::LoadScene(const std::wstring& path, const std::string& statesKey)
 
 void Renderer::SetTechniqueByIndex(int index)
 {
+	m_gpuMemoryReportPending = true; // the chain's shape can change here (P5 inventory)
 	const auto& registry = RenderTechnique::GetRegistry();
 	if (index < 0 || index >= static_cast<int>(registry.size()))
 		return;
@@ -1275,13 +1289,13 @@ void Renderer::ArmScreenshot(float seconds, const std::string& model, const std:
 
 void Renderer::ArmScreenshot(const CaptureSchedule& schedule, const std::string& model, const std::string& place,
                              const std::string& outDir, const std::string& stem,
-                             uint32_t imageIndex, uint32_t imageCount, float warmupSeconds)
+                             uint32_t imageIndex, uint32_t imageCount, const WarmUpReport& warmup)
 {
 	m_screenshotManager->SetOutputTarget(outDir, stem);
 	ScreenshotMetadata meta = BuildScreenshotMetadata(model, place);
 	meta.imageIndex    = imageIndex;
 	meta.imageCount    = imageCount;
-	meta.warmupSeconds = warmupSeconds;
+	meta.warmup        = warmup;
 	m_screenshotManager->Arm(*m_accumulationPass, schedule, std::move(meta));
 }
 
@@ -1354,6 +1368,7 @@ void Renderer::BuildVxpgGraph()
 	// Latched once per frame: the node that copies the stats out and the readback
 	// that reads them must agree, and ResolveStats disarms the CVar between them.
 	m_clusterStatsPending = VxpgClusterPass::IsStatsDumpArmed();
+	m_guidingProbePending = VoxelGuidingBuildPass::IsProbeArmed();
 
 	if (!FrameUsesVoxelGuiding() || !m_voxelizationPass || !m_scene)
 		return;
@@ -1636,6 +1651,19 @@ void Renderer::BuildVxpgGraph()
 				pass.Write(m_vxpg.premulIrradiance, kUavWrite);
 			},
 			[this]() { m_voxelGuidingBuildPass->RunCompact(); });
+
+		// Armed only for the one-shot readout, so the copy and its state flip exist on
+		// exactly the frame that reads them back.
+		if (m_guidingProbePending)
+		{
+			m_renderGraph.AddPass("VXPG GuidingBuild Probe Readback",
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.NeverCull();
+					pass.Read(m_vxpg.counters, GraphAccess::CopySource);
+				},
+				[this]() { m_voxelGuidingBuildPass->RecordProbeCopy(); });
+		}
 	}
 
 	// Stage 4: fingerprint every lit voxel (128 stratified screen representatives
@@ -1726,7 +1754,12 @@ void Renderer::BuildVxpgGraph()
 
 	// Stage 7: per-superpixel x per-cluster soft visibility (cvis), one node per
 	// kernel (clear -> gather -> check).
-	if (m_clusterVisibilityPass)
+	// The top-level tree is the only consumer of both signals (debug view 10 aside),
+	// so the IntensityOnly weighting drops the whole stage from the frame rather than
+	// paying for a signal it then ignores. Graph culling cannot do this on its own:
+	// the guided integrator declares a read on the mask for view 10 and would keep
+	// the producers alive. Consequence: in that mode view 10 shows a stale mask.
+	if (m_clusterVisibilityPass && g_topLevelImportance.Get() != TopLevelImportance::IntensityOnly)
 	{
 		const uint32_t frame = m_passConstants->data.frameIndex;
 
@@ -2347,6 +2380,40 @@ void Renderer::ExecuteCommandsAndReset()
 	ResetCommandList();
 }
 
+// P5. Every pass that holds GPU resources, in chain order, so the table reads as the
+// pipeline it describes. A pass that has not been created yet contributes nothing, which
+// is the honest answer for a frame that does not run the guide.
+GpuMemoryReport Renderer::CollectGpuMemory() const
+{
+    GpuMemoryReport report;
+    if (m_voxelizationPass)       m_voxelizationPass->ReportMemory(report);
+    if (m_vbufferPass)            m_vbufferPass->ReportMemory(report);
+    if (m_lightInjectionPass)     m_lightInjectionPass->ReportMemory(report);
+    if (m_voxelGuidingBuildPass)  m_voxelGuidingBuildPass->ReportMemory(report);
+    if (m_fingerprintPass)        m_fingerprintPass->ReportMemory(report);
+    if (m_superpixelBuildPass)    m_superpixelBuildPass->ReportMemory(report);
+    if (m_clusterPass)            m_clusterPass->ReportMemory(report);
+    if (m_clusterVisibilityPass)  m_clusterVisibilityPass->ReportMemory(report);
+    if (m_lightTreePass)          m_lightTreePass->ReportMemory(report);
+    if (m_technique)              m_technique->ReportMemory(report);
+    return report;
+}
+
+// Once per configuration rather than once per frame: the inventory only changes when the
+// grid, the window or the technique does, and printing it every frame would bury the log
+// the measurement is read from.
+void Renderer::LogGpuMemoryOnce()
+{
+    if (!m_gpuMemoryReportPending)
+        return;
+    m_gpuMemoryReportPending = false;
+
+    const GpuMemoryReport report = CollectGpuMemory();
+    if (report.Empty())
+        return;
+    spdlog::info("P5 inventory:\n{}", report.FormatTable());
+}
+
 ScreenshotMetadata Renderer::BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const
 {
     ScreenshotMetadata m;
@@ -2376,6 +2443,12 @@ ScreenshotMetadata Renderer::BuildScreenshotMetadata(const std::string& modelNam
     m.settings        = m_settingsTag;
     if (m_technique)
         m.shaderVariant = m_technique->GetShaderVariantKey();
+
+    // P5. Taken at arm time, so it describes the configuration this image was rendered
+    // under rather than whatever the chain grew into later in the run.
+    const GpuMemoryReport memory = CollectGpuMemory();
+    m.memoryByStage    = memory.ByStage();
+    m.memoryTotalBytes = memory.Total();
 
     return m;
 }

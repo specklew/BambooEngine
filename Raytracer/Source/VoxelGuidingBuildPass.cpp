@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "VoxelGuidingBuildPass.h"
 
@@ -26,6 +27,20 @@ constexpr BindingSlot kGuidingBuildRepresentative =
     PassTableEntry("gVoxelRepresentative", BindingKind::Uav, GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE,
                    GlobalDescriptor::VoxelRepresentative);
 constexpr BindingSlot kGuidingBuildCounters      = PassUav("gCounters", GUIDING_BUILD_REG_COUNTERS);
+constexpr uint32_t kCounterCount = 4;
+// Retried because the first frame runs before the bake and the first injection, so an
+// unarmed-looking zero is indistinguishable from a genuinely unlit grid on frame 0.
+constexpr uint32_t kProbeMaxRetries = 8;
+}
+
+// One-shot: the compaction kernel already reads both voxel textures, so arming this costs
+// two atomics on cells it was visiting anyway and nothing at all when disarmed.
+static AutoCVarInt g_guidingProbe("vxpg.guiding.probe",
+    "One-shot readout of the irradiance accumulator: headroom to a uint32 wrap and the share of "
+    "VPL-carrying cells that quantise to zero", 0, CVarFlags::EditCheckbox);
+
+namespace
+{
 constexpr BindingSlot kGuidingBuildCompactIds    = PassUav("gCompactIds", GUIDING_BUILD_REG_COMPACT_IDS);
 constexpr BindingSlot kGuidingBuildInverseIndex  = PassUav("gInverseIndex", GUIDING_BUILD_REG_INVERSE_INDEX);
 constexpr BindingSlot kGuidingBuildLiveBoundMin  = PassUav("gLiveBoundMin", GUIDING_BUILD_REG_LIVE_BOUND_MIN);
@@ -65,9 +80,15 @@ void VoxelGuidingBuildPass::CreateBuffers()
 {
     constexpr uint32_t capacity = Constants::Graphics::VOXEL_GUIDING_CAPACITY;
 
-    // Counters buffer stays 2 elements: element [1] is retired (was the CDF
-    // total weight) but downstream root-UAV consumers still see stride 2.
-    m_counters     = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, 2,        L"VoxelGuiding Counters");
+    // [0] compacted voxel count, [1] retired (was the CDF total weight), [2] and [3] the
+    // one-shot accumulator probe. Downstream root-UAV consumers only ever index [0].
+    m_counters     = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, kCounterCount, L"VoxelGuiding Counters");
+
+    const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
+    const auto bufferDesc     = CD3DX12_RESOURCE_DESC::Buffer(kCounterCount * sizeof(uint32_t));
+    ThrowIfFailed(m_device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m_countersReadback)));
+    m_countersReadback->SetName(L"VoxelGuiding Counters Readback");
     m_compactIds   = std::make_unique<RWStructuredBuffer<uint32_t>>(m_device, capacity, L"VoxelGuiding CompactIds");
     m_compactVoxelLightPoints = std::make_unique<RWStructuredBuffer<DirectX::XMFLOAT4>>(m_device, capacity, L"VoxelGuiding CompactVoxelLightPoints");
     m_premulIrradiance = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity, L"VoxelGuiding PremulIrradiance");
@@ -170,4 +191,77 @@ void VoxelGuidingBuildPass::RunCompact()
     const uint32_t groups = (m_voxelPass->GetGridDim() + 7) / 8;
     m_commandList->SetPipelineState(m_compactProgram->GetPipelineState());
     CommandContext::Get().Dispatch(groups, groups, groups);
+}
+
+// P5. Two of these are grid-sized (the inverse index and both live bounds) and the rest
+// are capped by VOXEL_GUIDING_CAPACITY, so the stage has a fixed part and a cubic part.
+bool VoxelGuidingBuildPass::IsProbeArmed()
+{
+    return g_guidingProbe.Get() != 0;
+}
+
+// Its own graph node, so the UNORDERED_ACCESS -> COPY_SOURCE flip is synthesized from the
+// declaration rather than placed here (same shape as the cluster probe).
+void VoxelGuidingBuildPass::RecordProbeCopy()
+{
+    CommandContext::Get().GetCommandList()->CopyBufferRegion(
+        m_countersReadback.Get(), 0,
+        m_counters->GetUnderlyingResource().Get(), 0,
+        kCounterCount * sizeof(uint32_t));
+}
+
+void VoxelGuidingBuildPass::ResolveProbe()
+{
+    if (!m_countersReadback)
+        return;
+
+    const D3D12_RANGE readRange{0, kCounterCount * sizeof(uint32_t)};
+    uint32_t* counters = nullptr;
+    if (FAILED(m_countersReadback->Map(0, &readRange, reinterpret_cast<void**>(&counters))))
+        return;
+
+    const uint32_t litVoxels    = counters[0];
+    const uint32_t truncated    = counters[2];
+    const uint32_t maxPackedSum = counters[3];
+
+    const D3D12_RANGE writeRange{0, 0};
+    if (litVoxels == 0 && truncated == 0 && m_probeRetries < kProbeMaxRetries)
+    {
+        ++m_probeRetries;
+        m_countersReadback->Unmap(0, &writeRange);
+        return;
+    }
+
+    // The accumulator is a uint32 that InterlockedAdd never saturates, so the question is
+    // how much headroom the brightest cell actually leaves. Reported as a share of the
+    // wrap point rather than a raw number, because the raw number means nothing alone.
+    const double headroom = 100.0 * static_cast<double>(maxPackedSum) / 4294967295.0;
+    spdlog::info("[VXPG accumulator] brightest cell holds {} of 4294967295 ({:.4f}% of the wrap point)",
+                 maxPackedSum, headroom);
+    if (headroom > 10.0)
+        spdlog::warn("[VXPG accumulator] within one order of magnitude of wrapping — a wrapped cell "
+                     "reads as nearly unlit in the brightest part of the scene");
+
+    // PackIrradiance truncates, so a cell whose samples all fall below 1/100 packs to zero,
+    // and the compaction below drops it. Harmless while the share is small (those cells carry
+    // almost no energy); a large share means the guide is losing support to quantisation.
+    const uint32_t caughtVpls = litVoxels + truncated;
+    spdlog::info("[VXPG accumulator] {} of {} cells with VPLs packed to zero and left the guide ({:.2f}%)",
+                 truncated, caughtVpls, caughtVpls > 0 ? 100.0 * truncated / caughtVpls : 0.0);
+
+    m_countersReadback->Unmap(0, &writeRange);
+    m_probeRetries = 0;
+    g_guidingProbe.Set(0); // one-shot
+}
+
+void VoxelGuidingBuildPass::ReportMemory(GpuMemoryReport& report) const
+{
+    using namespace GpuMemoryStage;
+    report.Add(GuidingBuild, "counters",              m_counters.get());
+    report.Add(GuidingBuild, "compact ids",           m_compactIds.get());
+    report.Add(GuidingBuild, "inverse index",         m_inverseIndex.get());
+    report.Add(GuidingBuild, "live bound min",        m_liveBoundMin.get());
+    report.Add(GuidingBuild, "live bound max",        m_liveBoundMax.get());
+    report.Add(GuidingBuild, "compact light points",  m_compactVoxelLightPoints.get());
+    report.Add(GuidingBuild, "premultiplied irradiance", m_premulIrradiance.get());
 }

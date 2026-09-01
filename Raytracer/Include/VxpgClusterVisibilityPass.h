@@ -11,6 +11,7 @@ class VoxelGuidingBuildPass;
 class VxpgClusterPass;
 class SuperpixelBuildPass;
 class Scene;
+class GpuMemoryReport;
 
 // VXPG cluster-visibility pass (average directional visibility, Wu and Chuang
 // 2013 — the soft-visibility work the VXPG paper cites in Sec. 5.2): fills the
@@ -30,6 +31,10 @@ class Scene;
 class VxpgClusterVisibilityPass
 {
 public:
+    // P5: the resources this stage holds, for the guiding chain's memory report.
+    // Declared per pass rather than collected from a base class because ADR 0017 left
+    // most of this chain as raw ComPtr, which no base class ever sees.
+    void ReportMemory(GpuMemoryReport& report) const;
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5>              device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
@@ -53,6 +58,7 @@ public:
     RWStructuredBuffer<float>* GetAvgVisibilityBuffer() const { return m_avgVisibility.get(); }
     RWStructuredBuffer<DirectX::XMFLOAT4>* GetClusterGatheredLightPointsBuffer() const { return m_clusterGatheredLightPoints.get(); }
     RWStructuredBuffer<uint32_t>* GetClusterLightPointCountsBuffer() const { return m_clusterLightPointCounts.get(); }
+
 
 private:
     void CreateFixedBuffers();

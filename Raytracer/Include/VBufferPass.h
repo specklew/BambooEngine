@@ -3,6 +3,7 @@
 #include "DxrPass.h"
 #include "RenderGraph.h"
 #include "VxpgGraphHandles.h"
+class GpuMemoryReport;
 
 // Shared primary-visibility buffer pass (ADR 0004, SIByL raytraced-vbuffer):
 // per frame, traces one jittered camera ray per pixel and stores the hit's
@@ -13,6 +14,10 @@
 class VBufferPass : public DxrPass
 {
 public:
+    // P5: the resources this stage holds, for the guiding chain's memory report.
+    // Declared per pass rather than collected from a base class because ADR 0017 left
+    // most of this chain as raw ComPtr, which no base class ever sees.
+    void ReportMemory(GpuMemoryReport& report) const;
     void Render() override;
 
     // Everything this pass's node touches, taken from the slot table so the two
@@ -25,6 +30,7 @@ protected:
     TechniqueDesc GetTechniqueDesc() const override;
     void CreateGlobalRootSignature() override;
     void CreateShaderResourceHeap() override;
+
 
 private:
     void CreateVBufferResource();

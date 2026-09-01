@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "VxpgLightTreePass.h"
 
@@ -36,7 +37,7 @@ constexpr BindingSlot kTreePremulIrradiance = PassUav("gPremulIrradiance", LIGHT
 constexpr BindingSlot kTreeCounters         = PassUav("gVoxCounters", LIGHT_TREE_REG_COUNTERS);
 constexpr BindingSlot kTreeNodeVisited      = PassUav("gNodeVisited", LIGHT_TREE_REG_NODE_VISITED);
 constexpr BindingSlot kTreeTopLevelConstants =
-    PassRootConstants("TopLevelTreeCB", LIGHT_TREE_REG_TOP_LEVEL_CB, 4); // mapX, mapY, useAvgVisibility, pad
+    PassRootConstants("TopLevelTreeCB", LIGHT_TREE_REG_TOP_LEVEL_CB, 4); // mapX, mapY, importanceMode, pad
 constexpr BindingSlot kTreeAvgVisibility  = PassUav("gAvgVisibility", LIGHT_TREE_REG_AVG_VISIBILITY);
 constexpr BindingSlot kTreeImportanceHeap = PassUav("gSpixelClusterImportanceHeap", LIGHT_TREE_REG_IMPORTANCE_HEAP);
 constexpr BindingSlot kTreeVisibilityMask = PassTableEntry("gClusterVisibilityMask", BindingKind::Uav,
@@ -55,19 +56,6 @@ constexpr uint64_t IndirectArgOffset(uint32_t slot)
     return static_cast<uint64_t>(slot) * sizeof(D3D12_DISPATCH_ARGUMENTS);
 }
 } // namespace
-
-// SIByL ships the top-level tree with visibility = 1 (Average / soft weighting).
-// 0 switches to Binary (a cluster is fully in or fully out per superpixel). Both
-// signals are produced by the cluster-visibility pass every frame, so this is a
-// quality knob, not a cost knob.
-// Average (SIByL default) measured BEST once the cvis facing-gate flip landed
-// (2026-07-10: FLIP 0.01476 vs Binary 0.01526 vs pre-fix Average 0.01552 on the
-// Standard Look b1 benchmark) — the raw-normal gate was what starved Average's
-// probe pairs on back-wound surfaces; Binary's 0/1 weighting over-samples
-// barely-visible clusters and is strictly worse post-fix.
-static AutoCVarInt g_topLevelUseAvgVisibility("vxpg.topLevelTree.useAvgVisibility",
-    "Weight top-level cluster importance by soft avg-visibility (1=SIByL Average, 0=Binary mask)",
-    1, CVarFlags::EditCheckbox);
 
 namespace
 {
@@ -298,9 +286,11 @@ void VxpgLightTreePass::RunTopLevel()
 
     auto* cmd = m_commandList.Get();
 
+    // The avg-visibility buffer stays bound in every mode: IntensityOnly leaves it
+    // unwritten (its producer is culled) but the root signature still needs a VA.
     const uint32_t constants[4] = {
         m_mapX, m_mapY,
-        static_cast<uint32_t>(g_topLevelUseAvgVisibility.Get() != 0),
+        static_cast<uint32_t>(g_topLevelImportance.Get()),
         0u
     };
     m_rootSig.SetConstants(cmd, kTreeTopLevelConstants, constants, 4);
@@ -312,4 +302,20 @@ void VxpgLightTreePass::RunTopLevel()
     // groups wide, mapY tall (SIByL dispatch (5,23) for its 40x23 map).
     cmd->SetPipelineState(m_topLevelProgram->GetPipelineState());
     CommandContext::Get().Dispatch((m_mapX + 7) / 8, m_mapY, 1);
+}
+
+// P5. The node array is what LIGHT_TREE_MAX_LEAVES caps, so this row is where the uint16
+// node index shows up as a number rather than as a note.
+void VxpgLightTreePass::ReportMemory(GpuMemoryReport& report) const
+{
+    using namespace GpuMemoryStage;
+    report.Add(LightTree, "sort keys",              m_sortKeys.get());
+    report.Add(LightTree, "tree nodes",             m_nodes.get());
+    report.Add(LightTree, "leaf ranges",            m_leafRanges.get());
+    report.Add(LightTree, "compact to leaf",        m_compactToLeaf.get());
+    report.Add(LightTree, "cluster roots",          m_clusterRoots.get());
+    report.Add(LightTree, "tree dispatch args",     m_dispatchArgs.get());
+    report.Add(LightTree, "indirect dispatch args", m_indirectDispatchArgs.get());
+    report.Add(LightTree, "node visited",           m_nodeVisited.get());
+    report.Add(LightTree, "superpixel cluster heap", m_spixelClusterHeap.get());
 }

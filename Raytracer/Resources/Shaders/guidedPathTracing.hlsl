@@ -571,6 +571,26 @@ GuidePdf PdfTraverseLightTree(int clusterRootId, int leafNodeId, float3 p, float
     return pdf;
 }
 
+// Drop the fuzzy parents whose importance heap is empty, then renormalize what
+// is left (SIByL gi.slang:293-299). Every consumer of a fuzzy weight set must
+// call this first: the forward chain divides by the pdf it drew from and the
+// MIS weights compare that against the reverse query, so a raw-vs-renormalized
+// split between the two sides leaves w_BSDF + w_guide < 1 — energy lost in
+// exactly the pixels whose parent set holds one dead superpixel.
+void NormalizeFuzzyParents(inout float4 fuzzyWeights, int4 fuzzyIndices)
+{
+    [unroll] for (int f = 0; f < 4; ++f)
+    {
+        const bool parentAlive = fuzzyWeights[f] > 0.0 && fuzzyIndices[f] >= 0 &&
+            gSpixelClusterImportanceHeap[uint(fuzzyIndices[f]) * 64u + 1u] > 0.0f;
+        if (!parentAlive)
+            fuzzyWeights[f] = 0.0;
+    }
+    const float fuzzyTotal = dot(fuzzyWeights, float4(1, 1, 1, 1));
+    if (fuzzyTotal > 0.0)
+        fuzzyWeights /= fuzzyTotal;
+}
+
 // Mixture probability of the fuzzy parent set picking `cluster`: sum over the
 // (renormalized) parents of weight x heapLeaf/heapRoot — SIByL strategy 7's
 // reverse formula (gi.slang:389-403), used here on BOTH the forward and the
@@ -757,8 +777,7 @@ GuidedPayload TraceBounceRay(RayDesc ray)
             uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
             HitData hit = GetHitData(query.CandidatePrimitiveIndex(), vertexOffset, indexOffset,
                                      query.CandidateTriangleBarycentrics(), instance.objectToWorld);
-            float4 albedo = SampleTextureColor(instance, hit) * instance.baseColorFactor;
-            if (albedo.a >= EPSILON)
+            if (!IsAlphaCutoutTransparent(instance, hit.uv))
                 query.CommitNonOpaqueTriangleHit();
         }
     }
@@ -1299,20 +1318,16 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
         // image black and the probe useless.
         if (chain == GUIDE_CHAIN_NO_PARENT && debugView != 4u)
             return radiance; // no live parent and no hard assignment
+        // A dead branch means the guide drew no sample, which is what NO_PARENT above already
+        // means, so it exits the same way. The previous form followed SIByL strategy 5, which
+        // wipes the strategy contributions and re-adds direct light after the wipe (gi.slang:512
+        // wipe, :635 direct) — but `radiance` here already holds the primary emission, the
+        // 3-way-weighted NEE and the whole BSDF strategy including its traced ray, and returning
+        // a fresh 2-way NEE threw all of that away and weighted the survivor by another
+        // heuristic. Rare under intensity-only weighting (internal intensity is the exact child
+        // sum), normal under the geometric modes, where both bounds can vanish below the horizon.
         if (chain == GUIDE_CHAIN_DEAD_BRANCH && debugView != 4u)
-        {
-            // SIByL strategy 5 wipes the STRATEGY contributions on a dead
-            // branch but adds direct light AFTER the wipe (gi.slang:512
-            // wipe, :635 direct) — returning black here also discarded the
-            // direct term, producing intermittent black samples (frame
-            // flicker). Return the direct-only radiance instead, matching
-            // SIByL's ordering. Rare with intensity-only traversal
-            // (internal intensity = exact child sum), but not impossible
-            // with float summation drift.
-            if (debugView >= 3u || IndirectOnly())
-                return float3(0, 0, 0);
-            return SampleDirectLight(hit, surface, seed);
-        }
+            return radiance;
         if (chain == GUIDE_CHAIN_OK)
         {
             float3 f = EvalPathBRDF(surface, dir);
@@ -1865,16 +1880,7 @@ void GuidedIntegratorMain()
         spixelFlat = gSpixelIndexImage[launchIndex];
         fuzzyWeights = gFuzzyWeights[launchIndex];
         fuzzyIndices = gFuzzyIndices[launchIndex];
-        [unroll] for (int f = 0; f < 4; ++f)
-        {
-            const bool parentAlive = fuzzyWeights[f] > 0.0 && fuzzyIndices[f] >= 0 &&
-                gSpixelClusterImportanceHeap[uint(fuzzyIndices[f]) * 64u + 1u] > 0.0f;
-            if (!parentAlive)
-                fuzzyWeights[f] = 0.0;
-        }
-        const float fuzzyTotal = dot(fuzzyWeights, float4(1, 1, 1, 1));
-        if (fuzzyTotal > 0.0)
-            fuzzyWeights /= fuzzyTotal;
+        NormalizeFuzzyParents(fuzzyWeights, fuzzyIndices);
     }
 
     float3 accumulated = float3(0, 0, 0);
@@ -1973,8 +1979,7 @@ void GuidedAnyHit(inout GuidedPayload payload : SV_RayPayload, in Attributes att
     uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
     HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
 
-    float4 albedo = SampleTextureColor(hit) * instance.baseColorFactor;
-    if (albedo.a < EPSILON)
+    if (IsAlphaCutoutTransparent(hit.uv))
     {
         IgnoreHit();
     }
@@ -2027,8 +2032,11 @@ void GuideChainMain(uint3 dispatchThreadId : SV_DispatchThreadID)
         return; // primary ray missed
 
     const uint litVoxelCount = LitVoxelCount();
-    const float4 fuzzyWeights = gFuzzyWeights[pixel];
+    float4 fuzzyWeights = gFuzzyWeights[pixel];
     const int4 fuzzyIndices = gFuzzyIndices[pixel];
+    // Same renormalization the raygen applies before its reverse pdf queries. Skipping it here
+    // made the forward pdf a factor W = sum of live raw weights larger than the reverse one.
+    NormalizeFuzzyParents(fuzzyWeights, fuzzyIndices);
     if (litVoxelCount == 0u || !any(fuzzyWeights > 0.0))
         return; // guideAlive is false; the raygen skips the branch on its own copy of this test
 
@@ -2046,7 +2054,7 @@ void GuideChainMain(uint3 dispatchThreadId : SV_DispatchThreadID)
     float3 aabbMin, aabbMax;
     uint outcome;
     const int chain = SampleGuideDirection(shadingPos, shadingNormal, fuzzyWeights,
-                                           gFuzzyIndices[pixel], gSpixelIndexImage[int2(pixel)],
+                                           fuzzyIndices, gSpixelIndexImage[int2(pixel)],
                                            treeWeightMode, litVoxelCount, seed,
                                            dir, pdfG, aabbMin, aabbMax, outcome);
 

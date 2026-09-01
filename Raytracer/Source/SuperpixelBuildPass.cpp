@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "SuperpixelBuildPass.h"
 
@@ -249,4 +250,17 @@ void SuperpixelBuildPass::RunClearCounter()
 
     m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
     CommandContext::Get().Dispatch((m_mapX + 7) / 8, (m_mapY + 7) / 8, 1);
+}
+
+// P5. Every one of these is screen-sized or superpixel-map-sized, so this stage tracks
+// the render resolution and is untouched by the grid.
+void SuperpixelBuildPass::ReportMemory(GpuMemoryReport& report) const
+{
+    using namespace GpuMemoryStage;
+    report.Add(Superpixel, "superpixel centers",     m_center.Get());
+    report.Add(Superpixel, "superpixel index",       m_index.Get());
+    report.Add(Superpixel, "superpixel counter",     m_counter.Get());
+    report.Add(Superpixel, "superpixel gathered",    m_gathered.Get());
+    report.Add(Superpixel, "fuzzy weight",           m_fuzzyWeight.Get());
+    report.Add(Superpixel, "fuzzy index",            m_fuzzyIndex.Get());
 }

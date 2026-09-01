@@ -72,11 +72,16 @@ globallycoherent RWStructuredBuffer<uint> gNodeVisited : BAMBOO_PASS_UAV(LIGHT_T
 // SIByL vxguiding/tree/tree-top-level-constr: per-superpixel implicit heap of
 // the 32 clusters' view-weighted importance. These are unused by the six
 // bottom-tree kernels above (DXC strips them per-entry).
+// Mirrors the C++ TopLevelImportance enum (VxpgLightTreePass.h).
+#define TOP_LEVEL_IMPORTANCE_BINARY_VISIBILITY  0
+#define TOP_LEVEL_IMPORTANCE_AVERAGE_VISIBILITY 1
+#define TOP_LEVEL_IMPORTANCE_INTENSITY_ONLY     2
+
 cbuffer TopLevelTreeCB : BAMBOO_PASS_CBV(LIGHT_TREE_REG_TOP_LEVEL_CB)
 {
-    uint gMapX;             // superpixel columns = ceil(width / SUPERPIXEL_SIZE)
-    uint gMapY;             // superpixel rows
-    uint gUseAvgVisibility; // 1 = SIByL Average (soft), 0 = Binary (mask bit)
+    uint gMapX;                // superpixel columns = ceil(width / SUPERPIXEL_SIZE)
+    uint gMapY;                // superpixel rows
+    uint gImportanceMode;      // TOP_LEVEL_IMPORTANCE_*
     uint gTopLevelPad;
 }
 RWStructuredBuffer<float> gAvgVisibility : BAMBOO_PASS_UAV(LIGHT_TREE_REG_AVG_VISIBILITY);               // SIByL avg_visibility (spixelFlat*32+cluster)
@@ -413,9 +418,14 @@ void MergeTreeNodes(uint3 dtid : SV_DispatchThreadID)
     if (parent == LIGHT_TREE_NO_NODE)
         return;
 
-    int lhsNodeId = gNodes[parent].leftIndex;
-    LightTreeNode lhs = gNodes[lhsNodeId];
-
+    // DEVIATION from SIByL (data race): both children are read INSIDE the loop, after the
+    // atomic gate. SIByL hoists the left child's read above the loop, which for a leaf that is
+    // its parent's right child happens before the left subtree has been merged at all — passing
+    // the gate second then folds a stale, all-zero left side in and loses that subtree. Latent
+    // in practice, because the leaf thread almost always reaches the gate first and returns,
+    // but the read is unsynchronised regardless of who wins. Past the gate the sibling has
+    // published its subtree root, so reading both children here is both safe and simpler: the
+    // own/sibling bookkeeping disappears.
     while (parent != LIGHT_TREE_NO_NODE)
     {
         uint old;
@@ -425,8 +435,10 @@ void MergeTreeNodes(uint3 dtid : SV_DispatchThreadID)
 
         const uint lidx = gNodes[parent].leftIndex;
         const uint ridx = gNodes[parent].rightIndex;
-        const uint rhsNodeId = (uint(lhsNodeId) != ridx) ? ridx : lidx;
-        LightTreeNode rhs = gNodes[rhsNodeId];
+        const uint lhsNodeId = lidx;
+        const uint rhsNodeId = ridx;
+        LightTreeNode lhs = gNodes[lidx];
+        LightTreeNode rhs = gNodes[ridx];
 
         LightTreeNode merged = gNodes[parent];
         merged.intensity = lhs.intensity + rhs.intensity;
@@ -442,7 +454,7 @@ void MergeTreeNodes(uint3 dtid : SV_DispatchThreadID)
         // whose two root subtrees BOTH span multiple clusters (the normal case)
         // it writes cluster_roots[0xFFFFFFFF] -> wild GPU write -> device removed.
         if (lhs.flag != merged.flag && lhs.flag < 32u)
-            gClusterRoots[lhs.flag] = lhsNodeId;
+            gClusterRoots[lhs.flag] = int(lhsNodeId);
         if (rhs.flag != merged.flag && rhs.flag < 32u)
             gClusterRoots[rhs.flag] = int(rhsNodeId);
         if (merged.parentIndex == LIGHT_TREE_NO_NODE && lhs.flag == rhs.flag && merged.flag < 32u)
@@ -450,8 +462,6 @@ void MergeTreeNodes(uint3 dtid : SV_DispatchThreadID)
 
         gNodes[parent] = merged;
 
-        lhs = merged;
-        lhsNodeId = int(parent);
         parent = gNodes[parent].parentIndex;
     }
 }
@@ -510,19 +520,21 @@ void BuildSuperpixelClusterHeaps(uint3 gid : SV_GroupID, uint groupIndex : SV_Gr
     const int clusterNodeId = gClusterRoots[cluster];
     float clusterIntensity = (clusterNodeId != -1) ? gNodes[clusterNodeId].intensity : 0.0f;
 
-    if (gUseAvgVisibility == 0u)
+    if (gImportanceMode == TOP_LEVEL_IMPORTANCE_BINARY_VISIBILITY)
     {
-        // Binary mode: mask bit clear => this superpixel can't see the cluster.
+        // Mask bit clear => this superpixel can't see the cluster.
         const uint visibilityPack = active ? gClusterVisibilityMask[spixel] : 0u;
         if ((visibilityPack & (1u << cluster)) == 0u)
             clusterIntensity = 0.0f;
     }
-    else
+    else if (gImportanceMode == TOP_LEVEL_IMPORTANCE_AVERAGE_VISIBILITY)
     {
-        // Average mode (SIByL default visibility=1): soft BRDF-weighted fraction.
+        // SIByL default (visibility=1): soft BRDF-weighted visible fraction.
         const float avgVisibility = active ? (gAvgVisibility[spixelFlat * 32u + cluster] / 32.0f) : 0.0f;
         clusterIntensity *= avgVisibility;
     }
+    // TOP_LEVEL_IMPORTANCE_INTENSITY_ONLY: the weight IS the cluster intensity, so
+    // neither visibility buffer is read and the cvis stage is culled from the frame.
 
     float importance = clusterIntensity;
     const uint offset = spixelFlat * 64u;

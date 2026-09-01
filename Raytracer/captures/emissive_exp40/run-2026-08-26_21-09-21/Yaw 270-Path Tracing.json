@@ -1,0 +1,54 @@
+{
+    "camera": {
+        "position": [
+            0.0,
+            7.0,
+            20.0
+        ],
+        "rotation": [
+            0.0,
+            -0.7071068286895752,
+            0.0,
+            0.7071067094802856
+        ],
+        "fov": 1.0471975803375244
+    },
+    "scene": {
+        "model": "BistroExterior_CONV",
+        "place": "Yaw 270"
+    },
+    "technique": "Path Tracing",
+    "postProcess": {
+        "enabled": true,
+        "exposure": 40.0,
+        "contrast": 1.0,
+        "saturation": 1.0,
+        "lift": 0.0
+    },
+    "raytracing": {
+        "spp": 1,
+        "bounces": 2,
+        "frameIndex": 1256,
+        "accumulatedTime": 3.0022261142730713
+    },
+    "render": {
+        "width": 960,
+        "height": 540
+    },
+    "benchmark": {
+        "budgetKind": "seconds",
+        "budgetValue": 3.0,
+        "checkpoints": 1,
+        "checkpointIndex": 0,
+        "imageIndex": 0,
+        "imageCount": 1,
+        "meanFrameMs": 2.3903074264526367,
+        "warmupSeconds": 0.0,
+        "levers": "",
+        "shaderVariant": "",
+        "settings": ""
+    },
+    "capture": {
+        "timestamp": "2026-08-26T21:09:33"
+    }
+}

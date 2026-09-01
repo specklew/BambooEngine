@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "VxpgFingerprintPass.h"
 
@@ -224,4 +225,13 @@ void VxpgFingerprintPass::RunVisibility(D3D12_GPU_VIRTUAL_ADDRESS tlasVa)
     constexpr uint32_t kVisibilityArgsOffset = 2 * sizeof(DirectX::XMUINT4); // entry [2]
     CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
         m_guidingDispatchArgs->GetUnderlyingResource().Get(), kVisibilityArgsOffset);
+}
+
+// P5.
+void VxpgFingerprintPass::ReportMemory(GpuMemoryReport& report) const
+{
+    using namespace GpuMemoryStage;
+    report.Add(Fingerprint, "screen representative points", m_screenRepresentativePoints.get());
+    report.Add(Fingerprint, "guiding dispatch args",        m_guidingDispatchArgs.get());
+    report.Add(Fingerprint, "voxel fingerprints",           m_voxelFingerprints.get());
 }

@@ -27,7 +27,7 @@ private:
     // Renders the real workload and throws the result away until the frame time
     // stops moving. Returns the seconds actually spent, which goes into the
     // sidecar — a warm-up nobody can see the length of is not a protocol.
-    float WarmUp();
+    WarmUpReport WarmUp();
 
     // The capture budget plus the checkpoints inside it, resolved from the flags.
     CaptureSchedule BuildSchedule() const;

@@ -50,6 +50,8 @@ class ScreenshotManager;
 class StatesManager;
 struct ScreenshotMetadata;
 struct CaptureSchedule;
+struct WarmUpReport;
+class GpuMemoryReport;
 class VoxelizationPass;
 
 
@@ -102,7 +104,7 @@ public:
 	// provenance a measurement has to carry to be reproducible.
 	void ArmScreenshot(const CaptureSchedule& schedule, const std::string& model, const std::string& place,
 	                   const std::string& outDir, const std::string& stem,
-	                   uint32_t imageIndex, uint32_t imageCount, float warmupSeconds);
+	                   uint32_t imageIndex, uint32_t imageCount, const WarmUpReport& warmup);
 	bool ScreenshotIdle() const;
 	// The settings point every subsequent capture belongs to (--cvar-matrix). Held on
 	// the renderer rather than passed per capture because it is provenance, not an
@@ -188,6 +190,7 @@ private:
 	// Latched from vxpg.cluster.dumpStats at graph-build time so the copy node,
 	// the frame's flush and the readback all agree on one answer.
 	bool m_clusterStatsPending = false;
+	bool m_guidingProbePending = false;
 
 	std::shared_ptr<RenderTechnique> m_technique;
 	std::shared_ptr<VBufferPass> m_vbufferPass;
@@ -258,8 +261,15 @@ private:
 	std::shared_ptr<VxpgClusterVisibilityPass> m_clusterVisibilityPass;
 	std::shared_ptr<VxpgLightTreePass> m_lightTreePass;
 	std::shared_ptr<SuperpixelBuildPass> m_superpixelBuildPass;
+	// Re-armed whenever the chain's shape can have changed (technique, scene, resize).
+	bool m_gpuMemoryReportPending = true;
 
 	ScreenshotMetadata BuildScreenshotMetadata(const std::string& modelName, const std::string& placeName) const;
+	// P5: walks every pass that holds GPU resources. Cheap (a desc query per resource),
+	// so it is taken fresh rather than cached — the chain resizes with the grid and with
+	// the window, and a cached figure would quietly describe the previous configuration.
+	GpuMemoryReport CollectGpuMemory() const;
+	void LogGpuMemoryOnce();
 };
 
 template <typename T>

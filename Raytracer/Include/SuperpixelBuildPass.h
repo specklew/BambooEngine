@@ -3,6 +3,7 @@
 
 #include "RootSignatureLibrary.h"
 #include "ShaderProgram.h"
+class GpuMemoryReport;
 
 // VXPG V2 Stage B: superpixel clustering (SLIC over the ShadingPoints G-buffer).
 // Per frame: InitSeedCenters -> N x [FindCenterAssociation -> SumCenter] ->
@@ -13,6 +14,10 @@
 class SuperpixelBuildPass
 {
 public:
+    // P5: the resources this stage holds, for the guiding chain's memory report.
+    // Declared per pass rather than collected from a base class because ADR 0017 left
+    // most of this chain as raw ComPtr, which no base class ever sees.
+    void ReportMemory(GpuMemoryReport& report) const;
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5>              device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList);
@@ -49,6 +54,7 @@ public:
     ID3D12Resource* GetFuzzyIndexResource() const { return m_fuzzyIndex.Get(); }
     uint32_t GetMapX() const { return m_mapX; }
     uint32_t GetMapY() const { return m_mapY; }
+
 
 private:
     // Binds heap + root signature + constants; false = cannot run.

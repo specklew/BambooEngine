@@ -6,11 +6,42 @@
 
 #include "Resources/RWStructuredBuffer.h"
 #include "BitonicSortPass.h"
+#include "Utils/CVars.h"
 
 class VoxelizationPass;
 class VoxelGuidingBuildPass;
 class VxpgClusterPass;
 class VxpgClusterVisibilityPass;
+class GpuMemoryReport;
+
+// How the top-level (per-superpixel) tree weights the 32 clusters. The first two
+// are SIByL's own pair and are both visibility-aware; SIByL ships Average.
+// IntensityOnly is the research plan's "power-proportional" strategy: the weight
+// is the cluster's intensity alone, visibility fixed at 1. It has no other
+// consumer, so selecting it also culls the whole cluster-visibility stage from
+// the frame (see Renderer::BuildVxpgGraph) — a strategy that ignores a signal
+// must not be charged for producing it.
+// AverageVisibility measured BEST of the two SIByL modes once the cvis facing-gate
+// flip landed (2026-07-10: FLIP 0.01476 vs BinaryVisibility 0.01526 vs pre-fix
+// Average 0.01552 on the Standard Look b1 benchmark) — the raw-normal gate was
+// what starved Average's probe pairs on back-wound surfaces; the binary 0/1
+// weighting over-samples barely-visible clusters and is strictly worse post-fix.
+enum class TopLevelImportance : int
+{
+    BinaryVisibility  = 0,
+    AverageVisibility = 1,
+    IntensityOnly     = 2,
+};
+
+// Lives beside its enum because both the light tree pass (which packs it into the
+// top-level root constants) and the Renderer (which decides whether the
+// cluster-visibility stage is needed at all) read the same object.
+inline AutoCVarEnum g_topLevelImportance("vxpg.topLevelTree.importance",
+    "Top-level cluster weighting: visibility mask, soft average visibility (SIByL), or intensity alone",
+    TopLevelImportance::AverageVisibility, CVarFlags::None,
+    {"cluster intensity zeroed unless the superpixel's mask bit is set",
+     "cluster intensity times the soft BRDF-weighted visible fraction (SIByL default)",
+     "cluster intensity alone, visibility ignored - skips the cluster-visibility stage"});
 
 // VXPG bottom light tree: a Karras LBVH over the lit voxels (SIByL vxguiding
 // tree-encode -> bitonic sort -> tree-initial -> tree-internal -> tree-merge).
@@ -20,6 +51,10 @@ class VxpgClusterVisibilityPass;
 class VxpgLightTreePass
 {
 public:
+    // P5: the resources this stage holds, for the guiding chain's memory report.
+    // Declared per pass rather than collected from a base class because ADR 0017 left
+    // most of this chain as raw ComPtr, which no base class ever sees.
+    void ReportMemory(GpuMemoryReport& report) const;
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5>              device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
@@ -78,6 +113,7 @@ public:
     RWStructuredBuffer<TreeBuildDispatchArgsGpu>* GetDispatchArgsBuffer() const { return m_dispatchArgs.get(); }
     RWStructuredBuffer<DispatchArgsGpu>* GetIndirectDispatchArgsBuffer() const { return m_indirectDispatchArgs.get(); }
     RWStructuredBuffer<uint32_t>* GetNodeVisitedBuffer() const { return m_nodeVisited.get(); }
+
 
 private:
     // Shared heap + tree root signature + every root resource. False = cannot run.

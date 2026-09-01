@@ -1,0 +1,56 @@
+{
+    "camera": {
+        "position": [
+            -8.02691650390625,
+            1.391247272491455,
+            -0.3997062146663666
+        ],
+        "rotation": [
+            -0.004789997823536396,
+            0.7158823013305664,
+            0.004911397118121386,
+            0.6981872320175171
+        ],
+        "fov": 1.0471975803375244
+    },
+    "scene": {
+        "model": "Sponza",
+        "place": "Test State"
+    },
+    "technique": "Path Tracing",
+    "postProcess": {
+        "enabled": true,
+        "exposure": 1.899999976158142,
+        "contrast": 0.800000011920929,
+        "saturation": 1.0,
+        "lift": 0.0
+    },
+    "raytracing": {
+        "spp": 1,
+        "bounces": 1,
+        "frameIndex": 502,
+        "accumulatedTime": 2.0030579566955566
+    },
+    "render": {
+        "width": 1920,
+        "height": 1080
+    },
+    "benchmark": {
+        "budgetKind": "seconds",
+        "budgetValue": 2.0,
+        "checkpoints": 1,
+        "checkpointIndex": 0,
+        "imageIndex": 5,
+        "imageCount": 20,
+        "meanFrameMs": 3.9901552200317383,
+        "warmupSeconds": 1.0855050086975098,
+        "levers": "guidechainpass",
+        "shaderVariant": "guidechainpass",
+        "settings": "",
+        "varianceMean": 0.000040776096284389496,
+        "varianceRelative": 0.04364554211497307
+    },
+    "capture": {
+        "timestamp": "2026-08-29T11:53:47"
+    }
+}

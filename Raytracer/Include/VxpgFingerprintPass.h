@@ -8,6 +8,7 @@
 
 class VoxelGuidingBuildPass;
 class LightInjectionPass;
+class GpuMemoryReport;
 
 // VXPG fingerprint pass (MRCS row sampling, producing each voxel's reduced
 // column): assigns every compacted lit
@@ -27,6 +28,10 @@ class LightInjectionPass;
 class VxpgFingerprintPass
 {
 public:
+    // P5: the resources this stage holds, for the guiding chain's memory report.
+    // Declared per pass rather than collected from a base class because ADR 0017 left
+    // most of this chain as raw ComPtr, which no base class ever sees.
+    void ReportMemory(GpuMemoryReport& report) const;
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5>              device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
@@ -45,6 +50,7 @@ public:
     RWStructuredBuffer<DirectX::XMFLOAT4>* GetScreenRepresentativePointsBuffer() const { return m_screenRepresentativePoints.get(); }
     RWStructuredBuffer<uint32_t>*          GetVoxelFingerprintsBuffer() const { return m_voxelFingerprints.get(); }
     RWStructuredBuffer<DirectX::XMUINT4>*  GetGuidingDispatchArgsBuffer() const { return m_guidingDispatchArgs.get(); }
+
 
 private:
     // False = the pass cannot run this frame (no G-buffer yet).

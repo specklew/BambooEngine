@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "VBufferPass.h"
 
@@ -115,4 +116,11 @@ void VBufferPass::Render()
     CommandContext::Get().DispatchRays(desc);
 
     // No tail barrier: the graph emits it from the consumer's declaration.
+}
+
+// P5. Shared with path tracing in principle, but only the guided chain builds it, so it
+// counts against the guide.
+void VBufferPass::ReportMemory(GpuMemoryReport& report) const
+{
+    report.Add(GpuMemoryStage::VBuffer, "v-buffer", m_vbufferTex.Get());
 }

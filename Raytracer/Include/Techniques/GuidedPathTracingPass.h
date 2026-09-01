@@ -20,6 +20,7 @@ class VxpgLightTreePass;
 class GuidedPathTracingPass : public DxrTechnique
 {
 public:
+    void ReportMemory(GpuMemoryReport& report) const override;
     // Wired by the Renderer after construction (registry factory takes no args)
     void SetGuidingResources(
         const std::shared_ptr<VoxelizationPass>& voxelPass,

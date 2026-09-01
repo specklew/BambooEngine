@@ -402,7 +402,14 @@ static std::shared_ptr<Primitive> LoadPrimitive(Renderer& renderer, const tinygl
             material->m_metallicRoughnessTexture = GetOrCreateTexture(renderer, model, metallic_roughness_index, textureCache);
         }
         
-        if (model.materials[primitive.material].alphaMode != "OPAQUE")
+        // Alpha is a cutout, never transmission (the integrator evaluates a BRDF, not a
+        // BSDF), so geometry only leaves the opaque fast path when a base-colour texture
+        // can actually reach alpha 0 — Sponza's leaf and chain cards. A material-constant
+        // alpha stays fully occluding: Mitsuba's `mask` opacity imports as BLEND with
+        // baseColorFactor.a below 1 (bedroom's curtains, 0.531), and a half-opaque curtain
+        // shading through a BRDF is a wall. Matches IsAlphaCutoutTransparent in HLSL.
+        if (model.materials[primitive.material].alphaMode != "OPAQUE" &&
+            model.materials[primitive.material].pbrMetallicRoughness.baseColorTexture.index >= 0)
         {
             material->m_data.isOpaque = false;
         }
@@ -661,16 +668,15 @@ static void LoadLights(const tinygltf::Model& model, SceneBuilder& sceneBuilder)
         CollectLightsFromNode(model, rootIndex, DirectX::XMMatrixIdentity(), lightTemplates, lightDataVector);
     }
 
+    // No fabricated fallback light. A scene lit only by emissive geometry (every
+    // converted Mitsuba scene) used to get a directional sun invented for it, which
+    // contributed nothing behind closed walls yet still took its share of the NEE
+    // selection CDF — silent wasted samples in every measurement. A scene with no
+    // punctual lights now has none; states.json and the headless config are the two
+    // places a light is added on purpose.
     if (lightDataVector.empty())
     {
-        LightData lightData;
-        lightData.type = Directional;
-        lightData.position = {0, 0, 0};
-        lightData.direction = {-0.5f, -0.7071f, -0.067f};
-        lightData.color = {1, 1, 1};
-        lightData.intensity = 3.0f;
-        lightData.range = 0.0f;
-        sceneBuilder.AddLightData(lightData);
+        spdlog::info("Scene declares no punctual lights; lighting comes from emissive geometry only");
         return;
     }
 

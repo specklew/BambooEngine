@@ -1,0 +1,54 @@
+{
+    "camera": {
+        "position": [
+            0.0,
+            7.0,
+            20.0
+        ],
+        "rotation": [
+            0.0,
+            0.9999998807907104,
+            0.0,
+            -1.1920928955078125e-7
+        ],
+        "fov": 1.0471975803375244
+    },
+    "scene": {
+        "model": "BistroExterior_CONV",
+        "place": "Yaw 180"
+    },
+    "technique": "Path Tracing",
+    "postProcess": {
+        "enabled": true,
+        "exposure": 40.0,
+        "contrast": 1.0,
+        "saturation": 1.0,
+        "lift": 0.0
+    },
+    "raytracing": {
+        "spp": 1,
+        "bounces": 2,
+        "frameIndex": 1328,
+        "accumulatedTime": 3.000537395477295
+    },
+    "render": {
+        "width": 960,
+        "height": 540
+    },
+    "benchmark": {
+        "budgetKind": "seconds",
+        "budgetValue": 3.0,
+        "checkpoints": 1,
+        "checkpointIndex": 0,
+        "imageIndex": 0,
+        "imageCount": 1,
+        "meanFrameMs": 2.2594408988952637,
+        "warmupSeconds": 0.0,
+        "levers": "",
+        "shaderVariant": "",
+        "settings": ""
+    },
+    "capture": {
+        "timestamp": "2026-08-26T21:09:30"
+    }
+}

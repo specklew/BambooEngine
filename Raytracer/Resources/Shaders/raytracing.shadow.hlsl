@@ -59,8 +59,7 @@ float TraceShadow(float3 shadingPoint, LightData light)
             uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
             HitData hit = GetHitData(query.CandidatePrimitiveIndex(), vertexOffset, indexOffset,
                                      query.CandidateTriangleBarycentrics(), instance.objectToWorld);
-            float4 albedo = SampleTextureColor(instance, hit) * instance.baseColorFactor;
-            if (albedo.a >= EPSILON)
+            if (!IsAlphaCutoutTransparent(instance, hit.uv))
                 query.CommitNonOpaqueTriangleHit();
         }
     }
@@ -90,8 +89,7 @@ float TraceShadowSegment(float3 origin, float3 direction, float maxT)
             uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
             HitData hit = GetHitData(query.CandidatePrimitiveIndex(), vertexOffset, indexOffset,
                                      query.CandidateTriangleBarycentrics(), instance.objectToWorld);
-            float4 albedo = SampleTextureColor(instance, hit) * instance.baseColorFactor;
-            if (albedo.a >= EPSILON)
+            if (!IsAlphaCutoutTransparent(instance, hit.uv))
                 query.CommitNonOpaqueTriangleHit();
         }
     }
@@ -123,8 +121,7 @@ void ShadowHit(inout ShadowPayload payload : SV_RayPayload, Attributes attr)
     uint indexOffset = g_geometryInfo[instance.geometryIndex].indexOffset;
     HitData hit = GetHitData(PrimitiveIndex(), vertexOffset, indexOffset, attr.barycentrics);
 
-    float4 albedo = SampleTextureColor(hit) * instance.baseColorFactor;
-    if (albedo.a < EPSILON)
+    if (IsAlphaCutoutTransparent(hit.uv))
     {
         IgnoreHit();
     }

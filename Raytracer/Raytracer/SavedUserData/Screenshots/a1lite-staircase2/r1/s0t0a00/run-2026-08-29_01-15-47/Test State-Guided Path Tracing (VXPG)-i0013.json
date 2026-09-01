@@ -1,0 +1,56 @@
+{
+    "camera": {
+        "position": [
+            -0.12871895730495453,
+            1.584504246711731,
+            3.8103842735290527
+        ],
+        "rotation": [
+            -0.00015838535910006613,
+            -0.9997286796569824,
+            -0.007142755668610334,
+            0.022168248891830444
+        ],
+        "fov": 1.0471975803375244
+    },
+    "scene": {
+        "model": "staircase",
+        "place": "Test State"
+    },
+    "technique": "Guided Path Tracing (VXPG)",
+    "postProcess": {
+        "enabled": true,
+        "exposure": 0.4000000059604645,
+        "contrast": 1.0,
+        "saturation": 1.0,
+        "lift": 0.0
+    },
+    "raytracing": {
+        "spp": 1,
+        "bounces": 1,
+        "frameIndex": 262,
+        "accumulatedTime": 2.006896495819092
+    },
+    "render": {
+        "width": 1920,
+        "height": 1080
+    },
+    "benchmark": {
+        "budgetKind": "seconds",
+        "budgetValue": 2.0,
+        "checkpoints": 1,
+        "checkpointIndex": 0,
+        "imageIndex": 13,
+        "imageCount": 20,
+        "meanFrameMs": 7.659909725189209,
+        "warmupSeconds": 1.0031979084014893,
+        "levers": "",
+        "shaderVariant": "",
+        "settings": "",
+        "varianceMean": 0.0001290249201701954,
+        "varianceRelative": 0.008162734098732471
+    },
+    "capture": {
+        "timestamp": "2026-08-29T01:16:21"
+    }
+}

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "VxpgClusterPass.h"
 
@@ -289,4 +290,16 @@ void VxpgClusterPass::ResolveStats()
 
     m_statsRetries = 0;
     g_clusterDumpStats.Set(0); // one-shot
+}
+
+// P5. The readback buffer is diagnostic and only exists while the cluster probe is armed,
+// so it is reported when present rather than assumed away.
+void VxpgClusterPass::ReportMemory(GpuMemoryReport& report) const
+{
+    using namespace GpuMemoryStage;
+    report.Add(Cluster, "cluster seed compact ids",   m_clusterSeedCompactIds.get());
+    report.Add(Cluster, "cluster centers",            m_clusterCenters.get());
+    report.Add(Cluster, "voxel cluster assignments",  m_voxelClusterAssignments.get());
+    report.Add(Cluster, "cluster stats",              m_clusterStats.get());
+    report.Add(Cluster, "cluster stats readback",     m_clusterStatsReadback.Get());
 }

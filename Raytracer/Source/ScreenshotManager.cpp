@@ -202,12 +202,12 @@ void ScreenshotManager::Arm(FrameAccumulationPass& accum, CaptureSchedule schedu
                      m_schedule.budget.value, m_schedule.checkpoints.size());
 }
 
-void ScreenshotManager::Tick(FrameAccumulationPass& accum, double elapsedTime)
+void ScreenshotManager::Tick(FrameAccumulationPass& accum, double elapsedTime, bool accumulating)
 {
     if (m_state != State::Pending)
         return;
 
-    if (accum.GetResetCount() != m_resetCountAtArm)
+    if (accumulating && accum.GetResetCount() != m_resetCountAtArm)
     {
         spdlog::warn("Screenshot cancelled: accumulation was reset (camera moved or window resized)");
         m_state      = State::Idle;
@@ -221,8 +221,12 @@ void ScreenshotManager::Tick(FrameAccumulationPass& accum, double elapsedTime)
     // The frame about to be rendered is the one the capture will read, so both
     // budgets are evaluated against the state INCLUDING it: frames already
     // accumulated + 1, and time already accumulated + this frame's delta.
-    const uint32_t framesInImage = accum.GetFrameCount() + 1;
-    const double   timeInImage   = accum.GetAccumulatedTime() + elapsedTime;
+    // Without accumulation the two local counters ARE the progress: both were just
+    // advanced by this frame, so they already include it exactly like the pass
+    // counters do above.
+    const uint32_t framesInImage = accumulating ? accum.GetFrameCount() + 1 : m_frameMsCount;
+    const double   timeInImage   = accumulating ? accum.GetAccumulatedTime() + elapsedTime
+                                                : m_frameMsSum / 1000.0;
     const double   progress      = m_schedule.budget.kind == CaptureBudget::Kind::Frames
                                  ? static_cast<double>(framesInImage)
                                  : timeInImage;
@@ -444,10 +448,35 @@ void ScreenshotManager::WriteSidecarJson(const std::string& jsonPath) const
         bench.AddMember("imageIndex",    m_pendingMeta.imageIndex, a);
         bench.AddMember("imageCount",    m_pendingMeta.imageCount, a);
         bench.AddMember("meanFrameMs",   m_pendingMeta.meanFrameMs, a);
-        bench.AddMember("warmupSeconds", m_pendingMeta.warmupSeconds, a);
+        bench.AddMember("warmupSeconds", m_pendingMeta.warmup.seconds, a);
+        // The whole warm-up record, not just its duration: PLAN_BADAWCZY 7.7 wants the
+        // state a run settled at in the metadata of every measurement, and the criterion
+        // beside it so a later tightening cannot silently reinterpret these files.
+        rapidjson::Value warmup(rapidjson::kObjectType);
+        warmup.AddMember("seconds",       m_pendingMeta.warmup.seconds,       a);
+        warmup.AddMember("meanFrameMs",   m_pendingMeta.warmup.meanFrameMs,   a);
+        warmup.AddMember("variation",     m_pendingMeta.warmup.variation,     a);
+        warmup.AddMember("drift",         m_pendingMeta.warmup.drift,         a);
+        warmup.AddMember("settled",       m_pendingMeta.warmup.settled,       a);
+        warmup.AddMember("windowSeconds", m_pendingMeta.warmup.windowSeconds, a);
+        warmup.AddMember("threshold",     m_pendingMeta.warmup.threshold,     a);
+        warmup.AddMember("minSeconds",    m_pendingMeta.warmup.minSeconds,    a);
+        bench.AddMember("warmup", warmup, a);
         bench.AddMember("levers",        MakeStr(m_pendingMeta.activeLevers, a), a);
         bench.AddMember("shaderVariant", MakeStr(m_pendingMeta.shaderVariant, a), a);
         bench.AddMember("settings",      MakeStr(m_pendingMeta.settings, a), a);
+        // P5: stage totals, in chain order. Bytes rather than MiB because a sidecar is
+        // machine-read and the report is what does the rounding.
+        if (m_pendingMeta.memoryTotalBytes > 0)
+        {
+            rapidjson::Value memory(rapidjson::kObjectType);
+            rapidjson::Value stages(rapidjson::kObjectType);
+            for (const auto& [stage, bytes] : m_pendingMeta.memoryByStage)
+                stages.AddMember(MakeStr(stage, a), bytes, a);
+            memory.AddMember("byStage", stages, a);
+            memory.AddMember("totalBytes", m_pendingMeta.memoryTotalBytes, a);
+            bench.AddMember("memory", memory, a);
+        }
         if (m_pendingMeta.varianceValid)
         {
             bench.AddMember("varianceMean",     m_pendingMeta.varianceMean,     a);

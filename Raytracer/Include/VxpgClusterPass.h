@@ -9,6 +9,7 @@
 class VoxelizationPass;
 class VoxelGuidingBuildPass;
 class VxpgFingerprintPass;
+class GpuMemoryReport;
 
 // VXPG cluster pass (MRCS column clustering): groups the fingerprinted lit
 // voxels into 32 supervoxels. Two compute kernels run each frame after the
@@ -22,6 +23,10 @@ class VxpgFingerprintPass;
 class VxpgClusterPass
 {
 public:
+    // P5: the resources this stage holds, for the guiding chain's memory report.
+    // Declared per pass rather than collected from a base class because ADR 0017 left
+    // most of this chain as raw ComPtr, which no base class ever sees.
+    void ReportMemory(GpuMemoryReport& report) const;
     void Initialize(
         Microsoft::WRL::ComPtr<ID3D12Device5>              device,
         Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList4> commandList,
@@ -54,6 +59,7 @@ public:
     RWStructuredBuffer<int32_t>*       GetClusterSeedCompactIdsBuffer() const { return m_clusterSeedCompactIds.get(); }
     RWStructuredBuffer<ClusterCenter>* GetClusterCentersBuffer() const { return m_clusterCenters.get(); }
     RWStructuredBuffer<int32_t>*       GetVoxelClusterAssignmentsBuffer() const { return m_voxelClusterAssignments.get(); }
+
 
 private:
     // Both kernels share one root signature but separate nodes may have barriers

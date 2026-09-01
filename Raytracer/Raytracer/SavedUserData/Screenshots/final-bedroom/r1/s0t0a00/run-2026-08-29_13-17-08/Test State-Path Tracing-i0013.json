@@ -1,0 +1,56 @@
+{
+    "camera": {
+        "position": [
+            3.069551944732666,
+            1.0660932064056396,
+            3.0544934272766113
+        ],
+        "rotation": [
+            0.01744367741048336,
+            -0.8897435665130615,
+            0.034122075885534286,
+            0.4548492133617401
+        ],
+        "fov": 1.0471975803375244
+    },
+    "scene": {
+        "model": "bedroom",
+        "place": "Test State"
+    },
+    "technique": "Path Tracing",
+    "postProcess": {
+        "enabled": true,
+        "exposure": 1.2000000476837158,
+        "contrast": 0.8999999761581421,
+        "saturation": 1.0,
+        "lift": 0.0
+    },
+    "raytracing": {
+        "spp": 1,
+        "bounces": 1,
+        "frameIndex": 811,
+        "accumulatedTime": 2.0011823177337646
+    },
+    "render": {
+        "width": 1920,
+        "height": 1080
+    },
+    "benchmark": {
+        "budgetKind": "seconds",
+        "budgetValue": 2.0,
+        "checkpoints": 1,
+        "checkpointIndex": 0,
+        "imageIndex": 13,
+        "imageCount": 20,
+        "meanFrameMs": 2.4675490856170654,
+        "warmupSeconds": 1.0001581907272339,
+        "levers": "",
+        "shaderVariant": "",
+        "settings": "",
+        "varianceMean": 0.00013911988935433328,
+        "varianceRelative": 0.11878395080566406
+    },
+    "capture": {
+        "timestamp": "2026-08-29T13:17:37"
+    }
+}

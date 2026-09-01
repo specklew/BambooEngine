@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Utils/GpuMemoryReport.h"
 #include "CommandContext.h"
 #include "Techniques/GuidedPathTracingPass.h"
 
@@ -460,3 +461,11 @@ void GuidedPathTracingPass::Render()
 }
 
 REGISTER_TECHNIQUE("Guided Path Tracing (VXPG)", GuidedPathTracingPass)
+
+// P5. The guided integrator's own two screen-sized buffers, which exist only because the
+// guide chain runs in its own dispatch (ADR 0014) and hand the sample to the raygen.
+void GuidedPathTracingPass::ReportMemory(GpuMemoryReport& report) const
+{
+    report.Add(GpuMemoryStage::Integrator, "guide sample dir+pdf", m_guideSampleDirPdfTex.Get());
+    report.Add(GpuMemoryStage::Integrator, "guide sample span",    m_guideSampleSpanTex.Get());
+}

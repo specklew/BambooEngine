@@ -32,6 +32,8 @@ struct FrameGraphContext
 // A selectable way of producing the frame's image. Rasterization and every
 // raytracing integrator are peers here: each declares its own nodes, and the
 // graph decides what actually runs.
+class GpuMemoryReport;
+
 class RenderTechnique
 {
 public:
@@ -88,6 +90,9 @@ public:
     static std::vector<DebugView> WithBufferViews(std::vector<DebugView> own);
     static bool SelectDebugView(RenderTechnique& technique, int index);
 
+    // P5: a technique that holds GPU resources of its own declares them here. Empty by
+    // default because path tracing holds none beyond its output, which is shared.
+    virtual void ReportMemory(GpuMemoryReport& report) const {}
     virtual void OnResize() {}
     virtual void OnShaderReload() {}
     virtual void OnSceneChange(std::shared_ptr<Scene> scene) {}

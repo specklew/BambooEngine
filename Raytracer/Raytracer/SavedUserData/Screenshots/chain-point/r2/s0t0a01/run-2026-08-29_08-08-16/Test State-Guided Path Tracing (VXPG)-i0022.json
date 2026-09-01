@@ -1,0 +1,56 @@
+{
+    "camera": {
+        "position": [
+            4.054019927978516,
+            1.6164699792861938,
+            -2.3065199851989746
+        ],
+        "rotation": [
+            0.010598015040159225,
+            -0.7545977234840393,
+            0.012191119603812695,
+            0.6559888124465942
+        ],
+        "fov": 1.0471975803375244
+    },
+    "scene": {
+        "model": "veach-ajar",
+        "place": "Test State"
+    },
+    "technique": "Guided Path Tracing (VXPG)",
+    "postProcess": {
+        "enabled": true,
+        "exposure": 0.20000000298023224,
+        "contrast": 0.800000011920929,
+        "saturation": 1.0,
+        "lift": 0.0
+    },
+    "raytracing": {
+        "spp": 1,
+        "bounces": 1,
+        "frameIndex": 222,
+        "accumulatedTime": 1.0034520626068115
+    },
+    "render": {
+        "width": 1920,
+        "height": 1080
+    },
+    "benchmark": {
+        "budgetKind": "seconds",
+        "budgetValue": 1.0,
+        "checkpoints": 1,
+        "checkpointIndex": 0,
+        "imageIndex": 22,
+        "imageCount": 25,
+        "meanFrameMs": 4.520054340362549,
+        "warmupSeconds": 1.003054141998291,
+        "levers": "guidechainpass",
+        "shaderVariant": "guidechainpass",
+        "settings": "",
+        "varianceMean": 0.10580377280712128,
+        "varianceRelative": 0.0739964172244072
+    },
+    "capture": {
+        "timestamp": "2026-08-29T08:08:53"
+    }
+}
