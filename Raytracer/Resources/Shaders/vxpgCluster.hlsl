@@ -12,21 +12,10 @@
 //     Every compact voxel compares its fingerprint against the 32 centers and
 //     stores the nearest cluster id.
 //
-//   AccumulateClusterCenters / UpdateClusterCenters  (no SIByL counterpart)
-//     The Lloyd half of k-means++: sum each cluster's members, replace the
-//     center with their centroid, assign again. Four rounds.
-//
 // Distance = Hamming(fingerprints) + |premultiplied-irradiance difference|
 // (SIByL ComputeDistance with extra=true, position_weight=0, intensity_weight=1
-// — the canonical VXPGGraph values; see ADR 0003).
-//
-// SIByL stops after seeding, on the argument that a bitmask has no mean. It has
-// one: under Hamming distance the centroid of a set of bit vectors is the
-// PER-BIT MAJORITY, which is still a bit vector, so the Lloyd step is well
-// defined and does decrease the objective. The intensity term is L1, whose exact
-// minimiser is the median rather than the mean; the mean is used because it is
-// what k-means prescribes and because a median needs a sort this kernel does not
-// have. That approximation is the only inexactness in the update.
+// — the canonical VXPGGraph values; see ADR 0003). Seeding-only k-means++:
+// bitmask centroids have no mean, so the seeds ARE the cluster descriptors.
 //
 // Ported from SIByL; identifiers renamed to descriptive Bamboo names (original
 // SIByL names kept in comments for traceability).
@@ -65,27 +54,6 @@ cbuffer ClusterCB : BAMBOO_PASS_CBV(CLUSTER_REG_CB)
 #define CLUSTER_STAT_COUNT      (CLUSTER_COUNT * 4)
 #define CLUSTER_STAT_INTENSITY_SCALE 1000.0
 
-// Lloyd accumulator, per cluster: one counter per fingerprint bit, then the
-// position and intensity sums and the population they are divided by.
-#define CLUSTER_ACC_BITS        0
-#define CLUSTER_ACC_POSITION    128
-#define CLUSTER_ACC_INTENSITY   131
-#define CLUSTER_ACC_POPULATION  132
-#define CLUSTER_ACC_STRIDE      133
-#define CLUSTER_ACC_COUNT       (CLUSTER_COUNT * CLUSTER_ACC_STRIDE)
-// The two float terms are summed through integer atomics, so they carry a scale.
-// Headroom at 256: the assignment buffer holds at most 131072 voxels, so the sum
-// stays under 2^32 up to a mean intensity of 128 — the scenes measure 0.20
-// (bistro-exterior) to 11.96 (veach-ajar) with vxpg.cluster.dumpStats, an order
-// of magnitude below. Voxel coordinates are bounded by the grid dimension, so
-// their scale can be lower and still never wrap.
-#define CLUSTER_ACC_INTENSITY_SCALE 256.0
-#define CLUSTER_ACC_POSITION_SCALE  16.0
-// Lloyd rounds after the seeding. k-means++ seeds are already spread apart, so
-// the assignment stops moving after a handful; four costs about 1% of a guided
-// frame, which is inside the noise of the measurement it feeds.
-#define CLUSTER_LLOYD_ITERATIONS 4
-
 // SIByL svoxel_info (mrcs/cluster-common.hlsli).
 struct ClusterCenter
 {
@@ -102,7 +70,6 @@ RWStructuredBuffer<uint>          gCompactIds              : BAMBOO_PASS_UAV(CLU
 RWStructuredBuffer<float>         gPremulIrradiance        : BAMBOO_PASS_UAV(CLUSTER_REG_PREMUL_IRRADIANCE); // SIByL u_PremulIrradiance
 RWStructuredBuffer<int>           gVoxelClusterAssignments : BAMBOO_PASS_UAV(CLUSTER_REG_ASSIGNMENTS); // SIByL u_Clusters
 RWStructuredBuffer<uint>          gClusterStats            : BAMBOO_PASS_UAV(CLUSTER_REG_STATS); // Bamboo diagnostic, no SIByL counterpart
-RWStructuredBuffer<uint>          gClusterAccumulators     : BAMBOO_PASS_UAV(CLUSTER_REG_ACCUMULATORS); // Lloyd sums, no SIByL counterpart
 
 // SIByL call-site weights (kept as named constants; position term is dead but
 // the struct keeps the field for port fidelity).
@@ -167,12 +134,6 @@ void SeedClusterCenters(uint3 tid : SV_DispatchThreadID)
     // always runs immediately before the assignment that fills them.
     if (gCollectStats != 0u && threadId < uint(CLUSTER_STAT_COUNT))
         gClusterStats[threadId] = 0u;
-
-    // Same reasoning for the Lloyd sums, and it saves a clear kernel: this group
-    // zeroes them once here, and every update consumes and re-zeroes its own
-    // cluster's slots, so the accumulator is always clean when a round starts.
-    for (uint slot = threadId; slot < uint(CLUSTER_ACC_COUNT); slot += CLUSTER_SEED_THREADS)
-        gClusterAccumulators[slot] = 0u;
 
     uint randState = pcg_hash((threadId * 9781u + gClusterSeedFrameTerm * 26699u) | 1u);
 
@@ -363,98 +324,4 @@ void AssignVoxelClusters(uint3 tid : SV_DispatchThreadID)
                            + countbits(fingerprint.z) + countbits(fingerprint.w);
         InterlockedAdd(gClusterStats[CLUSTER_STAT_POPCOUNT + nearestCluster], ownBits, ignored);
     }
-}
-
-// ---- AccumulateClusterCenters -----------------------------------------------
-
-// Sums one Lloyd round: every voxel adds itself to the cluster it was assigned.
-// Only SET bits are touched, so the atomic traffic is the mean popcount (about
-// 51 of 128 in the measured scenes) rather than the full width.
-[numthreads(256, 1, 1)]
-void AccumulateClusterCenters(uint3 tid : SV_DispatchThreadID)
-{
-    const uint litVoxelCount = gGuidingDispatchArgs[0].w;
-    const uint compactId = tid.x;
-    if (compactId >= litVoxelCount) return;
-
-    const int clusterId = gVoxelClusterAssignments[compactId];
-    if (clusterId < 0 || clusterId >= CLUSTER_COUNT) return;
-
-    const uint base = uint(clusterId) * CLUSTER_ACC_STRIDE;
-    const int voxelId = int(gCompactIds[compactId]);
-    const float3 voxelPosition = float3(ReconstructVoxelCoord(uint(voxelId)));
-    const float intensity = gPremulIrradiance[compactId];
-    const uint4 fingerprint = gVoxelFingerprints[compactId];
-
-    uint ignored;
-    [unroll] for (uint word = 0; word < 4u; ++word)
-    {
-        uint bits = fingerprint[word];
-        while (bits != 0u)
-        {
-            const uint bit = firstbitlow(bits);
-            bits &= bits - 1u; // clear the lowest set bit
-            InterlockedAdd(gClusterAccumulators[base + CLUSTER_ACC_BITS + word * 32u + bit], 1u, ignored);
-        }
-    }
-
-    // Both are non-negative — voxel coordinates are grid indices and the
-    // irradiance is premultiplied — so an unsigned accumulator is enough.
-    [unroll] for (uint axis = 0; axis < 3u; ++axis)
-        InterlockedAdd(gClusterAccumulators[base + CLUSTER_ACC_POSITION + axis],
-                       uint(voxelPosition[axis] * CLUSTER_ACC_POSITION_SCALE), ignored);
-    InterlockedAdd(gClusterAccumulators[base + CLUSTER_ACC_INTENSITY],
-                   uint(intensity * CLUSTER_ACC_INTENSITY_SCALE), ignored);
-    InterlockedAdd(gClusterAccumulators[base + CLUSTER_ACC_POPULATION], 1u, ignored);
-}
-
-// ---- UpdateClusterCenters ---------------------------------------------------
-
-// One thread per cluster: replace the center with the centroid of its members
-// and re-zero the slots for the next round.
-[numthreads(CLUSTER_COUNT, 1, 1)]
-void UpdateClusterCenters(uint3 tid : SV_DispatchThreadID)
-{
-    const uint clusterId = tid.x;
-    if (clusterId >= uint(CLUSTER_COUNT)) return;
-
-    const uint base = clusterId * CLUSTER_ACC_STRIDE;
-    const uint population = gClusterAccumulators[base + CLUSTER_ACC_POPULATION];
-
-    // An empty cluster has no centroid. Keeping its seed descriptor is what lets
-    // it win members again in a later round; zeroing it would collapse the center
-    // onto the origin and make the emptiness permanent.
-    if (population != 0u)
-    {
-        ClusterCenter center;
-
-        // Hamming's centroid is the per-bit majority: the bit that disagrees with
-        // fewer members. Ties go to zero, which matches the < half test.
-        uint4 fingerprint = uint4(0u, 0u, 0u, 0u);
-        [unroll] for (uint word = 0; word < 4u; ++word)
-        {
-            uint bits = 0u;
-            for (uint bit = 0; bit < 32u; ++bit)
-            {
-                const uint set = gClusterAccumulators[base + CLUSTER_ACC_BITS + word * 32u + bit];
-                if (set * 2u > population)
-                    bits |= 1u << bit;
-            }
-            fingerprint[word] = bits;
-        }
-        center.fingerprint = fingerprint;
-
-        const float inversePopulation = 1.0 / float(population);
-        center.position = float3(gClusterAccumulators[base + CLUSTER_ACC_POSITION + 0],
-                                 gClusterAccumulators[base + CLUSTER_ACC_POSITION + 1],
-                                 gClusterAccumulators[base + CLUSTER_ACC_POSITION + 2])
-                        * (inversePopulation / CLUSTER_ACC_POSITION_SCALE);
-        center.intensity = float(gClusterAccumulators[base + CLUSTER_ACC_INTENSITY])
-                         * (inversePopulation / CLUSTER_ACC_INTENSITY_SCALE);
-
-        gClusterCenters[clusterId] = center;
-    }
-
-    for (uint slot = 0; slot < uint(CLUSTER_ACC_STRIDE); ++slot)
-        gClusterAccumulators[base + slot] = 0u;
 }

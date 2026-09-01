@@ -140,9 +140,6 @@
 // Diagnostic only: per-cluster population and the two distance terms, written
 // while vxpg.cluster.dumpStats is armed and idle otherwise.
 #define CLUSTER_REG_STATS               7 // u
-// Lloyd-iteration sums: per cluster, one counter per fingerprint bit plus the
-// position, intensity and population accumulators the centroid is divided by.
-#define CLUSTER_REG_ACCUMULATORS        8 // u
 
 // ---------------------------------------------------------------------------
 // VxpgClusterVisibilityPass — vxpgClusterVisibility.hlsl

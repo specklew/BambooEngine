@@ -33,7 +33,6 @@ struct VxpgGraphHandles
     GraphResourceHandle clusterSeedCompactIds = InvalidGraphResource;
     GraphResourceHandle clusterCenters        = InvalidGraphResource;
     GraphResourceHandle clusterStats          = InvalidGraphResource;
-    GraphResourceHandle clusterAccumulators   = InvalidGraphResource;
     GraphResourceHandle superpixelIndex      = InvalidGraphResource;
     GraphResourceHandle superpixelCenter     = InvalidGraphResource;
     GraphResourceHandle superpixelCounter    = InvalidGraphResource;
