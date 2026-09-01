@@ -29,10 +29,12 @@ constexpr BindingSlot kClusterCompactIds       = PassUav("gCompactIds", CLUSTER_
 constexpr BindingSlot kClusterPremulIrradiance = PassUav("gPremulIrradiance", CLUSTER_REG_PREMUL_IRRADIANCE);
 constexpr BindingSlot kClusterAssignments      = PassUav("gVoxelClusterAssignments", CLUSTER_REG_ASSIGNMENTS);
 constexpr BindingSlot kClusterStats            = PassUav("gClusterStats", CLUSTER_REG_STATS);
+constexpr BindingSlot kClusterAccumulators     = PassUav("gClusterAccumulators", CLUSTER_REG_ACCUMULATORS);
 
 constexpr BindingSlot kClusterSlots[] = {kClusterConstants,    kClusterSeedIds,      kClusterCenters,
                                          kClusterDispatchArgs, kClusterFingerprints, kClusterCompactIds,
-                                         kClusterPremulIrradiance, kClusterAssignments, kClusterStats};
+                                         kClusterPremulIrradiance, kClusterAssignments, kClusterStats,
+                                         kClusterAccumulators};
 } // namespace
 
 // Default 0 = SIByL-faithful frame-constant k-means++ seeding (its sampler is
@@ -50,6 +52,10 @@ static AutoCVarInt g_clusterDumpStats("vxpg.cluster.dumpStats",
 namespace
 {
     constexpr uint32_t kClusterCount = 32;
+    // Mirrors CLUSTER_ACC_* in vxpgCluster.hlsl: 128 bit counters plus position,
+    // intensity and population.
+    constexpr uint32_t kClusterAccStride = 133;
+    constexpr uint32_t kClusterAccCount  = kClusterCount * kClusterAccStride;
     // population, Hamming, intensity (fixed point x1000), own-fingerprint popcount
     constexpr uint32_t kClusterStatFields = 4;
     constexpr uint32_t kClusterStatCount  = kClusterCount * kClusterStatFields;
@@ -99,6 +105,8 @@ void VxpgClusterPass::CreateBuffers()
         m_device, Constants::Graphics::VOXEL_GUIDING_CAPACITY, L"Cluster VoxelClusterAssignments");
     m_clusterStats = std::make_unique<RWStructuredBuffer<uint32_t>>(
         m_device, kClusterStatCount, L"Cluster Stats");
+    m_clusterAccumulators = std::make_unique<RWStructuredBuffer<uint32_t>>(
+        m_device, kClusterAccCount, L"Cluster Lloyd Accumulators");
 
     const auto heapProperties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
     const auto bufferDesc     = CD3DX12_RESOURCE_DESC::Buffer(kClusterStatCount * sizeof(uint32_t));
@@ -123,6 +131,10 @@ void VxpgClusterPass::CreatePSOs()
         "resources/shaders/vxpgCluster.seed.shader", L"VxpgCluster Seed PSO");
     m_assignProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
         "resources/shaders/vxpgCluster.assign.shader", L"VxpgCluster Assign PSO");
+    m_accumulateProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgCluster.accumulate.shader", L"VxpgCluster Accumulate PSO");
+    m_updateProgram = cache.GetOrCreateCompute(m_device.Get(), m_rootSig.Get(),
+        "resources/shaders/vxpgCluster.update.shader", L"VxpgCluster Update PSO");
 }
 
 void VxpgClusterPass::CreateCommandSignature()
@@ -140,7 +152,7 @@ void VxpgClusterPass::CreateCommandSignature()
     m_dispatchCommandSignature->SetName(L"VxpgCluster DispatchCommandSignature");
 }
 
-bool VxpgClusterPass::BindCommon(uint32_t frameIndex)
+bool VxpgClusterPass::BindCommon(uint32_t frameIndex, bool collectStats)
 {
     if (!m_initialized || !m_voxelPass || !m_buildPass || !m_fingerprintPass)
         return false;
@@ -150,7 +162,7 @@ bool VxpgClusterPass::BindCommon(uint32_t frameIndex)
     const uint32_t seedFrameTerm =
         (g_clusterFrameVaryingSeed.Get() != 0) ? PcgHash(frameIndex) : 0u;
     uint32_t constants[4] = { m_voxelPass->GetGridDim(), seedFrameTerm,
-                              IsStatsDumpArmed() ? 1u : 0u, 0u };
+                              collectStats ? 1u : 0u, 0u };
 
     cmd->SetComputeRootSignature(m_rootSig.Get());
     m_rootSig.SetConstants(cmd, kClusterConstants, constants, 4);
@@ -162,6 +174,7 @@ bool VxpgClusterPass::BindCommon(uint32_t frameIndex)
     m_rootSig.Set(cmd, kClusterPremulIrradiance, m_buildPass->GetPremulIrradianceBuffer()->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kClusterAssignments, m_voxelClusterAssignments->GetGPUVirtualAddress());
     m_rootSig.Set(cmd, kClusterStats, m_clusterStats->GetGPUVirtualAddress());
+    m_rootSig.Set(cmd, kClusterAccumulators, m_clusterAccumulators->GetGPUVirtualAddress());
 
     return true;
 }
@@ -169,7 +182,7 @@ bool VxpgClusterPass::BindCommon(uint32_t frameIndex)
 // Kernel 1: k-means++ seeding, one 1024-thread group.
 void VxpgClusterPass::RunSeed(uint32_t frameIndex)
 {
-    if (!BindCommon(frameIndex))
+    if (!BindCommon(frameIndex, IsStatsDumpArmed()))
         return;
 
     m_commandList->SetPipelineState(m_seedProgram->GetPipelineState());
@@ -181,14 +194,37 @@ void VxpgClusterPass::RunSeed(uint32_t frameIndex)
 // replacing the worst-case ceil(CAPACITY/256)=512 fixed dispatch (ADR 0003
 // option b). The fingerprint presample emitted the count this frame; the args
 // buffer's state flip is declared on this node rather than hand-placed here.
-void VxpgClusterPass::RunAssign(uint32_t frameIndex)
+void VxpgClusterPass::RunAssign(uint32_t frameIndex, bool collectStats)
 {
-    if (!BindCommon(frameIndex))
+    if (!BindCommon(frameIndex, collectStats && IsStatsDumpArmed()))
         return;
 
     m_commandList->SetPipelineState(m_assignProgram->GetPipelineState());
     CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
         m_fingerprintPass->GetGuidingDispatchArgsBuffer()->GetUnderlyingResource().Get(), 0); // entry [0]
+}
+
+// Lloyd round, half one: every voxel adds itself to the cluster it currently
+// belongs to. Same indirect dispatch as the assignment — it walks the same list.
+void VxpgClusterPass::RunAccumulate(uint32_t frameIndex)
+{
+    if (!BindCommon(frameIndex, false))
+        return;
+
+    m_commandList->SetPipelineState(m_accumulateProgram->GetPipelineState());
+    CommandContext::Get().DispatchIndirect(m_dispatchCommandSignature.Get(),
+        m_fingerprintPass->GetGuidingDispatchArgsBuffer()->GetUnderlyingResource().Get(), 0);
+}
+
+// Lloyd round, half two: one thread per cluster turns the sums into the new
+// center and re-zeroes them. A single group of CLUSTER_COUNT threads.
+void VxpgClusterPass::RunUpdate(uint32_t frameIndex)
+{
+    if (!BindCommon(frameIndex, false))
+        return;
+
+    m_commandList->SetPipelineState(m_updateProgram->GetPipelineState());
+    CommandContext::Get().Dispatch(1, 1, 1);
 }
 
 bool VxpgClusterPass::IsStatsDumpArmed()
@@ -302,4 +338,5 @@ void VxpgClusterPass::ReportMemory(GpuMemoryReport& report) const
     report.Add(Cluster, "voxel cluster assignments",  m_voxelClusterAssignments.get());
     report.Add(Cluster, "cluster stats",              m_clusterStats.get());
     report.Add(Cluster, "cluster stats readback",     m_clusterStatsReadback.Get());
+    report.Add(Cluster, "cluster lloyd accumulators", m_clusterAccumulators.get());
 }

@@ -1448,6 +1448,7 @@ void Renderer::BuildVxpgGraph()
 		m_vxpg.clusterSeedCompactIds = importBuffer(m_clusterPass->GetClusterSeedCompactIdsBuffer(), "VXPG ClusterSeedCompactIds");
 		m_vxpg.clusterCenters        = importBuffer(m_clusterPass->GetClusterCentersBuffer(), "VXPG ClusterCenters");
 		m_vxpg.clusterStats          = importBuffer(m_clusterPass->GetClusterStatsBuffer(), "VXPG ClusterStats");
+		m_vxpg.clusterAccumulators   = importBuffer(m_clusterPass->GetClusterAccumulatorsBuffer(), "VXPG ClusterAccumulators");
 	}
 	if (m_superpixelBuildPass)
 	{
@@ -1703,7 +1704,9 @@ void Renderer::BuildVxpgGraph()
 	}
 
 	// Stage 5: k-means++ cluster the fingerprinted voxels into 32 supervoxels,
-	// one node per kernel (seed -> assign).
+	// one node per kernel: seed -> assign -> (accumulate -> update -> assign) x N.
+	// The trailing assignment of every round is what the next round sums, and the
+	// last one is what the rest of the chain reads.
 	if (m_clusterPass)
 	{
 		const uint32_t frame = m_passConstants->data.frameIndex;
@@ -1725,18 +1728,66 @@ void Renderer::BuildVxpgGraph()
 			},
 			[this, frame]() { m_clusterPass->RunSeed(frame); });
 
-		m_renderGraph.AddPass("VXPG Cluster Assign",
-			[&](RenderGraphPassBuilder& pass)
-			{
-				pass.Read(m_vxpg.voxelFingerprints, kUavRead);
-				pass.Read(m_vxpg.clusterSeedCompactIds, kUavRead);
-				pass.Read(m_vxpg.clusterCenters, kUavRead);
-				pass.Read(m_vxpg.guidingDispatchArgs, GraphAccess::IndirectArgument);
-				pass.Write(m_vxpg.clusterAssignments, kUavWrite);
-				if (m_clusterStatsPending)
-					pass.Write(m_vxpg.clusterStats, kUavWrite);
-			},
-			[this, frame]() { m_clusterPass->RunAssign(frame); });
+		const auto addAssign = [&](const char* name, bool collectStats)
+		{
+			m_renderGraph.AddPass(name,
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.Read(m_vxpg.voxelFingerprints, kUavRead);
+					pass.Read(m_vxpg.clusterSeedCompactIds, kUavRead);
+					pass.Read(m_vxpg.clusterCenters, kUavRead);
+					pass.Read(m_vxpg.guidingDispatchArgs, GraphAccess::IndirectArgument);
+					pass.Write(m_vxpg.clusterAssignments, kUavWrite);
+					if (m_clusterStatsPending && collectStats)
+						pass.Write(m_vxpg.clusterStats, kUavWrite);
+				},
+				[this, frame, collectStats]() { m_clusterPass->RunAssign(frame, collectStats); });
+		};
+
+		// Only the last assignment of the last round describes the clustering the
+		// rest of the chain actually uses.
+		addAssign("VXPG Cluster Assign", VxpgClusterPass::kLloydIterations == 0);
+
+		// Node names are the key of the per-node cost table, so each round needs
+		// its own; a shared name would fold four dispatches into one row.
+		static constexpr const char* kAccumulateNames[] = {
+			"VXPG Cluster Accumulate 0", "VXPG Cluster Accumulate 1",
+			"VXPG Cluster Accumulate 2", "VXPG Cluster Accumulate 3"};
+		static constexpr const char* kUpdateNames[] = {
+			"VXPG Cluster Update 0", "VXPG Cluster Update 1",
+			"VXPG Cluster Update 2", "VXPG Cluster Update 3"};
+		static constexpr const char* kReassignNames[] = {
+			"VXPG Cluster Assign 1", "VXPG Cluster Assign 2",
+			"VXPG Cluster Assign 3", "VXPG Cluster Assign 4"};
+		static_assert(VxpgClusterPass::kLloydIterations <= std::size(kAccumulateNames),
+			"add a node name per Lloyd round");
+
+		for (uint32_t round = 0; round < VxpgClusterPass::kLloydIterations; ++round)
+		{
+			m_renderGraph.AddPass(kAccumulateNames[round],
+				[&](RenderGraphPassBuilder& pass)
+				{
+					pass.Read(m_vxpg.voxelFingerprints, kUavRead);
+					pass.Read(m_vxpg.compactIds, kUavRead);
+					pass.Read(m_vxpg.premulIrradiance, kUavRead);
+					pass.Read(m_vxpg.clusterAssignments, kUavRead);
+					pass.Read(m_vxpg.guidingDispatchArgs, GraphAccess::IndirectArgument);
+					pass.Write(m_vxpg.clusterAccumulators, kUavWrite);
+				},
+				[this, frame]() { m_clusterPass->RunAccumulate(frame); });
+
+			m_renderGraph.AddPass(kUpdateNames[round],
+				[&](RenderGraphPassBuilder& pass)
+				{
+					// Consumes the sums and re-zeroes them, so the accumulator is
+					// written as well as read.
+					pass.Write(m_vxpg.clusterAccumulators, kUavWrite);
+					pass.Write(m_vxpg.clusterCenters, kUavWrite);
+				},
+				[this, frame]() { m_clusterPass->RunUpdate(frame); });
+
+			addAssign(kReassignNames[round], round + 1 == VxpgClusterPass::kLloydIterations);
+		}
 
 		// Armed only for the one-shot dump, so the copy and its state flip exist
 		// on exactly the frame that reads them back.
