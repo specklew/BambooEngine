@@ -92,7 +92,7 @@ void BitonicSortPass::Sort(
     dispatchStage();
     keyBarrier();
 
-    // Outer/inner ladder: 1 presort + 15 outer + 5 inner = 21 dispatches.
+    // Outer/inner ladder: 1 presort + 21 outer + 6 inner = 28 dispatches.
     for (uint32_t k = 4096; k <= kCapacity; k *= 2)
     {
         for (uint32_t j = k / 2; j >= 2048; j /= 2)

@@ -25,14 +25,16 @@
 #include "PassRegisters.h"
 #include "LightTreeNode.hlsl"
 
-// Leaf ceiling. The node index is uint, so 2N-1 no longer binds; what binds now is
-// the sort key, which carries the compact voxel id in its low 16 bits (see the
-// EncodeTreeLeaves key layout), and LIGHT_TREE_SORT_CAPACITY. Both cap at 65536.
-#define LIGHT_TREE_MAX_LEAVES 65536
+// Leaf ceiling. The node index is uint, so 2N-1 no longer binds, and the sort key
+// carries the compact voxel id in 18 bits (see the EncodeTreeLeaves key layout), so
+// 262144 leaves fit it. What binds is the compaction buffer below: no leaf can exist
+// without a compacted voxel, so the two ceilings are the same number.
+#define LIGHT_TREE_MAX_LEAVES 131072
 // Compact voxel capacity (matches Constants::Graphics::VOXEL_GUIDING_CAPACITY).
 #define LIGHT_TREE_COMPACT_CAPACITY 131072
-// Sort-key buffer capacity (SIByL bitonic element_count = 65536).
-#define LIGHT_TREE_SORT_CAPACITY 65536
+// Sort-key buffer capacity (Constants::Graphics::LIGHT_TREE_SORT_CAPACITY; SIByL used
+// 65536). A power of two >= the leaf ceiling, so the ladder can always pad up to it.
+#define LIGHT_TREE_SORT_CAPACITY 131072
 
 cbuffer LightTreeGridCB : BAMBOO_PASS_CBV(LIGHT_TREE_REG_GRID_CB)
 {
@@ -47,7 +49,10 @@ RWStructuredBuffer<uint64_t> gSortKeys : BAMBOO_PASS_UAV(LIGHT_TREE_REG_SORT_KEY
 // groups (child results read by the sibling's thread). SIByL's Vulkan backend
 // is coherent by default; D3D12 UAVs are not without this keyword.
 globallycoherent RWStructuredBuffer<LightTreeNode> gNodes : BAMBOO_PASS_UAV(LIGHT_TREE_REG_NODES); // SIByL u_Nodes
-RWStructuredBuffer<uint> gLeafRanges : BAMBOO_PASS_UAV(LIGHT_TREE_REG_LEAF_RANGES); // SIByL u_Descendant (dead output; x | y<<16)
+// SIByL u_Descendant. Dead output, written only so the kernels keep their original
+// cost. SIByL packed the range as x | y<<16, which truncates once a leaf index needs
+// more than 16 bits (the ceiling is 131072), so the pair is stored unpacked.
+RWStructuredBuffer<uint2> gLeafRanges : BAMBOO_PASS_UAV(LIGHT_TREE_REG_LEAF_RANGES);
 RWStructuredBuffer<int> gCompactToLeaf : BAMBOO_PASS_UAV(LIGHT_TREE_REG_COMPACT_TO_LEAF); // SIByL compact2leaf
 globallycoherent RWStructuredBuffer<int> gClusterRoots : BAMBOO_PASS_UAV(LIGHT_TREE_REG_CLUSTER_ROOTS); // SIByL cluster_roots
 RWStructuredBuffer<TreeBuildDispatchArgs> gDispatchArgs : BAMBOO_PASS_UAV(LIGHT_TREE_REG_DISPATCH_ARGS); // SIByL u_ConstrIndirectArgs
@@ -130,7 +135,7 @@ uint MortonCode3D(float3 unipos)
 //  - compact->leaf map -> -1 so an out-of-tree (overflow / unlit) voxel returns
 //    "no leaf" in the reverse pdf query instead of a stale leaf index.
 //  - the ENTIRE sort-key buffer -> NULL (max). The encode kernel only writes the
-//    first numVXs keys; the tail must be max so the fixed worst-case 65536 sort
+//    first numVXs keys; the tail must be max so the fixed worst-case sort
 //    network (which over-dispatches and reads Index1 unguarded) sees padding, not
 //    stale garbage that would swap down into the valid region and corrupt the
 //    sort (-> a cyclic Karras tree -> merge parent-walk hang -> device removed).
@@ -180,7 +185,7 @@ void EncodeTreeLeaves(uint3 dtid : SV_DispatchThreadID)
         gIndirectDispatchArgs[LIGHT_TREE_INDIRECT_SLOT_INTERNAL] = uint3(uint(args.dispatchInternal.x), 1u, 1u);
         gIndirectDispatchArgs[LIGHT_TREE_INDIRECT_SLOT_NODE]     = uint3(uint(args.dispatchNode.x), 1u, 1u);
 
-        // Bitonic ladder, sized to the live count instead of the 65536 worst case.
+        // Bitonic ladder, sized to the live count instead of the LIGHT_TREE_SORT_CAPACITY worst case.
         // The network needs a power-of-two element count and sorts 2048 elements
         // per group, so pad up to the next power of two (never below one group). A
         // stage whose k exceeds that padded count sorts nothing and gets zero
@@ -213,7 +218,15 @@ void EncodeTreeLeaves(uint3 dtid : SV_DispatchThreadID)
     const uint64_t posCode = uint64_t(MortonCode3D(unipos));
     const uint64_t clusterCode = uint64_t(clusterID);
     const uint64_t idCode = uint64_t(leafID);
-    gSortKeys[leafID] = (clusterCode << 48) | (posCode << 16) | (idCode << 0);
+    // Key layout, MSB first, so an ascending sort orders by cluster, then by position
+    // within the cluster, and the id only ever breaks ties:
+    //   [63:48] clusterID   16 bits (only 0-31 used; CLUSTER_COUNT is 32)
+    //   [47:18] Morton code 30 bits
+    //   [17: 0] compactID   18 bits -> LIGHT_TREE_MAX_LEAVES <= 262144
+    // The id must stay in the key and stay unique: Karras derives its ranges from
+    // CommonUpperBits, which needs distinct keys, and InitializeTreeNodes recovers the
+    // compact id from these low bits after the sort has permuted everything.
+    gSortKeys[leafID] = (clusterCode << 48) | (posCode << 18) | (idCode << 0);
 }
 
 // ---- InitializeTreeNodes (tree-initial-pass) -------------------------------
@@ -251,7 +264,7 @@ void InitializeTreeNodes(uint3 dtid : SV_DispatchThreadID)
     }
 
     const uint leafID = uint(tid - numInternal);
-    const uint compactID = uint(gSortKeys[leafID] & 0xFFFFuL);
+    const uint compactID = uint(gSortKeys[leafID] & 0x3FFFFuL); // low 18 bits, see the encode key layout
     const uint voxelID = gCompactIds[compactID];
     const int3 mapPos = ReconstructVoxelCoord(voxelID);
     const uint clusterID = uint(gClusterAssignments[compactID]);
@@ -264,7 +277,7 @@ void InitializeTreeNodes(uint3 dtid : SV_DispatchThreadID)
     node.voxelIndex = compactID;
     node.flag = clusterID;
 
-    gLeafRanges[tid] = leafID; // dead output (cost fidelity)
+    gLeafRanges[tid] = uint2(leafID, leafID); // dead output (cost fidelity)
     gCompactToLeaf[compactID] = tid;
     gNodes[tid] = node;
 }
@@ -375,11 +388,11 @@ void BuildTreeInternalNodes(uint3 dtid : SV_DispatchThreadID)
         return;
 
     const uint2 ij = DetermineRange(numVPLs, uint(idx));
-    gLeafRanges[idx] = ij.x | (ij.y << 16); // dead output
+    gLeafRanges[idx] = ij; // dead output
     const uint gamma = FindSplit(ij.x, ij.y);
 
-    // Clamped N <= 65536 keeps gamma + (numVPLs-1) <= 131070, well inside uint, so these
-    // uint16 adds never wrap (SIByL Bug 2 site, defused by the encode clamp).
+    // Clamped N <= 131072 keeps gamma + (numVPLs-1) <= 262142, well inside uint, so these
+    // adds never wrap (SIByL Bug 2 site, where they were uint16, defused by the encode clamp).
     uint leftIndex = uint(gamma);
     uint rightIndex = uint(gamma + 1);
     if (min(ij.x, ij.y) == gamma)

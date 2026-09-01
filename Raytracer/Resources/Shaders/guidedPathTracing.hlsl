@@ -194,7 +194,7 @@ float3 SampleBsdfDir(SurfaceData s, float specularProb, float2 xi, float selecto
 // ---- Voxel guide distribution (tree-backed, vxguiding-gi strategy 5) ----
 
 // Leaf ceiling of the bottom tree (Constants::Graphics::LIGHT_TREE_MAX_LEAVES).
-#define LIGHT_TREE_MAX_LEAVES 65536
+#define LIGHT_TREE_MAX_LEAVES 131072
 
 // Lit-voxel count clamped exactly like tree-encode clamped it when building
 // this frame's tree — the raw counter would put the leaf boundary past the

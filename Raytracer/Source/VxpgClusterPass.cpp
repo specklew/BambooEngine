@@ -289,12 +289,13 @@ void VxpgClusterPass::ResolveStats()
     spdlog::info("[VXPG cluster] {} lit voxels over {}/{} occupied clusters, largest holds {:.1f}%",
         total, occupied, kClusterCount, total > 0 ? 100.0 * largest / total : 0.0);
 
-    // The bottom tree indexes nodes with a uint16, so it can only hold the first
-    // LIGHT_TREE_MAX_LEAVES compacted voxels (vxpgLightTree.hlsl `min(rawCount, ...)`).
-    // Past that the guide simply cannot reach the remainder, and nothing else says so:
-    // the shader raises an overflowFlag that no CPU code reads. Measured 2026-08-25,
-    // this bites at 128^3 on kitchen (32986 lit voxels) and everywhere at 256^3, which
-    // makes it a trap for any sweep over grid resolution.
+    // The bottom tree holds at most LIGHT_TREE_MAX_LEAVES compacted voxels
+    // (vxpgLightTree.hlsl `min(rawCount, ...)`). Past that the guide simply cannot reach
+    // the remainder, and nothing else says so: the shader raises an overflowFlag that no
+    // CPU code reads. It bit at the old 32768 ceiling (128^3 on kitchen, 32986 lit voxels)
+    // and again at 65536. The ceiling now equals VOXEL_GUIDING_CAPACITY, so compaction
+    // drops the excess first and the second warning is the one that can still fire; both
+    // stay, because they separate again the moment either constant moves.
     if (total > Constants::Graphics::LIGHT_TREE_MAX_LEAVES)
         spdlog::warn("[VXPG cluster] {} lit voxels exceeds the {}-leaf light tree by {} — the guide "
                      "cannot reach the excess, so this grid resolution measures the cap, not the grid",

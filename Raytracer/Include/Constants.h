@@ -16,20 +16,21 @@ namespace Constants
         constexpr int STATIC_SAMPLERS_COUNT = 6;
         // Max voxels in the compacted guiding distribution (matches SIByL VXGuider_MAX_CAPACITY)
         constexpr int VOXEL_GUIDING_CAPACITY = 131072;
-        // Bottom light tree leaf ceiling. The node index is uint (SIByL uses uint16_t),
-        // so the old 2N-1 <= 65535 constraint is gone; what binds now is the sort key,
-        // whose low 16 bits carry the compact voxel id, and LIGHT_TREE_SORT_CAPACITY.
+        // Bottom light tree leaf ceiling. The node index is uint (SIByL uses uint16_t), so
+        // the old 2N-1 <= 65535 constraint is gone, and the sort key now spends 18 bits on
+        // the compact voxel id (262144 leaves). What binds instead is the compaction buffer:
+        // voxelGuidingBuild.hlsl drops every voxel past VOXEL_GUIDING_CAPACITY, and a leaf
+        // cannot exist without a compacted voxel, so raising this means raising that first.
         // The encode kernel clamps the lit-voxel count to this (see ADR 0003), and
         // TreeBuildDispatchArgs::overflowFlag still wants a continuous CPU-side read so
         // truncation does not depend on the hand-armed cluster probe.
-        constexpr int LIGHT_TREE_MAX_LEAVES = 65536;
-        // Bitonic sort-key buffer capacity (SIByL element_count = 65536). NOT a
-        // binding limit: the leaf count is clamped to LIGHT_TREE_MAX_LEAVES and
-        // 32768 is itself a power of two, so the padded element count never
-        // exceeds half of this. It would only begin to bind if the leaf ceiling
-        // were raised above 65536 (measured 2026-08-27, R18 in
-        // docs/plan-badawczy-realizacja.md).
-        constexpr int LIGHT_TREE_SORT_CAPACITY = 65536;
+        constexpr int LIGHT_TREE_MAX_LEAVES = VOXEL_GUIDING_CAPACITY;
+        // Bitonic sort-key buffer capacity. Must be a power of two >= the leaf ceiling. NOT
+        // a per-frame cost: the ladder pads the live leaf count up to a power of two and
+        // every stage above it dispatches zero groups, so a raised capacity costs 8 B/key of
+        // storage and nothing else. BitonicSortPass::kCapacity and BITONIC_SORT_STAGE_COUNT
+        // are derived from this number and must move with it.
+        constexpr int LIGHT_TREE_SORT_CAPACITY = 131072;
         // VXPG V2 Stage B superpixels (SLIC over the ShadingPoints G-buffer).
         // map_size = ceil(screen / SUPERPIXEL_SIZE); gather cap = SUPERPIXEL_SIZE^2.
         constexpr int SUPERPIXEL_SIZE = 32;

@@ -197,11 +197,11 @@
 #define BITONIC_REG_CB          0 // b
 #define BITONIC_REG_SORT_BUFFER 0 // u
 #define BITONIC_REG_COUNTER     1 // u
-// Ladder length of the 65536 network: 1 presort + 15 outer + 5 inner. The light
+// Ladder length of the 131072 network: 1 presort + 21 outer + 6 inner. The light
 // tree's encode kernel writes one DISPATCH argument triple per stage in this
 // order, and BitonicSortPass::Sort issues them in the same order — the two loops
 // must stay identical or a stage reads another stage's group count.
-#define BITONIC_SORT_STAGE_COUNT 21
+#define BITONIC_SORT_STAGE_COUNT 28
 #define LIGHT_TREE_INDIRECT_SLOT_COUNT (LIGHT_TREE_INDIRECT_SLOT_SORT + BITONIC_SORT_STAGE_COUNT)
 
 // ---------------------------------------------------------------------------

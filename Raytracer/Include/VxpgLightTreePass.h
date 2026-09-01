@@ -81,6 +81,10 @@ public:
     // own stride can't run the buffer out of bounds.
     struct LightTreeNodeGpu { uint32_t opaque[12]; };
 
+    // Mirror of the shader uint2 gLeafRanges element (the dead descendant range).
+    // Unpacked because a leaf index no longer fits the 16 bits SIByL packed it into.
+    struct LeafRangeGpu { uint32_t first; uint32_t last; };
+
     // Mirror of the shader TreeBuildDispatchArgs (numValidVoxels at byte 12).
     struct TreeBuildDispatchArgsGpu
     {
@@ -95,7 +99,7 @@ public:
 
     // One DISPATCH argument triple. The encode kernel fills the whole array from
     // the live leaf count (three tree stages, then the bitonic ladder), so a frame
-    // that lit 1500 voxels stops paying the 32768-leaf / 65536-key worst case.
+    // that lit 1500 voxels stops paying the LIGHT_TREE_MAX_LEAVES / SORT_CAPACITY worst case.
     struct DispatchArgsGpu { uint32_t threadGroupCount[3]; };
 
     // Consumed by the guided integrator (later) + debug view 11.
@@ -135,7 +139,7 @@ private:
 
     std::unique_ptr<RWStructuredBuffer<uint64_t>>                 m_sortKeys;      // SIByL u_Codes
     std::unique_ptr<RWStructuredBuffer<LightTreeNodeGpu>>         m_nodes;         // SIByL u_Nodes
-    std::unique_ptr<RWStructuredBuffer<uint32_t>>                 m_leafRanges;    // SIByL u_Descendant (dead)
+    std::unique_ptr<RWStructuredBuffer<LeafRangeGpu>>             m_leafRanges;    // SIByL u_Descendant (dead)
     std::unique_ptr<RWStructuredBuffer<int32_t>>                  m_compactToLeaf; // SIByL compact2leaf
     std::unique_ptr<RWStructuredBuffer<int32_t>>                  m_clusterRoots;  // SIByL cluster_roots
     std::unique_ptr<RWStructuredBuffer<TreeBuildDispatchArgsGpu>> m_dispatchArgs;  // SIByL u_ConstrIndirectArgs

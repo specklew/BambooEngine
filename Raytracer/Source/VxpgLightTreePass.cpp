@@ -59,11 +59,23 @@ constexpr uint64_t IndirectArgOffset(uint32_t slot)
 
 namespace
 {
-    // uint16 node-index ceiling (2N-1 must fit uint16 => N <= 32768).
+    // Leaf ceiling. Node indices are uint, so what caps this is the compact voxel
+    // buffer (see Constants.h), not the index width and no longer the sort key,
+    // whose id field holds 18 bits.
     constexpr uint32_t kMaxLeaves = Constants::Graphics::LIGHT_TREE_MAX_LEAVES;
     // Node array holds 2N-1 entries.
-    constexpr uint32_t kNodeCapacity = 2 * kMaxLeaves - 1; // 65535
+    constexpr uint32_t kNodeCapacity = 2 * kMaxLeaves - 1; // 262143
     constexpr uint32_t kCompactCapacity = Constants::Graphics::VOXEL_GUIDING_CAPACITY;
+    constexpr uint32_t kSortCapacity = Constants::Graphics::LIGHT_TREE_SORT_CAPACITY;
+    // The clear kernel walks both buffers in one dispatch, so it needs the wider of the two.
+    constexpr uint32_t kClearThreads = kCompactCapacity > kSortCapacity ? kCompactCapacity : kSortCapacity;
+
+    static_assert(BitonicSortPass::kCapacity == kSortCapacity,
+        "the sort-key buffer and the ladder that sorts it must agree on the element count");
+    static_assert((kSortCapacity & (kSortCapacity - 1)) == 0, "the bitonic network needs a power of two");
+    static_assert(kMaxLeaves <= kSortCapacity, "every leaf needs a sort key");
+    static_assert(kMaxLeaves <= kCompactCapacity, "a leaf cannot exist without a compacted voxel");
+    static_assert(kMaxLeaves <= (1u << 18), "the sort key carries the compact voxel id in 18 bits");
     // Byte offset of numValidVoxels inside TreeBuildDispatchArgs (int3 first).
     constexpr uint32_t kCounterByteOffset = 12;
     constexpr uint32_t kSuperpixelSize = Constants::Graphics::SUPERPIXEL_SIZE;
@@ -103,7 +115,7 @@ void VxpgLightTreePass::CreateBuffers()
         m_device, BitonicSortPass::kCapacity, L"LightTree SortKeys");
     m_nodes = std::make_unique<RWStructuredBuffer<LightTreeNodeGpu>>(
         m_device, kNodeCapacity, L"LightTree Nodes");
-    m_leafRanges = std::make_unique<RWStructuredBuffer<uint32_t>>(
+    m_leafRanges = std::make_unique<RWStructuredBuffer<LeafRangeGpu>>(
         m_device, kNodeCapacity, L"LightTree LeafRanges");
     m_compactToLeaf = std::make_unique<RWStructuredBuffer<int32_t>>(
         m_device, kCompactCapacity, L"LightTree CompactToLeaf");
@@ -210,7 +222,7 @@ void VxpgLightTreePass::RunClear()
         return;
 
     m_commandList->SetPipelineState(m_clearProgram->GetPipelineState());
-    CommandContext::Get().Dispatch((kCompactCapacity + 255) / 256, 1, 1);
+    CommandContext::Get().Dispatch((kClearThreads + 255) / 256, 1, 1);
 }
 
 // Encode leaf sort keys + dispatch args (+ overflow flag). Fixed dispatch: this is
@@ -304,8 +316,8 @@ void VxpgLightTreePass::RunTopLevel()
     CommandContext::Get().Dispatch((m_mapX + 7) / 8, m_mapY, 1);
 }
 
-// P5. The node array is what LIGHT_TREE_MAX_LEAVES caps, so this row is where the uint16
-// node index shows up as a number rather than as a note.
+// P5. The node array is what LIGHT_TREE_MAX_LEAVES caps, so this row is where the leaf
+// ceiling shows up as a number rather than as a note.
 void VxpgLightTreePass::ReportMemory(GpuMemoryReport& report) const
 {
     using namespace GpuMemoryStage;

@@ -5,7 +5,7 @@
 #include "ShaderProgram.h"
 
 // Reusable GPU bitonic sort over uint64 keys (MiniEngine-style, ported from
-// SIByL bitonicsort/). Sorts up to 65536 keys ascending. The valid element
+// SIByL bitonicsort/). Sorts up to kCapacity keys ascending. The valid element
 // count is read live from a caller-supplied counter buffer inside each kernel, and
 // the ladder is issued through ExecuteIndirect off per-stage group counts the
 // caller's producer wrote: the live count pads up to a power of two and stages
@@ -33,8 +33,11 @@ public:
               ID3D12Resource*            stageArgsBuffer,
               uint64_t                   stageArgsByteOffset);
 
-    // Elements the 65536-network sorts (also the sort-key buffer capacity).
-    static constexpr uint32_t kCapacity = 65536;
+    // Elements the network sorts, and the sort-key buffer capacity. Must equal
+    // Constants::Graphics::LIGHT_TREE_SORT_CAPACITY: the light tree writes this
+    // ladder's group counts, and BITONIC_SORT_STAGE_COUNT is derived from the same
+    // number. All three move together or a stage reads another stage's group count.
+    static constexpr uint32_t kCapacity = 131072;
 
 private:
     void CreateRootSignature();

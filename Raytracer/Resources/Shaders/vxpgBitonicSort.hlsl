@@ -1,8 +1,9 @@
 // GPU bitonic sort over uint64 keys, ported from SIByL bitonicsort/
 // {presort,outersort,innersort}-pass.slang (INDIRECT_DISPATCH variant). The
-// element count is read live from a counter buffer each dispatch; Bamboo drives
-// the 65536-element network with fixed worst-case dispatches (32 groups each)
-// and lets the in-shader ListCount guards early-out (ADR 0003 option b).
+// element count is read live from a counter buffer each dispatch; Bamboo drives the
+// network through ExecuteIndirect off per-stage group counts sized from that live
+// count, and lets the in-shader guards early-out on the tail inside a group (ADR 0003
+// option b). The kernels are capacity-agnostic: only the ladder length knows the size.
 //
 // Used by the VXPG light tree to sort leaf codes so each cluster becomes a
 // contiguous Morton-ordered run. Ported from SIByL; identifiers renamed.
