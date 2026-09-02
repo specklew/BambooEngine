@@ -477,6 +477,13 @@ void ScreenshotManager::WriteSidecarJson(const std::string& jsonPath) const
             memory.AddMember("totalBytes", m_pendingMeta.memoryTotalBytes, a);
             bench.AddMember("memory", memory, a);
         }
+        // M8: the process' whole resident footprint on the card, which the inventory
+        // above cannot reach, plus the card it was measured on. Written for every arm,
+        // path tracing included, because the guided total means nothing without it.
+        if (m_pendingMeta.videoMemoryUsedBytes > 0)
+            bench.AddMember("videoMemoryBytes", m_pendingMeta.videoMemoryUsedBytes, a);
+        if (!m_pendingMeta.adapterName.empty())
+            bench.AddMember("adapter", MakeStr(m_pendingMeta.adapterName, a), a);
         if (m_pendingMeta.varianceValid)
         {
             bench.AddMember("varianceMean",     m_pendingMeta.varianceMean,     a);

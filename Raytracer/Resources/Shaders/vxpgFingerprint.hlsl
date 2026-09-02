@@ -29,6 +29,12 @@
 // the packing below, which halved every reported count. Measured 2026-08-23 after
 // the fix: staircase resolves 127 of 128 with cell retries alone and 128 with the
 // global pass.)
+// The compaction buffer's size, and therefore the largest lit-voxel index that exists.
+// The counter it is compared against keeps counting past it (the atomic cannot be undone
+// once the slot is refused), so every consumer has to clamp or it dispatches over voxels
+// whose entries were never written.
+#define VOXEL_GUIDING_CAPACITY 131072u
+
 #define FINGERPRINT_PRESAMPLE_ATTEMPTS 16u
 #define FINGERPRINT_PRESAMPLE_GLOBAL_ATTEMPTS 16u
 
@@ -113,7 +119,13 @@ void SampleScreenRepresentatives(uint3 tid : SV_DispatchThreadID)
     // Thread (0,0) alone emits the dispatch args (SIByL row-presample tail).
     if (all(cellId == uint2(0, 0)))
     {
-        const uint litVoxelCount = gGuidingCounters[0];
+        // Clamped, not raw: past the capacity the compaction dropped the voxels but the
+        // counter kept rising, so the raw value dispatches work over compact slots that
+        // hold nothing. Measured consequence of the raw value: a hang and DEVICE REMOVED
+        // on every scene dense enough to pass the cap (Cornell Box at 256^3 counts 222 587
+        // against a 131 072 buffer), which read as "this grid resolution does not work"
+        // when it was an unclamped count.
+        const uint litVoxelCount = min(gGuidingCounters[0], VOXEL_GUIDING_CAPACITY);
         gGuidingDispatchArgs[0] = uint4((litVoxelCount + 255u) / 256u, 1u, 1u, litVoxelCount);
         gGuidingDispatchArgs[1] = uint4((litVoxelCount * 2u - 1u + 255u) / 256u, 1u, 1u, litVoxelCount);
         // Row-visibility grid: X covers 128 representatives (4 groups of 32),

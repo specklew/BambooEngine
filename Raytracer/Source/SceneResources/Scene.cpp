@@ -354,6 +354,16 @@ std::shared_ptr<Scene> SceneBuilder::Build(Renderer& renderer)
         scene.m_aabbMin.x, scene.m_aabbMin.y, scene.m_aabbMin.z,
         scene.m_aabbMax.x, scene.m_aabbMax.y, scene.m_aabbMax.z);
 
+    // The scene table of the evaluation chapter prints both, and neither was recoverable
+    // from the log before: triangles are of the MERGED buffer (each one stored once,
+    // however many instances draw it), primitives are the drawn instances.
+    size_t primitiveCount = 0;
+    for (const auto& gameObject : scene.m_gameObjects)
+        if (gameObject && gameObject->GetModel())
+            primitiveCount += gameObject->GetModel()->GetMeshes().size();
+    spdlog::info("Scene geometry: {} triangles in {} primitive(s)",
+        scene.m_indexBuffer ? scene.m_indexBuffer->GetIndexCount() / 3 : 0, primitiveCount);
+
     return std::make_shared<Scene>(std::move(scene));
 }
 

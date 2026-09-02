@@ -61,6 +61,14 @@ public:
     [[nodiscard]] UINT GetFrameIndex() const { return m_frameIndex; }
     [[nodiscard]] bool IsTearingSupported() const { return m_tearingSupport; }
 
+    // What the whole method costs in video memory, and on which card. The per-stage
+    // inventory (GpuMemoryReport) covers the guiding chain and the technique's own
+    // resources; it cannot see the scene buffers, the textures or the driver-side
+    // acceleration structures, and M8 of the evaluation plan asks for the total. The
+    // adapter's own accounting sees all of it.
+    [[nodiscard]] uint64_t LocalVideoMemoryUsedBytes() const;
+    [[nodiscard]] const std::string& GetAdapterName() const { return m_adapterName; }
+
 private:
     Microsoft::WRL::ComPtr<IDXGIAdapter4> GetHardwareAdapter(bool useWarp = false);
     Microsoft::WRL::ComPtr<ID3D12Device5> GetDeviceForAdapter(Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter);
@@ -68,6 +76,8 @@ private:
     bool m_enableDebugLayer = true;
 
     Microsoft::WRL::ComPtr<IDXGIFactory6> m_dxgiFactory;
+    Microsoft::WRL::ComPtr<IDXGIAdapter4> m_adapter;
+    std::string m_adapterName;
     Microsoft::WRL::ComPtr<ID3D12Device5> m_device;
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> m_infoQueue;
     DWORD m_debugMessageCallbackCookie = 0;

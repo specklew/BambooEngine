@@ -108,6 +108,7 @@
 #define GUIDING_BUILD_REG_PREMUL_IRRADIANCE     9  // u
 #define GUIDING_BUILD_REG_BAKED_BOUND_MIN       10 // u
 #define GUIDING_BUILD_REG_BAKED_BOUND_MAX       11 // u
+#define GUIDING_BUILD_REG_OCCUPANCY             12 // u  (private heap)
 
 // ---------------------------------------------------------------------------
 // VxpgFingerprintPass — vxpgFingerprint.hlsl. Two kernels, two root signatures;

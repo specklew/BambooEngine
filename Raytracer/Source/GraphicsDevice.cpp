@@ -79,8 +79,30 @@ void GraphicsDevice::Initialize(bool enableDebugLayer)
 
 	if (ComPtr<IDXGIAdapter4> dxgiAdapter = GetHardwareAdapter())
 	{
+		m_adapter = dxgiAdapter;
+		DXGI_ADAPTER_DESC3 desc = {};
+		if (SUCCEEDED(dxgiAdapter->GetDesc3(&desc)))
+		{
+			const std::wstring wide(desc.Description);
+			m_adapterName.assign(wide.begin(), wide.end());
+			spdlog::info("Adapter: {} ({} MiB dedicated)", m_adapterName,
+				desc.DedicatedVideoMemory / (1024ull * 1024ull));
+		}
 		m_device = GetDeviceForAdapter(dxgiAdapter);
 	}
+}
+
+// CurrentUsage of the LOCAL segment: what this process has resident on the card,
+// driver allocations included. Taken at capture time so it describes the configuration
+// the image was rendered under.
+uint64_t GraphicsDevice::LocalVideoMemoryUsedBytes() const
+{
+	if (!m_adapter)
+		return 0;
+	DXGI_QUERY_VIDEO_MEMORY_INFO info = {};
+	if (FAILED(m_adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info)))
+		return 0;
+	return info.CurrentUsage;
 }
 
 void GraphicsDevice::CreateCommandQueue()

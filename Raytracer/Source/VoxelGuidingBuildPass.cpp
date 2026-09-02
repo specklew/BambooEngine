@@ -27,6 +27,10 @@ constexpr BindingSlot kGuidingBuildRepresentative =
     PassTableEntry("gVoxelRepresentative", BindingKind::Uav, GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE,
                    GlobalDescriptor::VoxelRepresentative);
 constexpr BindingSlot kGuidingBuildCounters      = PassUav("gCounters", GUIDING_BUILD_REG_COUNTERS);
+// Read only by the census (see the probe): the denominator of the lit-voxel share is the
+// number of cells the bake marked as holding geometry, and nothing else counted them.
+constexpr BindingSlot kGuidingBuildOccupancy =
+    PassTableEntry("gOccupancy", BindingKind::Uav, GUIDING_BUILD_REG_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
 constexpr uint32_t kCounterCount = 4;
 // Retried because the first frame runs before the bake and the first injection, so an
 // unarmed-looking zero is indistinguishable from a genuinely unlit grid on frame 0.
@@ -55,7 +59,7 @@ constexpr BindingSlot kGuidingBuildSlots[] = {
     kGuidingBuildConstants,     kGuidingBuildIrradiance,   kGuidingBuildVplCount,      kGuidingBuildRepresentative,
     kGuidingBuildCounters,      kGuidingBuildCompactIds,   kGuidingBuildInverseIndex,  kGuidingBuildLiveBoundMin,
     kGuidingBuildLiveBoundMax,  kGuidingBuildLightPoints,  kGuidingBuildPremulIrradiance,
-    kGuidingBuildBakedBoundMin, kGuidingBuildBakedBoundMax};
+    kGuidingBuildBakedBoundMin, kGuidingBuildBakedBoundMax, kGuidingBuildOccupancy};
 } // namespace
 
 void VoxelGuidingBuildPass::Initialize(
@@ -146,7 +150,9 @@ bool VoxelGuidingBuildPass::BindCommon()
     m_commandList->SetDescriptorHeaps(_countof(heaps), heaps);
     m_commandList->SetComputeRootSignature(m_rootSig.Get());
 
-    uint32_t constants[4] = { gridDim, 0, 0, 0 };
+    // The census walks the whole grid, so it rides the probe's arming rather than
+    // running every frame: disarmed, the compaction kernel skips the occupancy read.
+    uint32_t constants[4] = { gridDim, IsProbeArmed() ? 1u : 0u, 0, 0 };
     auto* cmd = m_commandList.Get();
     m_rootSig.SetConstants(cmd, kGuidingBuildConstants, constants, 4);
     m_rootSig.SetTable(cmd, 0, globalHeap.GpuStart());
@@ -221,6 +227,7 @@ void VoxelGuidingBuildPass::ResolveProbe()
         return;
 
     const uint32_t litVoxels    = counters[0];
+    const uint32_t occupied     = counters[1];
     const uint32_t truncated    = counters[2];
     const uint32_t maxPackedSum = counters[3];
 
@@ -248,6 +255,22 @@ void VoxelGuidingBuildPass::ResolveProbe()
     const uint32_t caughtVpls = litVoxels + truncated;
     spdlog::info("[VXPG accumulator] {} of {} cells with VPLs packed to zero and left the guide ({:.2f}%)",
                  truncated, caughtVpls, caughtVpls > 0 ? 100.0 * truncated / caughtVpls : 0.0);
+
+    // The scene-selection metric of the evaluation plan: lit cells over cells holding
+    // geometry. Both counts are of the SAME grid, so the share is comparable across
+    // resolutions in a way neither count is on its own.
+    spdlog::info("[VXPG census] {} lit voxels of {} occupied by geometry ({:.2f}% lit)",
+                 litVoxels, occupied, occupied > 0 ? 100.0 * litVoxels / occupied : 0.0);
+
+    // Past the capacity the compaction keeps the first VOXEL_GUIDING_CAPACITY voxels and
+    // drops the rest, and every consumer clamps to that ceiling — so the cluster pass now
+    // reports exactly the ceiling and cannot see the overflow. The raw count only exists
+    // here, which makes this the only place the truncation can still be reported.
+    if (litVoxels > Constants::Graphics::VOXEL_GUIDING_CAPACITY)
+        spdlog::warn("[VXPG census] {} lit voxels exceeds the {}-entry compaction buffer by {} — this "
+                     "grid resolution measures the cap, not the grid",
+                     litVoxels, Constants::Graphics::VOXEL_GUIDING_CAPACITY,
+                     litVoxels - Constants::Graphics::VOXEL_GUIDING_CAPACITY);
 
     m_countersReadback->Unmap(0, &writeRange);
     m_probeRetries = 0;

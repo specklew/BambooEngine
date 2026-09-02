@@ -15,7 +15,10 @@ RWTexture3D<uint>   gVoxVplCount          : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_VP
 // during light injection (last-writer-wins).
 RWTexture3D<float4> gVoxelRepresentative  : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_VOXEL_REPRESENTATIVE);
 
-// [0] = compacted voxel count ([1] retired with the flat CDF)
+// Geometry occupancy from the bake, read only by the census below.
+RWTexture3D<uint>   gOccupancy            : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_OCCUPANCY);
+
+// [0] = compacted voxel count, [1] = cells holding geometry (census)
 RWStructuredBuffer<uint>   gCounters     : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_COUNTERS);
 RWStructuredBuffer<uint>   gCompactIds   : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_COMPACT_IDS);
 // voxelID (flat) -> compactID, sentinel -1. Sized gridDim^3. Each cell written
@@ -39,7 +42,7 @@ RWStructuredBuffer<uint4> gBakedBoundMax : BAMBOO_PASS_UAV(GUIDING_BUILD_REG_BAK
 cbuffer BuildCB : BAMBOO_PASS_CBV(GUIDING_BUILD_REG_CB)
 {
     uint gGridDim;
-    uint _pad0;
+    uint gCensusArmed;
     uint _pad1;
     uint _pad2;
 }
@@ -53,6 +56,7 @@ float UnpackIrradiance(uint packed)
 void ClearCounters(uint3 tid : SV_DispatchThreadID)
 {
     gCounters[0] = 0u;
+    gCounters[1] = 0u; // cells holding geometry (census)
     gCounters[2] = 0u; // voxels dropped by the fixed-point truncation (probe)
     gCounters[3] = 0u; // largest accumulated packed irradiance seen (probe)
 }
@@ -88,6 +92,14 @@ void CompactVoxels(uint3 tid : SV_DispatchThreadID)
 
     uint flatId = tid.x + tid.y * gGridDim + tid.z * gGridDim * gGridDim;
     gInverseIndex[flatId] = -1; // clear own cell before any early-return
+
+    // Before the early-out: the census counts cells with geometry whether or not any
+    // light reached them, and those are exactly the cells that leave here first.
+    if (gCensusArmed != 0u && gOccupancy[tid] != 0u)
+    {
+        uint censusPrevious;
+        InterlockedAdd(gCounters[1], 1u, censusPrevious);
+    }
 
     uint count = gVoxVplCount[tid];
     if (count == 0u) return;

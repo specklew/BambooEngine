@@ -88,6 +88,13 @@ struct ScreenshotMetadata
     // measurement's conditions and the chain's shape is not one of them.
     std::vector<std::pair<std::string, uint64_t>> memoryByStage;
     uint64_t memoryTotalBytes = 0;
+
+    // M8 wants the footprint of the WHOLE method, which the inventory above cannot give:
+    // it knows nothing of the scene buffers, the textures or the driver-side acceleration
+    // structures. This is the adapter's own accounting of the process, and the same field
+    // for path tracing is the reference point the guided total is read against.
+    uint64_t videoMemoryUsedBytes = 0;
+    std::string adapterName;
 };
 
 // A capture's stopping condition. Seconds is the equal-time axis, frames the

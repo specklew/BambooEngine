@@ -154,7 +154,7 @@ static AutoCVarFloat g_exposure("renderer.postprocess.exposure","Exposure multip
 static AutoCVarFloat g_contrast("renderer.postprocess.contrast", "Pre-ACES contrast power curve", 1.0f, CVarFlags::EditDrag, 0.1f, 3.0f);
 static AutoCVarFloat g_saturation("renderer.postprocess.saturation", "Post-ACES saturation", 1.0f, CVarFlags::EditDrag, 0.0f, 2.0f);
 static AutoCVarFloat g_lift("renderer.postprocess.lift", "Post-ACES shadow lift", 0.0f, CVarFlags::EditDrag, 0.0f, 0.5f);
-static AutoCVarInt   g_voxelGridDim("voxel.gridDim", "Voxel grid resolution (one axis)", 64, CVarFlags::EditDrag, 32, 256);
+static AutoCVarInt   g_voxelGridDim("voxel.gridDim", "Voxel grid resolution (one axis)", 64, CVarFlags::EditDrag, 32, 512);
 static AutoCVarFloat g_voxelAabbPad("voxel.aabbPadCells", "Voxel grid padding in cells (unused V1)", 0.5f, CVarFlags::EditDrag, 0.0f, 4.0f);
 static AutoCVarInt   g_voxelInjectUseAvg("voxel.inject.useAvg", "Injection accumulation: 1 = average (add + count), 0 = max", 1, CVarFlags::EditCheckbox);
 // Default ON (deviation from SIByL's shipped default): full-cube bounds made the
@@ -1640,6 +1640,7 @@ void Renderer::BuildVxpgGraph()
 				pass.Read(m_vxpg.voxelIrradiance, kUavRead);
 				pass.Read(m_vxpg.voxelVplCount, kUavRead);
 				pass.Read(m_vxpg.voxelRepresentative, kUavRead);
+				pass.Read(m_vxpg.voxelOccupancy, kUavRead);
 				pass.Read(m_vxpg.liveBoundMin, kUavRead);
 				pass.Read(m_vxpg.liveBoundMax, kUavRead);
 				// Appends through the counter the clear node zeroed, so the write
@@ -2449,6 +2450,11 @@ ScreenshotMetadata Renderer::BuildScreenshotMetadata(const std::string& modelNam
     const GpuMemoryReport memory = CollectGpuMemory();
     m.memoryByStage    = memory.ByStage();
     m.memoryTotalBytes = memory.Total();
+    if (m_graphicsDevice)
+    {
+        m.videoMemoryUsedBytes = m_graphicsDevice->LocalVideoMemoryUsedBytes();
+        m.adapterName          = m_graphicsDevice->GetAdapterName();
+    }
 
     return m;
 }

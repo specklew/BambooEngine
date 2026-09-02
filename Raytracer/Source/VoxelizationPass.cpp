@@ -292,7 +292,7 @@ void VoxelizationPass::OnSceneLoaded(const Scene& scene)
     m_haveScene = true;
     m_bakeValid = false;
 
-    spdlog::debug("VoxelizationPass: gridMin=({:.3f},{:.3f},{:.3f}) gridMax=({:.3f},{:.3f},{:.3f}) voxelSize={:.4f}",
+    spdlog::info("VoxelizationPass: gridMin=({:.3f},{:.3f},{:.3f}) gridMax=({:.3f},{:.3f},{:.3f}) voxelSize={:.4f}",
         m_gridConstants.gridMin.x, m_gridConstants.gridMin.y, m_gridConstants.gridMin.z,
         m_gridConstants.gridMax.x, m_gridConstants.gridMax.y, m_gridConstants.gridMax.z,
         m_gridConstants.voxelSize);
