@@ -1,0 +1,187 @@
+{
+    "_comment": [
+        "The second evaluation round. Run, in this order:",
+        "",
+        "  python tools/campaign.py --manifest tools/ewaluacja-campaign.json configs",
+        "  python tools/campaign.py --manifest tools/ewaluacja-campaign.json references",
+        "  python tools/campaign.py --manifest tools/ewaluacja-campaign.json sweep        (faza 1)",
+        "  python tools/campaign.py --manifest tools/ewaluacja-campaign.json budget       (faza 2)",
+        "  python tools/campaign.py --manifest tools/ewaluacja-campaign.json --only M1 run",
+        "",
+        "Scenes are NOT redeclared here; they are frozen in ewaluacja-manifest.json, which also",
+        "carries the phase-0 numbers that justify the set. This file adds only what a campaign",
+        "has and a scene list does not: arms, protocols, categories, rounds and repeats.",
+        "",
+        "PROTOCOLS. The first round ran one protocol (30 s, 16 checkpoints). This round runs",
+        "four, because the plan asks three different questions of the same pair of arms:",
+        "",
+        "  short     equal TIME. One budget for the whole set, chosen in phase 2 so both arms",
+        "            accumulate a similar number of frames on most scenes. This is the",
+        "            protocol every basic measurement runs on.",
+        "  samples   equal SAMPLE COUNT. The budget is a number of path samples, not seconds,",
+        "            and the arms convert it to different frame counts: the guided technique",
+        "            draws two path samples per iteration (two-sample MIS at the first vertex)",
+        "            where path tracing draws one. It answers how well the method steers rays,",
+        "            with the frame cost taken out - a different question from `short`.",
+        "  variance  equal VARIANCE. Renders with `checkpoints: every:1`, so every frame is",
+        "            saved and scored, and the reading is the FIRST frame under an MSE ceiling.",
+        "            No interpolation. The dense capture inflates this run's own clock (a",
+        "            measured 6.8-10.4 ms against a 4.63 ms warm-up at 1080p), so the time",
+        "            column comes from `budget`'s frame cost, never from this run's sidecars.",
+        "  curve     the 30 s error-against-time curves, the ONLY place 30 s appears. Nothing",
+        "            in the tables is read off this protocol.",
+        "",
+        "'samplesPerFrame' on an arm is what makes the equal-sample budget expressible: it is",
+        "the number of path samples one frame of that arm carries.",
+        "",
+        "'sweeps' is phase 1: one factor at a time, guided arm only, at a common short budget.",
+        "The winner per scene lands in parameters.json, which `run` then reads. The grid",
+        "dimension is swept over the SCENE's own ladder from ewaluacja-manifest.json, not over",
+        "the values listed here, because a rung above a scene's cap measures the cap.",
+        "",
+        "TWO PARAMETERS OF THE PLAN ARE NOT SWEPT, and the chapter has to say why rather than",
+        "quietly drop them. Both are compile-time constants and neither is a knob:",
+        "  * the number of supervoxels is fixed at 32 (Constants::Graphics, kClusterCount).",
+        "    The cluster-visibility mask is ONE uint32 per superpixel, one bit per cluster, so",
+        "    64 clusters would need a 64-bit mask and a different kernel - a structural change,",
+        "    not a setting.",
+        "  * the number of visibility representatives is fixed at 128 (four 32-bit fingerprint",
+        "    words). 64 would halve the words and change the fingerprint layout everywhere it",
+        "    is read.",
+        "Both belong in the chapter's table of COMMON parameters, with this reason stated.",
+        "",
+        "CATEGORIES ARE RUN ONE AT A TIME. A job is keyed by (cell, arm), so asking for two",
+        "categories whose protocols differ in one invocation is refused by design. Run each",
+        "with its own --only and its own --out; M1 and M7 share the protocol and may run",
+        "together."
+    ],
+
+    "scenesFrom": "tools/ewaluacja-manifest.json",
+    "configDir": "SavedUserData/ewaluacja",
+
+    "renderDefaults": {
+        "width": 1920,
+        "height": 1080,
+        "spp": 1,
+        "bounces": 1,
+        "postProcessEnabled": true,
+        "contrast": 1.0,
+        "saturation": 1.0,
+        "lift": 0.0,
+        "indirectSkyClamp": 0.0,
+        "skyLighting": false,
+        "indirectOnly": false,
+        "emissiveGeometry": true,
+        "guidingDebugView": 0,
+        "treeWeightMode": 0,
+        "defaultSeconds": 5.0,
+        "outputDir": "SavedUserData/Screenshots"
+    },
+
+    "arms": {
+        "BSDF":  { "technique": "Path Tracing",               "cvars": [], "samplesPerFrame": 1 },
+        "WIE":   { "technique": "Guided Path Tracing (VXPG)", "cvars": [], "samplesPerFrame": 2 },
+        "WIE-R": { "technique": "Guided Path Tracing (VXPG)", "cvars": ["vxpg.injection.reuseInMis=1"], "samplesPerFrame": 2 }
+    },
+
+    "sweeps": [
+        {
+            "cvar": "voxel.gridDim",
+            "_label": "rozdzielczość siatki wokseli",
+            "values": [32, 64, 128, 256, 512],
+            "_note": "Not only a quality knob: acceptance of guided samples RISES with resolution (San Miguel 0.1 % at 64^3, 25.4 % at 512^3), so on the large scenes this parameter decides whether the guide works at all. A rung whose lit-voxel census passes 131 072 measures the cap and the sweep refuses it."
+        },
+        {
+            "cvar": "vxpg.topLevelTree.importance",
+            "_label": "tryb wartości liścia",
+            "values": [0, 1, 2],
+            "_note": "0 = binary visibility, 1 = soft average visibility (default), 2 = intensity alone. Mode 2 culls the whole cluster-visibility stage, so it is also the cheapest; the plan's three leaf-value modes are exactly these."
+        },
+        {
+            "cvar": "vxpg.tree.weightMode",
+            "_label": "ważenie gałęzi dolnego drzewa",
+            "values": [0, 1, 2],
+            "_note": "0 = intensity only (default), 1 = the paper's exact geometry + distance term, 2 = the cheap approximation. Not in the plan's list, but it is a real runtime knob and costs the same sweep."
+        }
+    ],
+
+    "protocols": {
+        "short": {
+            "_comment": "Equal TIME, and equal time only. Phase 2 chose 24 ms as the smallest budget whose worst-case gap between the arms' ACTUALLY SPENT time stays under 10 % (9.1 % on veach-ajar). Frame counts differ by the frame-cost ratio, 2.4-6.1x, and are not asked to agree - that ratio is the thing being measured. At this budget San Miguel's guided arm renders ONE frame per image and does not accumulate at all; the chapter says so.",
+            "budget": "seconds:0.024",
+            "checkpoints": "log:8",
+            "images": 10,
+            "warmup": 45
+        },
+        "samples": {
+            "_comment": "Equal sample count. Frames follow from the arm's samplesPerFrame.",
+            "samples": 64,
+            "checkpoints": null,
+            "images": 10,
+            "warmup": 45
+        },
+        "variance": {
+            "_comment": "Every frame saved and scored; the reading is the first frame under the MSE ceiling.",
+            "budget": "frames:256",
+            "checkpoints": "every:1",
+            "images": 1,
+            "warmup": 45
+        },
+        "curve": {
+            "_comment": "The only 30 s protocol; feeds the plot and no table.",
+            "budget": "seconds:30",
+            "checkpoints": "log:16",
+            "images": 4,
+            "warmup": 45
+        }
+    },
+
+    "rounds": 2,
+    "repeats": 2,
+    "referenceSeconds": 1800,
+
+    "categories": {
+        "SUNTEMPLE": {
+            "_what": "komórka diagnostyczna poza zbiorem: jak siatka zachowuje się na scenie o rozpiętości 271 m",
+            "protocol": "short",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["sun-temple"],
+            "lights": ["own"]
+        },
+        "M1": {
+            "_what": "porównanie przy równym czasie",
+            "protocol": "short",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["cornell-box", "bedroom", "staircase", "veach-ajar", "san-miguel", "zero-day"],
+            "lights": ["own"]
+        },
+        "M2": {
+            "_what": "porównanie przy równej liczbie próbek",
+            "protocol": "samples",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["cornell-box", "bedroom", "staircase", "veach-ajar", "san-miguel", "zero-day"],
+            "lights": ["own"]
+        },
+        "M3": {
+            "_what": "porównanie przy równej wariancji",
+            "protocol": "variance",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["cornell-box", "bedroom", "staircase", "veach-ajar", "san-miguel", "zero-day"],
+            "lights": ["own"]
+        },
+        "M4": {
+            "_what": "krzywe błędu wobec czasu, 30 s",
+            "protocol": "curve",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["cornell-box", "bedroom", "staircase", "veach-ajar", "san-miguel", "zero-day"],
+            "lights": ["own"]
+        },
+        "M7": {
+            "_what": "wariant z ponownym użyciem próbki",
+            "protocol": "short",
+            "arms": ["WIE", "WIE-R"],
+            "scenes": ["cornell-box", "bedroom", "staircase", "veach-ajar", "san-miguel", "zero-day"],
+            "lights": ["own"]
+        }
+    }
+}

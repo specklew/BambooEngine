@@ -1,0 +1,136 @@
+{
+    "_comment": [
+        "The scene set of the second evaluation round, closed by the user on 2026-09-02 after",
+        "the phase-0 probe. This file replaces recon-manifest.json as the source of scenes for",
+        "the campaign; the recon manifest stays as the record of the FIRST round and must not",
+        "be edited, or last round's numbers stop being reproducible.",
+        "",
+        "  python tools/campaign.py --manifest tools/ewaluacja-campaign.json configs",
+        "",
+        "Six cells, three sizes x two levels of the lit-voxel share. The share is not an",
+        "absolute threshold: no large scene reaches 20 %, because the share falls with scene",
+        "size, so within each size class the set takes the highest and the lowest candidate.",
+        "The numbers below are from the 128^3 probe and go into the scene table of chapter 5:",
+        "",
+        "  Cornell Box  63.9 %   2 m      32 tris       accept 99.9 %",
+        "  Bedroom      13.1 %   7 m      1 499 344     accept 69.6 %",
+        "  Staircase    31.0 %  10 m      262 508       accept 85.3 %",
+        "  Veach Ajar    6.6 %  17 m      382 628       accept 77.1 % (128^3)",
+        "  San Miguel    2.3 %  69 m      9 949 550     accept 17.7 % (256^3)",
+        "  Zero Day      0.6 % 394 m      5 836 076     accept 25.3 % (256^3)",
+        "",
+        "'accept' is the guided-sample acceptance (GuideAcceptance view): the share of guided",
+        "samples that survive the gate. It is the criterion for whether the technique has",
+        "anything to steer at all, and it RISES with grid resolution - which is why the two",
+        "large scenes carry a grid ladder that starts where their guide comes alive.",
+        "",
+        "Sun Temple is NOT in the set: its acceptance is 0.0 % at every rung below 256^3, and the",
+        "whole grid ladder moves its FLIP by 2.4 % (0.10093-0.10337 from 32^3 to 512^3), which",
+        "is inside the tie tolerance. The grid is inert on a 271 m scene even where the guide",
+        "finally accepts samples. It is described in the chapter as the documented negative case.",
+        "",
+        "'exposure', 'contrast' and 'saturation' are the tone settings the user authored in the",
+        "GUI and froze on 2026-09-02. They decide what the image looks like and therefore what",
+        "every FLIP number means; they are not free parameters.",
+        "",
+        "'bounces: 1' is the ENGINE's spelling, counting bounces after the shading point. In",
+        "the thesis' convention that is two bounces. Do not renumber it here."
+    ],
+
+    "configDir": "SavedUserData/ewaluacja",
+    "defaultLightTypes": ["own"],
+    "defaultGridResolutions": [32, 64, 128, 256, 512],
+
+    "renderDefaults": {
+        "width": 1920,
+        "height": 1080,
+        "spp": 1,
+        "bounces": 1,
+        "postProcessEnabled": true,
+        "contrast": 1.0,
+        "saturation": 1.0,
+        "lift": 0.0,
+        "indirectSkyClamp": 0.0,
+        "skyLighting": false,
+        "indirectOnly": false,
+        "emissiveGeometry": true,
+        "guidingDebugView": 0,
+        "treeWeightMode": 0,
+        "defaultSeconds": 5.0,
+        "outputDir": "SavedUserData/Screenshots"
+    },
+
+    "scenes": [
+        {
+            "id": "cornell-box",
+            "_class": "mała / irradiancja w większości sceny",
+            "gridResolutions": [32, 64, 128],
+            "scenePath": "resources/models/FinalTestScenes/cornell-box.glb",
+            "state": "Test State",
+            "exposure": 3.0,
+            "overrides": { "contrast": 0.7 },
+            "_note": "63.9 % lit at 128^3, acceptance 99.9 % - the near-uniform guide, where the gain is expected to vanish. 256^3 and 512^3 are excluded: 222 587 and 468 881 lit voxels against a 131 072 compaction buffer, so those rungs measure the cap."
+        },
+        {
+            "id": "bedroom",
+            "_class": "mała / irradiancja w małej części sceny",
+            "gridResolutions": [32, 64, 128, 256, 512],
+            "scenePath": "resources/models/FinalTestScenes/bedroom.glb",
+            "state": "Test State",
+            "exposure": 1.2,
+            "overrides": { "contrast": 0.9 },
+            "_note": "13.1 % lit at 128^3, acceptance 69.6 %. 1.5 M triangles - the densest small scene. 512^3 is admissible here (49 911 lit voxels, under the 131 072 cap) unlike on Cornell Box and Staircase."
+        },
+        {
+            "id": "staircase",
+            "_class": "średnia / irradiancja w większości sceny",
+            "gridResolutions": [32, 64, 128, 256],
+            "scenePath": "resources/models/FinalTestScenes/staircase.glb",
+            "state": "Test State",
+            "exposure": 0.4,
+            "_note": "31.0 % lit at 128^3, acceptance 85.3 %. 512^3 excluded: 186 427 lit voxels past the 131 072 cap."
+        },
+        {
+            "id": "veach-ajar",
+            "_class": "średnia / irradiancja w małej części sceny",
+            "gridResolutions": [32, 64, 128, 256, 512],
+            "scenePath": "resources/models/FinalTestScenes/veach-ajar.glb",
+            "state": "Test State",
+            "exposure": 0.2,
+            "overrides": { "contrast": 0.8 },
+            "_note": "6.6 % lit at 128^3, acceptance 64.6 % at 64^3 and 77.1 % at 128^3. Light through a door slit; the strongest guided win of the first round (145 %)."
+        },
+        {
+            "id": "san-miguel",
+            "_class": "duża / irradiancja w większości sceny (w klasie)",
+            "gridResolutions": [128, 256, 512],
+            "statesKey": "san-miguel.nogit",
+            "scenePath": "resources/models/FinalTestScenes/san-miguel.nogit.glb",
+            "state": "Test State",
+            "exposure": 3.3,
+            "overrides": { "contrast": 0.7, "saturation": 1.7 },
+            "_note": "2.3 % lit at 128^3. The ladder starts at 128^3 because acceptance is 0.2 % at 32^3 and 0.1 % at 64^3 - below that the guide is dead and the rung would measure path tracing plus the chain's cost. 3.2 % at 128^3, 17.7 % at 256^3, 25.4 % at 512^3. 9.9 M triangles, 23 ms/frame."
+        },
+        {
+            "id": "sun-temple",
+            "_class": "poza zbiorem - komórka diagnostyczna dla drabiny siatki",
+            "gridResolutions": [32, 64, 128, 256, 512],
+            "statesKey": "sun-temple.nogit",
+            "scenePath": "resources/models/FinalTestScenes/sun-temple.nogit.glb",
+            "state": "Test State",
+            "exposure": 1.0,
+            "_note": "NOT one of the six. Acceptance 0.0 / 0.0 / 0.1 / 2.9 / 20.4 % at 32 / 64 / 128 / 256 / 512^3 and 139 ms/frame at 512^3 - the case where the guide only comes alive at a rung nobody can afford. Measured here so the chapter can say what the grid does on a scene of 271 m rather than assert it."
+        },
+        {
+            "id": "zero-day",
+            "_class": "duża / irradiancja w małej części sceny",
+            "gridResolutions": [32, 64, 128, 256, 512],
+            "statesKey": "zero-day-measure-one.nogit",
+            "scenePath": "resources/models/FinalTestScenes/zero-day-measure-one.nogit.glb",
+            "state": "Test State",
+            "exposure": 10.0,
+            "overrides": { "contrast": 0.7 },
+            "_note": "0.6 % lit at 128^3 - the smallest guide support in the set (49 lit voxels at 128^3). Acceptance 42.1 / 26.4 / 25.3 / 32.9 % at 32 / 64 / 256 / 512^3, so the guide is alive at every rung; 128^3 was censused (0.6 % lit) but its acceptance was not measured."
+        }
+    ]
+}

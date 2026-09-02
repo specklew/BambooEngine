@@ -1,0 +1,125 @@
+{
+    "_comment": [
+        "The reconnaissance grid. Run:",
+        "  python tools/recon.py configs    (writes one headless config per cell)",
+        "  python tools/recon.py smoke      (5 s per cell: loads? lit? truncating?)",
+        "  python tools/recon.py references (600 s path-traced reference per cell)",
+        "  python tools/recon.py run        (the measurement)",
+        "  python tools/recon.py report     (one table, one verdict per cell)",
+        "",
+        "'state' is the scene's default camera state and must be the SAME name in every",
+        "scene. 'states' overrides it per light type, for the K2 cells whose analytic rig",
+        "is authored IN the state next to the camera it was balanced against.",
+        "",
+        "'lightTypes' defaults to ['own'], which omits the lights key entirely so the",
+        "camera state's own array rules. PLAN_BADAWCZY 7.2: substituting a source into a",
+        "scene changes the scene, not a parameter, so the three light types are an axis",
+        "only in category K2 (veach-ajar and staircase). Any cell other than own/emissive",
+        "gets \"emissiveGeometry\": false written for it, or the substituted light would",
+        "join the scene's own emitters instead of replacing them.",
+        "",
+        "'exposure' and 'overrides' are frozen per scene and are NOT free parameters:",
+        "under indirect-only, exposure was measured to move the guided arm's equal-time",
+        "lead from 183% to 141% on veach-ajar between 2.0 and 0.5. That number predates",
+        "indirectOnly:false and is quoted only to show the sensitivity, not as a current",
+        "figure. The values here are the ones authored in the GUI and are frozen."
+    ],
+
+    "configDir": "SavedUserData/recon",
+    "defaultLightTypes": ["own"],
+    "defaultGridResolutions": [32, 64],
+
+    "renderDefaults": {
+        "width": 1920,
+        "height": 1080,
+        "spp": 1,
+        "bounces": 1,
+        "postProcessEnabled": true,
+        "contrast": 1.0,
+        "saturation": 1.0,
+        "lift": 0.0,
+        "indirectSkyClamp": 0.0,
+        "skyLighting": false,
+        "indirectOnly": false,
+        "guidingDebugView": 0,
+        "treeWeightMode": 0,
+        "defaultSeconds": 5.0,
+        "outputDir": "SavedUserData/Screenshots"
+    },
+
+    "defaultLights": {
+        "point": {
+            "type": "point",
+            "position": [0.0, 1.8, -2.2],
+            "color": [1.0, 1.0, 1.0],
+            "intensity": 40.0,
+            "range": 0.0
+        },
+        "directional": {
+            "type": "directional",
+            "direction": [-0.28, -0.93, -0.24],
+            "color": [1.0, 0.96, 0.88],
+            "intensity": 4.0,
+            "range": 0.0
+        }
+    },
+
+    "scenes": [
+        {
+            "id": "veach-ajar",
+            "gridResolutions": [32, 64, 128, 256],
+            "scenePath": "resources/models/FinalTestScenes/veach-ajar.glb",
+            "state": "Test State",
+            "lightTypes": ["own", "point"],
+            "states": { "point": "Test State Point Light" },
+            "exposure": 0.2,
+            "overrides": { "contrast": 0.8 },
+            "_note": "own = emissive only. The point rig (intensity 2400, behind the door at the emitter) was swept to match the emissive image's mean brightness to 0.7%: 0.374 vs 0.375, std 0.281 vs 0.291. It cannot match exactly — with emitters off the emitter panel renders black while the reference shows it lit."
+        },
+        {
+            "id": "staircase",
+            "gridResolutions": [32, 64, 128],
+            "scenePath": "resources/models/FinalTestScenes/staircase.glb",
+            "state": "Test State",
+            "lightTypes": ["own", "point"],
+            "states": { "point": "Test State Point Light" },
+            "exposure": 0.4,
+            "_note": "own = emissive only. K2 substitutes the source into THIS scene and asks how the technique copes, so the two conditions have to be equally exposed or the comparison is confounded by brightness. Re-swept 2026-08-30: intensity 90 (was 55.3) lands at mean 0.2176 against the emissive 0.2196, i.e. 0.9% apart, matching veach-ajar's 0.7%. At 55.3 the point image was 20.9% darker, which is a different measurement, not the same one under a different source. The rig lives in the state Test State Point Light."
+        },
+        {
+            "id": "kitchen",
+            "gridResolutions": [32, 64],
+            "scenePath": "resources/models/FinalTestScenes/kitchen.glb",
+            "state": "Test State",
+            "exposure": 1.0
+        },
+        {
+            "id": "bedroom",
+            "gridResolutions": [32, 64, 128],
+            "scenePath": "resources/models/FinalTestScenes/bedroom.glb",
+            "state": "Test State",
+            "exposure": 1.2,
+            "overrides": { "contrast": 0.9 },
+            "_note": "PLAN_BADAWCZY 7.9's strongest a-priori case: the largest win in the source paper"
+        },
+        {
+            "id": "sponza",
+            "gridResolutions": [32, 64, 128, 256],
+            "scenePath": "resources/models/FinalTestScenes/Sponza/glTF/Sponza.gltf",
+            "state": "Test State",
+            "exposure": 1.9,
+            "overrides": { "contrast": 0.8 },
+            "_note": "own light = the directional saved in the state; no emissive geometry"
+        },
+        {
+            "id": "bistro-exterior",
+            "gridResolutions": [32, 64, 128, 256],
+            "statesKey": "bistroexterior_conv.nogit",
+            "scenePath": "resources/models/FinalTestScenes/BistroExterior_CONV.nogit.glb",
+            "state": "Test State",
+            "exposure": 10.0,
+            "overrides": { "contrast": 0.8 },
+            "_note": "2.83M triangles, 990 MB glb — the extreme case; 82 s to load, per process launch"
+        }
+    ]
+}

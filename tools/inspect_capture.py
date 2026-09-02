@@ -77,6 +77,45 @@ def find_color(pixels, channel, threshold):
     return mask, result
 
 
+# Palette of GuidedPathTracingPass debug view 4 (GuideAcceptance), straight from the
+# colour branch at the end of guidedPathTracing.hlsl. Counting these classes is how a
+# guided run reports where its first-bounce samples go.
+GUIDE_ACCEPTANCE_PALETTE = [
+    ("accepted",        (0.0, 1.0, 0.0), "hit inside the sampled voxel, sample used"),
+    ("blocked-short",   (1.0, 0.0, 0.0), "occluder between the shading point and the voxel"),
+    ("no-cluster",      (0.0, 1.0, 1.0), "chain found no cluster"),
+    ("pdf-nonpositive", (1.0, 0.5, 0.0), "guide pdf <= 0"),
+    ("below-horizon",   (0.5, 0.0, 1.0), "sampled direction under the surface"),
+    ("zero-brdf",       (1.0, 1.0, 0.0), "BRDF zero at the sampled direction"),
+    ("crossed-empty",   (1.0, 1.0, 1.0), "reached the voxel and hit nothing"),
+    ("guide-dead",      (0.0, 0.0, 1.0), "no live parent / dead branch"),
+    ("background",      (0.0, 0.0, 0.0), "no shading point (primary miss)"),
+]
+
+PALETTES = {"guide-acceptance": GUIDE_ACCEPTANCE_PALETTE}
+
+
+def aces_gamma(values):
+    """The engine's display transform (postprocess.hlsl): ACES filmic (Narkowicz 2015)
+    then linear->gamma. A debug view's palette colours arrive in a PNG through it, so a
+    classifier has to compare against the transformed palette, not the authored one."""
+    x = np.asarray(values, dtype=np.float32)
+    mapped = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)
+    return np.clip(mapped, 0.0, 1.0) ** (1.0 / 2.2)
+
+
+def classify(pixels, palette, tolerance, transform=None):
+    """Per-pixel nearest palette entry; -1 where nothing is within `tolerance`."""
+    colors = np.array([entry[1] for entry in palette], dtype=np.float32)
+    if transform is not None:
+        colors = transform(colors)
+    flat = pixels.reshape(-1, 3)
+    distance = ((flat[:, None, :] - colors[None, :, :]) ** 2).sum(axis=2)
+    ids = distance.argmin(axis=1)
+    ids[distance.min(axis=1) > tolerance ** 2] = -1
+    return ids.reshape(pixels.shape[:2])
+
+
 def save_image(array, path, exposure):
     out = np.clip(array * exposure, 0.0, 1.0)
     Image.fromarray((out * 255.0 + 0.5).astype(np.uint8)).save(path)
@@ -91,6 +130,12 @@ def main():
     parser.add_argument("--crop", help="write an exposure-scaled crop of the region to this path")
     parser.add_argument("--mark", help="write a full image with found pixels marked red to this path")
     parser.add_argument("--exposure", type=float, default=1.0, help="multiplier applied before saving --crop/--mark")
+    parser.add_argument("--classify", choices=list(PALETTES), help="count pixels per class of a known debug-view palette")
+    parser.add_argument("--display-transform", choices=["none", "aces"], default="aces",
+                        help="display curve the capture already went through (default aces, as postprocess.hlsl)")
+    parser.add_argument("--tolerance", type=float, default=0.12, help="max per-pixel distance to a palette colour (default 0.12)")
+    parser.add_argument("--class-mask", help="with --classify: write the image with one class marked red")
+    parser.add_argument("--mask-class", help="which class --class-mask marks (default: blocked-short)")
     parser.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = parser.parse_args()
 
@@ -115,6 +160,40 @@ def main():
             save_image(marked, args.mark, 1.0)
             report["markPath"] = args.mark
 
+    if args.classify:
+        palette = PALETTES[args.classify]
+        ids = classify(sub, palette, args.tolerance,
+                       aces_gamma if args.display_transform == "aces" else None)
+        total = ids.size
+        counts = []
+        for index, (name, _color, meaning) in enumerate(palette):
+            n = int((ids == index).sum())
+            counts.append({"class": name, "count": n, "share": round(100.0 * n / total, 3), "meaning": meaning})
+        unmatched = int((ids < 0).sum())
+        counts.append({"class": "unmatched", "count": unmatched,
+                       "share": round(100.0 * unmatched / total, 3),
+                       "meaning": "no palette colour within the tolerance (blended pixel)"})
+        report["classify"] = {"palette": args.classify, "tolerance": args.tolerance,
+                              "pixels": total, "classes": counts}
+        if unmatched:
+            # An unmatched population is usually the palette scaled or blended, not a new
+            # class, so the commonest unmatched colours say which of the two it is.
+            flat = sub.reshape(-1, 3)[ids.reshape(-1) < 0]
+            quantized = np.round(flat * 32.0) / 32.0
+            uniques, hits = np.unique(quantized, axis=0, return_counts=True)
+            order = np.argsort(-hits)[:5]
+            report["classify"]["unmatchedColors"] = [
+                {"rgb": [round(float(v), 3) for v in uniques[i]], "count": int(hits[i])} for i in order]
+        if args.class_mask:
+            wanted = args.mask_class or "blocked-short"
+            names = [entry[0] for entry in palette]
+            mask = np.zeros((height, width), dtype=bool)
+            mask[y0:y1, x0:x1] = ids == names.index(wanted)
+            marked = np.clip(image * args.exposure, 0.0, 1.0)
+            marked[mask] = [1.0, 0.0, 0.0]
+            save_image(marked, args.class_mask, 1.0)
+            report["classMaskPath"] = args.class_mask
+
     if args.crop:
         save_image(sub, args.crop, args.exposure)
         report["cropPath"] = args.crop
@@ -132,6 +211,15 @@ def main():
         print(f"Find '{f['channel']}'-dominant (thr {f['threshold']}): count={f['count']} energy={f['energy']}")
         if f["count"]:
             print(f"  bbox {f['bbox']}  maxValue={f['maxValue']}")
+    if "classify" in report:
+        c = report["classify"]
+        print(f"Classify '{c['palette']}' over {c['pixels']} px (tolerance {c['tolerance']}):")
+        for entry in c["classes"]:
+            if entry["count"]:
+                print(f"  {entry['class']:<16} {entry['count']:>9}  {entry['share']:>6.2f} %  {entry['meaning']}")
+        for entry in c.get("unmatchedColors", []):
+            print(f"  unmatched rgb {entry['rgb']}  x{entry['count']}")
+        if "classMaskPath" in report: print(f"Class mask: {report['classMaskPath']}")
     if "cropPath" in report: print(f"Crop:   {report['cropPath']}  (exposure {args.exposure})")
     if "markPath" in report: print(f"Marked: {report['markPath']}")
 

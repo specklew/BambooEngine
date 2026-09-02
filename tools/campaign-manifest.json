@@ -1,0 +1,109 @@
+{
+    "_comment": [
+        "The measurement campaign. Run:",
+        "  python tools/campaign.py configs      (one headless config per cell)",
+        "  python tools/campaign.py references   (1800 s path-traced reference per cell)",
+        "  python tools/campaign.py run          (the campaign)",
+        "  python tools/campaign.py report       (tables, including the run-to-run noise floor)",
+        "",
+        "Scenes are NOT redeclared here. Their identity, camera state, exposure and tone",
+        "curve were frozen for the reconnaissance and must not drift between the two, so",
+        "this file points at that manifest and adds only what a campaign has and a recon",
+        "does not: arms, protocols, categories, rounds and repeats.",
+        "",
+        "A JOB is (cell, arm, protocol) where a cell is (scene, light type). Categories are",
+        "a VIEW over jobs, not a partition of them: K1 and K2 both want veach-ajar under its",
+        "own light, and it is measured once. That is why the runner takes the union of what",
+        "the enabled categories ask for and the report slices the result afterwards.",
+        "",
+        "'rounds' interleaves: the runner walks every job once per round rather than",
+        "finishing a job's images back to back, so thermal drift lands on both arms alike.",
+        "'repeats' re-walks the WHOLE grid in fresh processes. That is the only way to get",
+        "the between-run spread PLAN_BADAWCZY 10.2 asks for - a confidence interval taken",
+        "across images of one process understates it 3-10x on this harness."
+    ],
+
+    "scenesFrom": "tools/recon-manifest.json",
+    "configDir": "SavedUserData/campaign",
+
+    "renderDefaults": {
+        "width": 1920,
+        "height": 1080,
+        "spp": 1,
+        "bounces": 1,
+        "postProcessEnabled": true,
+        "contrast": 1.0,
+        "saturation": 1.0,
+        "lift": 0.0,
+        "indirectSkyClamp": 0.0,
+        "skyLighting": false,
+        "indirectOnly": false,
+        "guidingDebugView": 0,
+        "treeWeightMode": 0,
+        "defaultSeconds": 5.0,
+        "outputDir": "SavedUserData/Screenshots"
+    },
+
+    "arms": {
+        "BSDF":  { "technique": "Path Tracing",               "cvars": [] },
+        "WIE":   { "technique": "Guided Path Tracing (VXPG)", "cvars": [] },
+        "WIE-R": { "technique": "Guided Path Tracing (VXPG)", "cvars": ["vxpg.injection.reuseInMis=1"] }
+    },
+
+    "protocols": {
+        "curve": {
+            "_comment": "PLAN_BADAWCZY 7.9 protocol K. Ten images per point, split across the rounds.",
+            "budget": "seconds:30",
+            "checkpoints": "log:16",
+            "images": 10,
+            "warmup": 45
+        }
+    },
+
+    "rounds": 2,
+    "repeats": 2,
+    "referenceSeconds": 1800,
+
+    "categories": {
+        "K1": {
+            "_what": "performance, the main measurement (P1, P2)",
+            "protocol": "curve",
+            "arms": ["BSDF", "WIE"],
+            "scenes": "all",
+            "lights": ["own"]
+        },
+        "K2": {
+            "_what": "effect of light type (P1); the only category where light type is an axis",
+            "_requiresExplicitRig": true,
+            "_directionalDropped": [
+                "PLAN_BADAWCZY 7.2 asks for three light types here. Directional is not",
+                "realizable on either scene and the reason is structural, not a matter of",
+                "picking a better direction: a directional source sits at infinity, so a",
+                "surface is lit only when the ray back along the beam LEAVES the scene, and",
+                "both of these scenes are sealed interiors. Measured 2026-08-30 at 4 s,",
+                "mean image brightness against the scene's own light:",
+                "  veach-ajar  own 0.372  vs  directional 0.0067 at intensity 1280 (55x short,",
+                "              and already clipping at max 0.96 - four directions tried,",
+                "              including the emitter-to-room axis and both verticals)",
+                "  staircase   own 0.2196 vs directional 0.0004 at intensity 100 (550x short)",
+                "Raising the intensity to close the gap burns the few lit texels to white long",
+                "before the mean moves, so the arms would be compared across a black frame.",
+                "Opening an aperture would change the scene, which 7.2 forbids. The category",
+                "therefore runs area-emissive vs point, which still varies exactly what it is",
+                "about - the spatial distribution of the source, area against delta."
+            ],
+            "protocol": "curve",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["veach-ajar", "staircase"],
+            "lights": ["own", "point"]
+        },
+        "K3": {
+            "_what": "estimator bias of the reuse variant (P3)",
+            "_chosenBy": "recon 2026-08-30, REUSE/WIE FLIP ratio at equal time: veach-ajar 1.107 (strongest), kitchen 1.025 (middle), bistro-exterior 0.888 (weakest, the biased arm is ahead there)",
+            "protocol": "curve",
+            "arms": ["WIE", "WIE-R"],
+            "scenes": ["veach-ajar", "kitchen", "bistro-exterior"],
+            "lights": ["own"]
+        }
+    }
+}
