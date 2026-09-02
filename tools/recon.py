@@ -239,7 +239,7 @@ def require_disk_space():
 
 def engine(scene, light, manifest, technique, cvars, out_dir, budget, images, warmup,
            checkpoints=None, log_path=None, config=None, debug_views=None,
-           rdg_timings=False, levers=None):
+           rdg_timings=False, levers=None, settle=0):
     command = [
         str(EXE), "--headless",
         "--scene", scene_argument(scene),
@@ -254,6 +254,10 @@ def engine(scene, light, manifest, technique, cvars, out_dir, budget, images, wa
     ]
     if checkpoints:
         command += ["--checkpoints", checkpoints]
+    # Frames pumped between images, outside every measured window: at a budget of one display
+    # frame the leftover of the previous capture can otherwise eat a whole image.
+    if settle:
+        command += ["--settle", str(settle)]
     # A buffer debug view has to arrive as --debug-views: SelectDebugView wipes the CVar,
     # so `--cvar renderer.bufferDebugView=...` silently renders the ordinary image.
     if debug_views:
@@ -283,7 +287,7 @@ def engine(scene, light, manifest, technique, cvars, out_dir, budget, images, wa
 
 def engine_checked(scene, light, manifest, technique, cvars, out_dir, budget, images, warmup,
                    checkpoints=None, log_path=None, config=None, debug_views=None,
-                   rdg_timings=False, levers=None):
+                   rdg_timings=False, levers=None, settle=0):
     """engine(), then throw the run away and repeat it once if any capture came out at the
     wrong resolution. Seen once in the wild: a 1280x720 image inside a 1920x1080 run,
     written in the first frames after a shader rebuild. Rare and harmless on its own —
@@ -293,7 +297,7 @@ def engine_checked(scene, light, manifest, technique, cvars, out_dir, budget, im
         require_disk_space()
         code, seconds = engine(scene, light, manifest, technique, cvars, out_dir, budget,
                                images, warmup, checkpoints, log_path, config, debug_views,
-                               rdg_timings, levers)
+                               rdg_timings, levers, settle)
         if code != 0:
             # A nonzero exit is not always a defect in the run. Seen 2026-09-01: bistro-exterior
             # failed its BLAS build with E_OUTOFMEMORY because the previous job's process had not

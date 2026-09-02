@@ -76,6 +76,7 @@ HeadlessArgs ParseHeadlessArgs(int argc, wchar_t** argv)
         else if (flag == "--images")      args.images = static_cast<uint32_t>(std::stoul(valueOf(i)));
         else if (flag == "--checkpoints") args.checkpoints = valueOf(i);
         else if (flag == "--warmup")      args.warmupSeconds = std::stof(valueOf(i));
+        else if (flag == "--settle")      args.settleFrames = static_cast<uint32_t>(std::stoul(valueOf(i)));
         else if (flag == "--out")        args.outDir = valueOf(i);
         else if (flag == "--debug-views") args.debugViews = SplitCsv(valueOf(i));
         else if (flag == "--debug-layer") args.debugLayer = true;

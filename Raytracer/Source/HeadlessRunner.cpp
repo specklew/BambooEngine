@@ -535,6 +535,14 @@ int HeadlessRunner::Run()
                         ? fmt::format("{}-i{:04}", stem, image)
                         : stem;
 
+                    // Absorb the previous capture outside the measured window (--settle).
+                    // Without it, at a budget of one display frame, the leftover of the
+                    // previous image's readback can consume this image's whole budget in a
+                    // single frame — measured on zero-day at 24 ms: 1 frame of 36.3 ms
+                    // where the settled cost is 12.1 ms.
+                    for (uint32_t settle = 0; settle < m_args.settleFrames; ++settle)
+                        PumpFrame();
+
                     m_renderer.ArmScreenshot(schedule, model, place, runDir, imageStem,
                                              image, m_args.images, warmup);
                     while (!m_renderer.ScreenshotIdle())

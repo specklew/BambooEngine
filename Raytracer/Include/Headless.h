@@ -115,6 +115,16 @@ struct HeadlessArgs
     // state. 0 => the legacy fixed 16-frame pump.
     float warmupSeconds = 0.0f;
 
+    // --settle N: frames pumped BETWEEN images, outside every measured window. The capture
+    // of one image leaves work behind — the readback flushes the queue and the encode is
+    // handed to writer threads — and part of that lands in the next frame's clock delta.
+    // The engine already subtracts what it can measure of it, and at a 30 s budget the
+    // remainder is invisible; at a budget of one display frame it is not. Measured on
+    // zero-day at 24 ms: an image that should hold two frames of 12.1 ms held one frame of
+    // 36.3 ms. Zero by default, because a settle frame is wrong for a metric defined on
+    // CONSECUTIVE frames (temporal error), and right for INDEPENDENT images.
+    uint32_t settleFrames = 0;
+
     // --debug-views: capture each listed view of the active technique instead of
     // the plain render. Indices belong to that technique's own enumeration ("all"
     // takes every view it declares). Empty => one normal capture per technique.

@@ -326,7 +326,7 @@ def run_campaign(args, manifest):
                     job["scene"], job["light"], manifest, spec["technique"],
                     list(spec["cvars"]) + scene_cvars(cell, parameters),
                     out, arm_budget(protocol, arm, manifest), images, protocol["warmup"],
-                    checkpoints=protocol["checkpoints"],
+                    checkpoints=protocol["checkpoints"], settle=protocol.get("settle", 0),
                     log_path=under(root) / f"{cell}-{arm}-p{repeat}r{round_index}.log",
                     config=config_path(manifest, job["scene"], job["light"]))
                 if code != 0:
