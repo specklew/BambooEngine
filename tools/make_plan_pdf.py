@@ -38,13 +38,26 @@ def load(path, default=None):
         return default
 
 
+def newest(name):
+    """The repeated run of a measurement if there is one, otherwise the original.
+
+    The frame-window accounting fix of 2026-09-03 invalidated every short-window measurement
+    (M1, M7, the budget ladder, the 1 s curves); those were re-run into `<name>-v3`. Resolving
+    by existence keeps this document pointing at the freshest data without a second set of
+    paths to keep in step - and makes it obvious, when a `-v3` directory is missing, that the
+    figure below still comes from the superseded run.
+    """
+    repeated = SHOTS / f"{name}-v3"
+    return repeated if repeated.exists() else SHOTS / name
+
+
 scenes = load(SHOTS / "scenes-probe" / "scenes.json", {})
 strategy = load(SCRATCH / "strategy.json", {})
 params = load(SHOTS / "parametry-pass2" / "parameters.json", {})
 params1 = load(SHOTS / "parametry" / "parameters-pass1.json", {})
 suntemple = load(SHOTS / "parametry-suntemple" / "parameters.json", {})
 costs = load(SHOTS / "parametry-testowania" / "koszt-klatki.json", {})
-m1 = load(SHOTS / "wyniki-czas" / "m1-wyniki.json", None)
+m1 = load(newest("wyniki-czas") / "m1-wyniki.json", None)
 
 
 def refs():
@@ -195,7 +208,7 @@ def sweep_table(factor, label, source, cells):
 
 def ratio_table(path, name):
     """One measurement's per-scene table: both arms and the ratio between them."""
-    data = (load(SHOTS / path, {}) or {}).get("data", {})
+    data = (load(path if isinstance(path, Path) else SHOTS / path, {}) or {}).get("data", {})
     if not data:
         return ""
     rows = []
@@ -342,7 +355,7 @@ def crossover_table():
     """The same ratio at three budgets an order of magnitude apart."""
     import csv as _csv
     from collections import defaultdict as _dd
-    short = load(SHOTS / "wyniki-czas" / "m1-wyniki.json", {}) or {}
+    short = load(newest("wyniki-czas") / "m1-wyniki.json", {}) or {}
     curves = SHOTS / "wyniki-krzywe" / "m4-curves.csv"
     if not short or not curves.exists():
         return ""
@@ -410,7 +423,7 @@ def stability_table():
 
 def reuse_table():
     """M7 at the equal-time budget."""
-    data = (load(SHOTS / "wyniki-obciazenie" / "m7-wyniki.json", {}) or {}).get("data", {})
+    data = (load(newest("wyniki-obciazenie") / "m7-wyniki.json", {}) or {}).get("data", {})
     if not data:
         return ""
     rows = []
@@ -431,7 +444,7 @@ def reuse_curve_table():
     """M7 along the 30 s curve: where the bias starts to cost."""
     import csv as _csv
     from collections import defaultdict as _dd
-    path = SHOTS / "wyniki-obciazenie-krzywa" / "m7c-curves.csv"
+    path = newest("wyniki-obciazenie-krzywa") / "m7c-curves.csv"
     if not path.exists():
         return ""
     series = _dd(lambda: _dd(list))
@@ -1259,7 +1272,7 @@ wyznaczone z krzywych M4, bo to ten sam przebieg dostarcza obu.
     for placeholder, builder in (
             ("%%THROTTLE%%", throttle_table),
             ("%%PAIRS%%", frame_pair_table),
-            ("%%M1%%", lambda: ratio_table("wyniki-czas/m1-wyniki.json", "M1")),
+            ("%%M1%%", lambda: ratio_table(newest("wyniki-czas") / "m1-wyniki.json", "M1")),
             ("%%M2%%", lambda: ratio_table("wyniki-probki/m2-wyniki.json", "M2")),
             ("%%M3%%", variance_table),
             ("%%CROSS%%", crossover_table),
