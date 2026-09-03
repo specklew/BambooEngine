@@ -535,11 +535,19 @@ int HeadlessRunner::Run()
                         ? fmt::format("{}-i{:04}", stem, image)
                         : stem;
 
-                    // Absorb the previous capture outside the measured window (--settle).
-                    // Without it, at a budget of one display frame, the leftover of the
-                    // previous image's readback can consume this image's whole budget in a
-                    // single frame — measured on zero-day at 24 ms: 1 frame of 36.3 ms
-                    // where the settled cost is 12.1 ms.
+                    // Keep the card under load between images (--settle). The capture frame
+                    // flushes and reads back, so without these the window would open on a
+                    // card that has just been idle.
+                    //
+                    // These frames used to matter far more than that, and for a reason that
+                    // was misread: the window's accounting was shifted by one frame, so it
+                    // charged the last settle frame instead of its own last one, and a settle
+                    // frame right after a capture is atypically cheap. The reading that
+                    // justified this loop - "1 frame of 36.3 ms where the settled cost is
+                    // 12.1 ms" - had it backwards: 12.1 ms was the frame that had not paid,
+                    // not the true cost. Both defects are fixed in Renderer/ScreenshotManager
+                    // (the window is armed on a flushed queue and each frame is timed inside
+                    // itself), so what remains here is load-keeping.
                     for (uint32_t settle = 0; settle < m_args.settleFrames; ++settle)
                         PumpFrame();
 
