@@ -191,6 +191,7 @@ void ScreenshotManager::Arm(FrameAccumulationPass& accum, CaptureSchedule schedu
     m_frameMsCount    = 0;
     m_captureDue      = false;
     m_copyRecorded    = false;
+    m_frameInWindow   = false;
     m_pendingMeta     = std::move(metadata);
     m_state           = State::Pending;
 
@@ -215,18 +216,20 @@ void ScreenshotManager::Tick(FrameAccumulationPass& accum, double elapsedTime, b
         return;
     }
 
-    m_frameMsSum += elapsedTime * 1000.0;
-    ++m_frameMsCount;
+    // This frame's duration is not knowable yet - it is measured at the end of the frame, in
+    // AccountFrame - so the window's books are closed there and only marked here.
+    m_frameInWindow      = true;
+    m_windowAccumulating = accumulating;
 
-    // The frame about to be rendered is the one the capture will read, so both
-    // budgets are evaluated against the state INCLUDING it: frames already
-    // accumulated + 1, and time already accumulated + this frame's delta.
-    // Without accumulation the two local counters ARE the progress: both were just
-    // advanced by this frame, so they already include it exactly like the pass
-    // counters do above.
-    const uint32_t framesInImage = accumulating ? accum.GetFrameCount() + 1 : m_frameMsCount;
-    const double   timeInImage   = accumulating ? accum.GetAccumulatedTime() + elapsedTime
-                                                : m_frameMsSum / 1000.0;
+    // The frame about to be rendered is the one the capture will read, so both budgets are
+    // evaluated against the state INCLUDING it: frames already accumulated + 1, and time
+    // already accumulated plus a PREDICTION of this frame, for which the previous frame's
+    // measured duration is the best available estimate. The prediction only moves where a
+    // seconds budget stops; the time this capture reports is the measured sum, finalised in
+    // AccountFrame once this frame is actually over.
+    const uint32_t framesInImage = accumulating ? accum.GetFrameCount() + 1 : m_frameMsCount + 1;
+    const double   timeInImage   = (accumulating ? accum.GetAccumulatedTime()
+                                                 : m_frameMsSum / 1000.0) + elapsedTime;
     const double   progress      = m_schedule.budget.kind == CaptureBudget::Kind::Frames
                                  ? static_cast<double>(framesInImage)
                                  : timeInImage;
@@ -248,7 +251,33 @@ void ScreenshotManager::Tick(FrameAccumulationPass& accum, double elapsedTime, b
     m_pendingMeta.accumulatedTime = static_cast<float>(timeInImage);
     m_pendingMeta.meanFrameMs     = m_frameMsCount > 0 ? static_cast<float>(m_frameMsSum / m_frameMsCount) : 0.0f;
 
-    spdlog::info("Screenshot capture triggered at {} frame(s) / {:.3f}s", framesInImage, timeInImage);
+    spdlog::info("Screenshot capture triggered at {} frame(s) / {:.3f}s (predicted; the "
+                 "measured total follows)", framesInImage, timeInImage);
+}
+
+void ScreenshotManager::AccountFrame(FrameAccumulationPass& accum, double frameSeconds)
+{
+    // Outside a capture window this is just the running clock the UI shows.
+    accum.Update(frameSeconds);
+    if (!m_frameInWindow)
+        return;
+    m_frameInWindow = false;
+
+    m_frameMsSum += frameSeconds * 1000.0;
+    ++m_frameMsCount;
+
+    // FinishCapture writes the JSON later in this same frame, so the numbers it reads have to
+    // be right now - and now they can be, this frame's duration having just been measured.
+    if (m_captureDue)
+    {
+        const double measured = m_windowAccumulating ? accum.GetAccumulatedTime()
+                                                     : m_frameMsSum / 1000.0;
+        m_pendingMeta.accumulatedTime = static_cast<float>(measured);
+        m_pendingMeta.meanFrameMs     = m_frameMsCount > 0
+                                      ? static_cast<float>(m_frameMsSum / m_frameMsCount) : 0.0f;
+        spdlog::info("Screenshot window measured: {} frame(s) / {:.3f}s ({:.3f} ms/frame)",
+                     m_frameMsCount, measured, m_pendingMeta.meanFrameMs);
+    }
 }
 
 void ScreenshotManager::RecordCopy(const Microsoft::WRL::ComPtr<ID3D12Resource>& source)

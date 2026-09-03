@@ -613,10 +613,12 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	// number the capture stores.
 	const double renderElapsed = std::max(0.0, elapsedTime - m_screenshotManager->ConsumeLastCaptureCostSeconds());
 
-	// Tick screenshot before advancing accumulatedTime so the check reads the pre-update value
+	// Tick screenshot before advancing accumulatedTime so the check reads the pre-update value.
+	// The delta is passed as a PREDICTION of the frame about to run - it is the previous frame's
+	// duration - and the accumulators are advanced at the end of the frame, in AccountFrame,
+	// with what this frame actually took.
+	m_frameStart = std::chrono::steady_clock::now();
 	m_screenshotManager->Tick(*m_accumulationPass, renderElapsed, !DebugViewPass::IsActive());
-
-	m_accumulationPass->Update(renderElapsed);
 
 	if (m_statesManager)
 		m_statesManager->Tick();
@@ -775,6 +777,14 @@ void Renderer::Render(double elapsedTime, double totalTime)
 	if (m_unsteerableProbePending && m_voxelGuidingBuildPass)
 		m_voxelGuidingBuildPass->ResolveUnsteerable();
 	DumpRenderGraphIfRequested();
+
+	// The frame is over: everything it submitted has been waited on (a capture frame flushed
+	// outright, the rest waited on the slot NUM_FRAMES-1 back), and its own capture cost is
+	// still ahead of us. So this interval is the frame's own wall cost, and unlike the clock
+	// delta at the top of Update it belongs to THIS frame rather than the previous one.
+	const double frameSeconds =
+		std::chrono::duration<double>(std::chrono::steady_clock::now() - m_frameStart).count();
+	m_screenshotManager->AccountFrame(*m_accumulationPass, frameSeconds);
 
 	if (m_screenshotManager->IsCaptureDue())
 	{
@@ -1308,6 +1318,12 @@ void Renderer::ArmScreenshot(const CaptureSchedule& schedule, const std::string&
                              const std::string& outDir, const std::string& stem,
                              uint32_t imageIndex, uint32_t imageCount, const WarmUpReport& warmup)
 {
+	// The window must open on an empty queue. The CPU runs NUM_FRAMES-1 frames ahead, so without
+	// this the settle frames are still in flight when the window starts, and the capture frame's
+	// own flush waits for them too - charging the window for two frames it did not render. It is
+	// exactly measurable: the ramp read T(N) = (N+2) x 4.07 ms instead of N x 4.07 ms.
+	FlushCommandQueue();
+
 	m_screenshotManager->SetOutputTarget(outDir, stem);
 	ScreenshotMetadata meta = BuildScreenshotMetadata(model, place);
 	meta.imageIndex    = imageIndex;

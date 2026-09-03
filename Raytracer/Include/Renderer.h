@@ -194,6 +194,8 @@ private:
 	// The unsteerable-share accumulators are filled by the INTEGRATOR, so their readback
 	// node has to sit past the technique rather than inside the guiding chain.
 	bool m_unsteerableProbePending = false;
+	// Start of the current frame, for the in-frame duration AccountFrame consumes.
+	std::chrono::steady_clock::time_point m_frameStart;
 
 	std::shared_ptr<RenderTechnique> m_technique;
 	std::shared_ptr<VBufferPass> m_vbufferPass;

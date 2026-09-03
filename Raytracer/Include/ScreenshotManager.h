@@ -148,6 +148,16 @@ public:
     // encoder threads. Returns as soon as the copy out of the mapped buffer is done.
     void FinishCapture();
 
+    // Closes the books on the frame that just finished. Called at the END of that frame with
+    // its own measured duration, which is the only place that duration exists: the clock delta
+    // available at the START of a frame is the PREVIOUS frame's. Attributing it forward made a
+    // capture window of N frames report the last settle frame plus the first N-1 measured ones,
+    // which on a guided arm read 12.2 ms for the first frame against a settled 34.5 ms - the
+    // window was crediting a frame that ran while the GPU queue was still refilling after the
+    // previous capture's flush. Also where the metadata's timing is finalised, because
+    // FinishCapture writes the JSON later in this same frame.
+    void AccountFrame(FrameAccumulationPass& accum, double frameSeconds);
+
     // Block until every queued PNG has hit disk. Must be called before the process
     // exits or the last images of a run are simply missing.
     void WaitForPendingWrites();
@@ -209,6 +219,10 @@ private:
     State m_state      = State::Idle;
     bool  m_captureDue    = false;
     bool  m_copyRecorded  = false;
+    // Set by Tick while the schedule is armed, consumed by AccountFrame: marks the frames whose
+    // duration belongs inside the measured window.
+    bool  m_frameInWindow = false;
+    bool  m_windowAccumulating = true;
 
     CaptureSchedule m_schedule;
     size_t          m_nextCheckpoint = 0;
