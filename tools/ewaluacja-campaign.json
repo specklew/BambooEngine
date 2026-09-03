@@ -107,8 +107,9 @@
 
     "protocols": {
         "short": {
-            "_comment": "Equal TIME, and equal time only. Phase 2 chose 24 ms as the smallest budget whose worst-case gap between the arms' ACTUALLY SPENT time stays under 10 % (9.1 % on veach-ajar). Frame counts differ by the frame-cost ratio, 2.4-6.1x, and are not asked to agree - that ratio is the thing being measured. At this budget San Miguel's guided arm renders ONE frame per image and does not accumulate at all; the chapter says so.",
-            "budget": "seconds:0.024",
+            "_comment": "Equal TIME at the scale of one display frame, realised by stating the FRAME COUNTS rather than a time budget. A time budget cannot do it here: the engine stops at the first frame reaching the budget, so each arm overshoots by a partial frame and the overshoots differ - measured at 24 ms, the arms landed up to 20 % apart in time, always in the guided arm's favour. The counts in klatki-rownego-czasu.json put both arms within 0-9.3 % of each other around 24 ms (about 40 frames per second). They are derived from frame costs measured IN that regime: cost under a 10 s load runs 2-42 % higher, and the guided arm loses more to the clock-down than the path-traced one. Frame counts differ between the arms by the frame-cost ratio, 2.4-6.1x, and are not asked to agree - that ratio is what is being measured.",
+            "framesFrom": "Raytracer/SavedUserData/Screenshots/parametry-testowania/klatki-rownego-czasu.json",
+            "_budget": "seconds:0.024 - superseded by framesFrom; kept for the record of what 24 ms meant",
             "_checkpoints": "None on purpose: a 24 ms budget holds 1-37 frames, and eight checkpoints inside it would put up to eight captures into a window that short. Capturing is not free (a measured ~1 ms of machinery plus a resolution-dependent readback per capture), so the frame cost such a run reports would describe the capturing, not the technique. Frame cost comes from the phase-2 runs, which capture once.",
             "checkpoints": null,
             "settle": 2,
@@ -117,7 +118,8 @@
         },
         "samples": {
             "_comment": "Equal sample count. Frames follow from the arm's samplesPerFrame.",
-            "samples": 64,
+            "samples": 16,
+            "_samples": "16 path samples: the guided arm draws two per frame, so 8 frames against 16 for path tracing. Chosen to sit at the top of the range the equal-time budget reaches (M1 gives the guided arm 4-16 samples), so the two measurements describe the same regime.",
             "checkpoints": null,
             "settle": 2,
             "images": 10,
@@ -125,9 +127,43 @@
         },
         "variance": {
             "_comment": "Every frame saved and scored; the reading is the first frame under the MSE ceiling.",
-            "budget": "frames:256",
+            "framesFrom": "Raytracer/SavedUserData/Screenshots/parametry-testowania/klatki-rowna-wariancja.json",
+            "_budget": "per cell, from the 30 s curves: a bit above where each cell crosses the ceiling. A common 512-frame budget would write 15 GB of captures to answer a question most cells answer in the first hundred frames.",
+            "_mseCeiling": 0.005,
+            "_mseCeilingWhy": "the only ceiling both arms reach on every scene within a few hundred frames; 0.002 needs 1713 frames on veach-ajar and 0.01 is already met at the first checkpoint of the 30 s curve, so it cannot be resolved",
             "checkpoints": "every:1",
             "images": 1,
+            "warmup": 45
+        },
+        "short-x2": {
+            "_comment": "The equal-time pair multiplied by 2: same ratio between the arms, 2 times the budget. Localises where the guided arm's short-budget advantage ends, which the error curves cannot do below 160 ms because their checkpoints land on wildly different frame counts per arm.",
+            "framesFrom": "Raytracer/SavedUserData/Screenshots/parametry-testowania/klatki-x2.json",
+            "checkpoints": null,
+            "settle": 2,
+            "images": 6,
+            "warmup": 45
+        },
+        "short-x4": {
+            "_comment": "The equal-time pair multiplied by 4: same ratio between the arms, 4 times the budget. Localises where the guided arm's short-budget advantage ends, which the error curves cannot do below 160 ms because their checkpoints land on wildly different frame counts per arm.",
+            "framesFrom": "Raytracer/SavedUserData/Screenshots/parametry-testowania/klatki-x4.json",
+            "checkpoints": null,
+            "settle": 2,
+            "images": 6,
+            "warmup": 45
+        },
+        "short-x8": {
+            "_comment": "The equal-time pair multiplied by 8: same ratio between the arms, 8 times the budget. Localises where the guided arm's short-budget advantage ends, which the error curves cannot do below 160 ms because their checkpoints land on wildly different frame counts per arm.",
+            "framesFrom": "Raytracer/SavedUserData/Screenshots/parametry-testowania/klatki-x8.json",
+            "checkpoints": null,
+            "settle": 2,
+            "images": 6,
+            "warmup": 45
+        },
+        "curve-short": {
+            "_comment": "The 30 s curve's first checkpoint lands at 0.3 s, which leaves the whole real-time regime unmeasured: M1 sits at 19-28 ms and the curve starts an order of magnitude later. On staircase and san-miguel the guided arm leads at 20 ms and trails at 300 ms, so the crossing happens inside that gap. This protocol covers 10 ms to 1 s and joins the two.",
+            "budget": "seconds:1",
+            "checkpoints": "log:16",
+            "images": 4,
             "warmup": 45
         },
         "curve": {
@@ -176,6 +212,42 @@
             "_what": "krzywe błędu wobec czasu, 30 s",
             "protocol": "curve",
             "arms": ["BSDF", "WIE"],
+            "scenes": ["cornell-box", "bedroom", "staircase", "veach-ajar", "san-miguel", "zero-day"],
+            "lights": ["own"]
+        },
+        "M4B": {
+            "_what": "krzywe w reżimie czasu rzeczywistego, 1 s - domknięcie dziury między M1 a M4",
+            "protocol": "curve-short",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["cornell-box", "bedroom", "staircase", "veach-ajar", "san-miguel", "zero-day"],
+            "lights": ["own"]
+        },
+        "M1X2": {
+            "_what": "drabina budżetu x2 na dwóch scenach z przecięciem",
+            "protocol": "short-x2",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["staircase", "san-miguel"],
+            "lights": ["own"]
+        },
+        "M1X4": {
+            "_what": "drabina budżetu x4 na dwóch scenach z przecięciem",
+            "protocol": "short-x4",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["staircase", "san-miguel"],
+            "lights": ["own"]
+        },
+        "M1X8": {
+            "_what": "drabina budżetu x8 na dwóch scenach z przecięciem",
+            "protocol": "short-x8",
+            "arms": ["BSDF", "WIE"],
+            "scenes": ["staircase", "san-miguel"],
+            "lights": ["own"]
+        },
+        "M7C": {
+            "_what": "wariant z ponownym użyciem próbki na krzywej 30 s - obciążenie ujawnia się powyżej przecięcia",
+            "_deviation": "The plan asks for a SHORTER second budget for this measurement, arguing that the bias shows above the crossing of the two curves. Those two statements contradict each other: above the crossing means LONGER. The base budget is already one display frame, so a shorter one would be a single frame. Measured here on the 30 s curve instead, which brackets the crossing from both sides.",
+            "protocol": "curve",
+            "arms": ["WIE", "WIE-R"],
             "scenes": ["cornell-box", "bedroom", "staircase", "veach-ajar", "san-miguel", "zero-day"],
             "lights": ["own"]
         },

@@ -1662,6 +1662,7 @@ void Renderer::BuildVxpgGraph()
 				{
 					pass.NeverCull();
 					pass.Read(m_vxpg.counters, GraphAccess::CopySource);
+					pass.Read(m_vxpg.premulIrradiance, GraphAccess::CopySource);
 				},
 				[this]() { m_voxelGuidingBuildPass->RecordProbeCopy(); });
 		}

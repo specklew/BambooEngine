@@ -44,6 +44,10 @@ public:
     [[nodiscard]] static bool IsProbeArmed();
     void RecordProbeCopy();
     void ResolveProbe();
+    // How much of the total irradiance the brightest voxels carry, and over how many voxels
+    // the distribution effectively spreads. A guide built from a peaked distribution has
+    // something to steer by; one built from a flat distribution is a uniform sampler.
+    void LogConcentration(uint32_t litVoxels) const;
 
     // [0] = compacted voxel count ([1] retired with the flat CDF, [2] and [3] are the probe)
     RWStructuredBuffer<uint32_t>* GetCountersBuffer() const { return m_counters.get(); }
@@ -57,6 +61,10 @@ public:
 
 private:
     Microsoft::WRL::ComPtr<ID3D12Resource> m_countersReadback;
+    // Read back with the counters, for the concentration readout: how much of the total
+    // irradiance the brightest voxels carry. Sized to the compaction capacity, so it holds
+    // whatever the tree could possibly weight.
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_premulReadback;
     uint32_t m_probeRetries = 0;
 
     void CreateBuffers();

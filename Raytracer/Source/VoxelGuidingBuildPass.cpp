@@ -97,6 +97,11 @@ void VoxelGuidingBuildPass::CreateBuffers()
     m_compactVoxelLightPoints = std::make_unique<RWStructuredBuffer<DirectX::XMFLOAT4>>(m_device, capacity, L"VoxelGuiding CompactVoxelLightPoints");
     m_premulIrradiance = std::make_unique<RWStructuredBuffer<float>>(m_device, capacity, L"VoxelGuiding PremulIrradiance");
 
+    const auto premulDesc = CD3DX12_RESOURCE_DESC::Buffer(capacity * sizeof(float));
+    ThrowIfFailed(m_device->CreateCommittedResource(&heapProperties, D3D12_HEAP_FLAG_NONE, &premulDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m_premulReadback)));
+    m_premulReadback->SetName(L"VoxelGuiding PremulIrradiance Readback");
+
     CreateGridSizedBuffers();
 }
 
@@ -214,6 +219,70 @@ void VoxelGuidingBuildPass::RecordProbeCopy()
         m_countersReadback.Get(), 0,
         m_counters->GetUnderlyingResource().Get(), 0,
         kCounterCount * sizeof(uint32_t));
+
+    // The premultiplied irradiance of every compacted voxel - the quantity the light tree
+    // weights its choice by, so the right one to ask how concentrated the light is.
+    if (m_premulReadback && m_premulIrradiance)
+        CommandContext::Get().GetCommandList()->CopyBufferRegion(
+            m_premulReadback.Get(), 0,
+            m_premulIrradiance->GetUnderlyingResource().Get(), 0,
+            Constants::Graphics::VOXEL_GUIDING_CAPACITY * sizeof(float));
+}
+
+void VoxelGuidingBuildPass::LogConcentration(uint32_t litVoxels) const
+{
+    if (!m_premulReadback || litVoxels == 0)
+        return;
+
+    const uint32_t count = std::min(litVoxels,
+        static_cast<uint32_t>(Constants::Graphics::VOXEL_GUIDING_CAPACITY));
+    const D3D12_RANGE readRange{0, count * sizeof(float)};
+    float* mapped = nullptr;
+    if (FAILED(m_premulReadback->Map(0, &readRange, reinterpret_cast<void**>(&mapped))))
+        return;
+
+    std::vector<double> weights;
+    weights.reserve(count);
+    double total = 0.0;
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const double value = static_cast<double>(mapped[i]);
+        if (value > 0.0)
+        {
+            weights.push_back(value);
+            total += value;
+        }
+    }
+    const D3D12_RANGE writeRange{0, 0};
+    m_premulReadback->Unmap(0, &writeRange);
+
+    if (weights.empty() || total <= 0.0)
+        return;
+
+    std::sort(weights.begin(), weights.end(), std::greater<double>());
+
+    // At least one voxel per bucket: on a scene with 49 lit voxels, 1 % rounds to zero and
+    // the answer would read as "0 % of the energy" instead of "whatever the brightest holds".
+    auto headShare = [&](int percent)
+    {
+        const size_t take = std::max<size_t>(1, (weights.size() * percent) / 100);
+        double head = 0.0;
+        for (size_t i = 0; i < take; ++i)
+            head += weights[i];
+        return 100.0 * head / total;
+    };
+
+    // Participation ratio: the number of voxels the distribution behaves as if it spread over
+    // evenly. Equals the count for a flat distribution and 1 for a single spike.
+    double sumOfSquares = 0.0;
+    for (const double weight : weights)
+        sumOfSquares += (weight / total) * (weight / total);
+    const double effective = 1.0 / sumOfSquares;
+
+    spdlog::info("[VXPG concentration] top 1% holds {:.1f}%, top 5% {:.1f}%, top 10% {:.1f}% "
+                 "of total irradiance; effective support {:.0f} of {} lit voxels ({:.2f}%)",
+                 headShare(1), headShare(5), headShare(10), effective, weights.size(),
+                 100.0 * effective / static_cast<double>(weights.size()));
 }
 
 void VoxelGuidingBuildPass::ResolveProbe()
@@ -261,6 +330,8 @@ void VoxelGuidingBuildPass::ResolveProbe()
     // resolutions in a way neither count is on its own.
     spdlog::info("[VXPG census] {} lit voxels of {} occupied by geometry ({:.2f}% lit)",
                  litVoxels, occupied, occupied > 0 ? 100.0 * litVoxels / occupied : 0.0);
+
+    LogConcentration(litVoxels);
 
     // Past the capacity the compaction keeps the first VOXEL_GUIDING_CAPACITY voxels and
     // drops the rest, and every consumer clamps to that ceiling — so the cluster pass now

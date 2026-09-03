@@ -246,15 +246,45 @@ def scene_cvars(cell, parameters):
             if not name.startswith("_")]
 
 
-def arm_budget(protocol, arm, manifest):
+def load_frame_pairs(path):
+    """{cell: {arm: frames}} chosen so both arms spend the same TIME.
+
+    A time budget cannot equalise the time at this scale: the engine stops at the first
+    frame REACHING the budget, so each arm overshoots by a partial frame and the two
+    overshoots differ. Measured at 24 ms, that left the arms up to 20 % apart in time -
+    always in the guided arm's favour, because its frame is the larger one. Stating the
+    frame counts instead removes the quantisation: the counts are picked so that
+    N1*cost1 and N2*cost2 land within a few percent of each other and of the target.
+
+    The costs behind them must come from the regime being measured. Frame cost under a
+    10 s load is 2-42 % higher than in a 24 ms burst, because the card clocks down - and
+    the guided arm loses more to that than the path-traced one.
+    """
+    if not path:
+        return {}
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = REPO_ROOT / resolved
+    if not resolved.exists():
+        sys.exit(f"No frame-pair table at {resolved}. The protocol asks for one; produce it "
+                 f"from a measured run or point 'framesFrom' elsewhere.")
+    return json.loads(resolved.read_text(encoding="utf-8-sig"))
+
+
+def arm_budget(protocol, arm, manifest, cell=None, frame_pairs=None):
     """The stopping condition for ONE arm.
 
-    Equal time is one budget for both arms. Equal SAMPLE COUNT is not: the guided
-    technique draws two path samples per iteration (two-sample MIS at the first vertex)
-    where path tracing draws one, so the same number of samples is a different number of
-    frames per arm. The protocol states the sample count and the arm states how many
-    samples one of its frames carries; the frame budget follows from the two.
+    Three shapes. A plain time budget is one value for both arms. A SAMPLE COUNT is not:
+    the guided technique draws two path samples per iteration (two-sample MIS at the first
+    vertex) where path tracing draws one, so the same sample count is a different frame
+    count per arm. A FRAME-PAIR table is per cell and per arm, and is how equal time is
+    actually realised at a budget of one display frame.
     """
+    if "framesFrom" in protocol:
+        entry = (frame_pairs or {}).get(cell, {})
+        if arm not in entry:
+            sys.exit(f"No frame count for {cell} / {arm} in the frame-pair table")
+        return f"frames:{entry[arm]}"
     if "samples" in protocol:
         per_frame = manifest["arms"][arm].get("samplesPerFrame", 1)
         frames = protocol["samples"] // per_frame
@@ -280,6 +310,8 @@ def run_campaign(args, manifest):
     rounds = args.rounds or manifest["rounds"]
     repeats = args.repeats or manifest["repeats"]
     parameters = load_parameters(getattr(args, "parameters", None))
+    frame_pairs = {name: load_frame_pairs(spec["framesFrom"])
+                   for name, spec in protocols.items() if "framesFrom" in spec}
 
     total = len(plan) * rounds * repeats
     print(f"{len(plan)} jobs x {rounds} round(s) x {repeats} repeat(s) = {total} runs")
@@ -325,7 +357,9 @@ def run_campaign(args, manifest):
                 code, took = engine_checked(
                     job["scene"], job["light"], manifest, spec["technique"],
                     list(spec["cvars"]) + scene_cvars(cell, parameters),
-                    out, arm_budget(protocol, arm, manifest), images, protocol["warmup"],
+                    out, arm_budget(protocol, arm, manifest, cell,
+                                    frame_pairs.get(job["protocol"])),
+                    images, protocol["warmup"],
                     checkpoints=protocol["checkpoints"], settle=protocol.get("settle", 0),
                     log_path=under(root) / f"{cell}-{arm}-p{repeat}r{round_index}.log",
                     config=config_path(manifest, job["scene"], job["light"]))
