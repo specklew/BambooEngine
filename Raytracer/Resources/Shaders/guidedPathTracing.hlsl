@@ -1279,6 +1279,39 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                     pdfGAtDir = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices, hit.position, surface.N, hitPos, treeWeightMode));
                 if (isnan(pdfGAtDir)) pdfGAtDir = 0.0; // SIByL w2 guard
 
+                // Unsteerable-share probe (vxpg.guiding.unsteerable, guidingFlags bit 0).
+                // Where pdfGAtDir is zero the balance weight is 1 and this estimator IS the
+                // BSDF estimator, so the share of the second moment landing there is a hard
+                // ceiling on what guiding can win. Accumulated on 1/16 of the samples, chosen
+                // by a hash rather than a pixel stride (the pixel index is not in scope here
+                // and this file also compiles for the inline-RayQuery backend); sigma_u is a
+                // ratio, so an unbiased subsample does not move it.
+                if ((guidingFlags & 1u) != 0u && (pcg_hash(seed ^ 0x9E3779B9u) & 15u) == 0u)
+                {
+                    const float3 contribution = f * dot(surface.N, dir) * incoming / pdfB;
+                    const float second = dot(contribution, float3(0.2126, 0.7152, 0.0722));
+                    const float squared = second * second;
+                    // Fixed point, because the counters are uint32 and HLSL has no float
+                    // atomics: 129k samples of a clamped 256 at scale 16 stay two orders
+                    // below the wrap. The clamp is counted so the log can say if it bit.
+                    // A LOG2 HISTOGRAM, not a fixed-point sum. The squared contribution
+                    // spans ten orders of magnitude between a dark corridor and a firefly,
+                    // so any single scale either quantises the bulk to zero (measured: a
+                    // whole scene summing to nothing) or clips the bright tail, which IS
+                    // the second moment. Counting per octave costs 64 addresses and cannot
+                    // overflow at 129k samples; the CPU rebuilds both sums from the bucket
+                    // midpoints, and because numerator and denominator share the buckets,
+                    // the RATIO is unaffected by the octave width.
+                    if (squared > 0.0)
+                    {
+                        const int bucket = clamp(int(floor(log2(squared))) + 32, 0, 63);
+                        uint previous;
+                        InterlockedAdd(gVoxCounters[16 + bucket], 1u, previous);
+                        if (pdfGAtDir <= 0.0)
+                            InterlockedAdd(gVoxCounters[80 + bucket], 1u, previous);
+                    }
+                }
+
                 float weight = BalanceWeight(pdfB, pdfGAtDir, 0.0);
                 misWeightB = weight;
                 float NdotL = dot(surface.N, dir);

@@ -191,6 +191,9 @@ private:
 	// the frame's flush and the readback all agree on one answer.
 	bool m_clusterStatsPending = false;
 	bool m_guidingProbePending = false;
+	// The unsteerable-share accumulators are filled by the INTEGRATOR, so their readback
+	// node has to sit past the technique rather than inside the guiding chain.
+	bool m_unsteerableProbePending = false;
 
 	std::shared_ptr<RenderTechnique> m_technique;
 	std::shared_ptr<VBufferPass> m_vbufferPass;

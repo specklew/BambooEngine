@@ -42,6 +42,8 @@ public:
     // answer: how close the uint32 irradiance accumulator came to wrapping, and how many cells
     // caught VPLs but packed to zero and were therefore dropped from the guide.
     [[nodiscard]] static bool IsProbeArmed();
+    [[nodiscard]] static bool IsUnsteerableArmed();
+    void ResolveUnsteerable();
     void RecordProbeCopy();
     void ResolveProbe();
     // How much of the total irradiance the brightest voxels carry, and over how many voxels
@@ -65,6 +67,7 @@ private:
     // irradiance the brightest voxels carry. Sized to the compaction capacity, so it holds
     // whatever the tree could possibly weight.
     Microsoft::WRL::ComPtr<ID3D12Resource> m_premulReadback;
+    uint32_t m_unsteerableRetries = 0;
     uint32_t m_probeRetries = 0;
 
     void CreateBuffers();

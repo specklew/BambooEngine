@@ -571,6 +571,7 @@ void Renderer::Update(double elapsedTime, double totalTime)
 	// removed. The other fields keep their positions rather than shifting down, so
 	// no shader mirror has to move with them.
 	m_passConstants->data.guidingFlags =
+		(VoxelGuidingBuildPass::IsUnsteerableArmed() ? 1u : 0u) |
 		((static_cast<uint32_t>(g_guidingDebugView.Get()) & 15u) << 1) |
 		((static_cast<uint32_t>(g_guidingTreeWeightMode.Get()) & 3u) << 5) |
 		((g_injectionReuseInMis.Get() != 0 ? 1u : 0u) << 8) |
@@ -694,6 +695,20 @@ void Renderer::Render(double elapsedTime, double totalTime)
 			});
 	}
 
+	// The unsteerable accumulators are written by the INTEGRATOR, so their readback has to sit
+	// past it: the guiding chain's own probe node runs before the technique and would copy
+	// zeros for those two counters. Placed after the whole display chain, so it is ordered
+	// behind the technique node whichever branch above added it.
+	if (m_unsteerableProbePending && m_voxelGuidingBuildPass)
+	{
+		m_renderGraph.AddPass("VXPG Unsteerable Readback",
+			[&](RenderGraphPassBuilder& pass)
+			{
+				pass.NeverCull();
+				pass.Read(m_vxpg.counters, GraphAccess::CopySource);
+			},
+			[this]() { m_voxelGuidingBuildPass->RecordProbeCopy(); });
+	}
 	if (!m_headless)
 	{
 		// ImGui draws over whatever the frame produced, so it needs the back buffer
@@ -757,6 +772,8 @@ void Renderer::Render(double elapsedTime, double totalTime)
 		m_clusterPass->ResolveStats();
 	if (m_guidingProbePending && m_voxelGuidingBuildPass)
 		m_voxelGuidingBuildPass->ResolveProbe();
+	if (m_unsteerableProbePending && m_voxelGuidingBuildPass)
+		m_voxelGuidingBuildPass->ResolveUnsteerable();
 	DumpRenderGraphIfRequested();
 
 	if (m_screenshotManager->IsCaptureDue())
@@ -1369,6 +1386,7 @@ void Renderer::BuildVxpgGraph()
 	// that reads them must agree, and ResolveStats disarms the CVar between them.
 	m_clusterStatsPending = VxpgClusterPass::IsStatsDumpArmed();
 	m_guidingProbePending = VoxelGuidingBuildPass::IsProbeArmed();
+	m_unsteerableProbePending = VoxelGuidingBuildPass::IsUnsteerableArmed();
 
 	if (!FrameUsesVoxelGuiding() || !m_voxelizationPass || !m_scene)
 		return;

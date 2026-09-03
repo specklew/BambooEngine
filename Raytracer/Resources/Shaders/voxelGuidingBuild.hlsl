@@ -59,6 +59,10 @@ void ClearCounters(uint3 tid : SV_DispatchThreadID)
     gCounters[1] = 0u; // cells holding geometry (census)
     gCounters[2] = 0u; // voxels dropped by the fixed-point truncation (probe)
     gCounters[3] = 0u; // largest accumulated packed irradiance seen (probe)
+    // Unsteerable probe: [16..79] the log2 histogram of the BSDF strategy's squared
+    // contribution, [80..143] the same restricted to directions the guide cannot reach.
+    for (uint slot = 4u; slot < 144u; ++slot)
+        gCounters[slot] = 0u;
 }
 
 // Copy baked per-voxel bounds into the live buffers for voxels that received

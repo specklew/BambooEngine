@@ -31,7 +31,15 @@ constexpr BindingSlot kGuidingBuildCounters      = PassUav("gCounters", GUIDING_
 // number of cells the bake marked as holding geometry, and nothing else counted them.
 constexpr BindingSlot kGuidingBuildOccupancy =
     PassTableEntry("gOccupancy", BindingKind::Uav, GUIDING_BUILD_REG_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
-constexpr uint32_t kCounterCount = 4;
+// [0..3] the compaction count and the accumulator probe; [4..6] the unsteerable-share
+// probe (second moment where the guide has no density, its total, and how many samples hit
+// the fixed-point ceiling).
+// [0..3] compaction + accumulator probe; [16..79] and [80..143] the two halves of the
+// unsteerable probe's log2 histogram.
+constexpr uint32_t kCounterCount = 144;
+constexpr uint32_t kUnsteerableBuckets = 64;
+constexpr uint32_t kUnsteerableTotalBase = 16;
+constexpr uint32_t kUnsteerableBlockedBase = 80;
 // Retried because the first frame runs before the bake and the first injection, so an
 // unarmed-looking zero is indistinguishable from a genuinely unlit grid on frame 0.
 constexpr uint32_t kProbeMaxRetries = 8;
@@ -39,6 +47,17 @@ constexpr uint32_t kProbeMaxRetries = 8;
 
 // One-shot: the compaction kernel already reads both voxel textures, so arming this costs
 // two atomics on cells it was visiting anyway and nothing at all when disarmed.
+// The S1 ceiling of the guided estimator. On directions that hit no lit voxel the guide has
+// zero density, the balance weight collapses to 1 and the estimator IS the BSDF estimator, so
+// the share of the BSDF strategy's SECOND MOMENT that lands there bounds what any guide can
+// win: Var_B / Var_MIS <= 1 / sigma_u. A scene whose sigma_u exceeds the reciprocal of the
+// frame-cost multiplier cannot win at equal time however well the guide is built - which turns
+// "render both arms and see" into a prediction. Second moment and not energy: a uniform sky
+// carries much of the energy and almost none of the variance.
+static AutoCVarInt g_unsteerableProbe("vxpg.guiding.unsteerable",
+    "One-shot readout of the share of the BSDF strategy's second moment that the guide cannot reach",
+    0, CVarFlags::EditCheckbox);
+
 static AutoCVarInt g_guidingProbe("vxpg.guiding.probe",
     "One-shot readout of the irradiance accumulator: headroom to a uint32 wrap and the share of "
     "VPL-carrying cells that quantise to zero", 0, CVarFlags::EditCheckbox);
@@ -206,9 +225,14 @@ void VoxelGuidingBuildPass::RunCompact()
 
 // P5. Two of these are grid-sized (the inverse index and both live bounds) and the rest
 // are capped by VOXEL_GUIDING_CAPACITY, so the stage has a fixed part and a cubic part.
+bool VoxelGuidingBuildPass::IsUnsteerableArmed()
+{
+    return g_unsteerableProbe.Get() != 0;
+}
+
 bool VoxelGuidingBuildPass::IsProbeArmed()
 {
-    return g_guidingProbe.Get() != 0;
+    return g_guidingProbe.Get() != 0 || g_unsteerableProbe.Get() != 0;
 }
 
 // Its own graph node, so the UNORDERED_ACCESS -> COPY_SOURCE flip is synthesized from the
@@ -346,6 +370,75 @@ void VoxelGuidingBuildPass::ResolveProbe()
     m_countersReadback->Unmap(0, &writeRange);
     m_probeRetries = 0;
     g_guidingProbe.Set(0); // one-shot
+}
+
+// Read after the integrator, not after the build chain: the accumulators are filled by the
+// raygen, so the copy node for this one sits past the technique (see Renderer).
+void VoxelGuidingBuildPass::ResolveUnsteerable()
+{
+    if (!m_countersReadback)
+        return;
+
+    const D3D12_RANGE readRange{0, kCounterCount * sizeof(uint32_t)};
+    uint32_t* counters = nullptr;
+    if (FAILED(m_countersReadback->Map(0, &readRange, reinterpret_cast<void**>(&counters))))
+        return;
+
+    // Rebuild both sums from the histogram, weighting each octave by its geometric
+    // midpoint. Sharing the buckets between numerator and denominator is what makes the
+    // ratio insensitive to the octave width.
+    double unreachable = 0.0;
+    double total = 0.0;
+    double fireflyMass = 0.0;
+    uint64_t samples = 0;
+    for (uint32_t bucket = 0; bucket < kUnsteerableBuckets; ++bucket)
+    {
+        const double midpoint = std::pow(2.0, static_cast<double>(bucket) - 32.0 + 0.5);
+        const double all     = counters[kUnsteerableTotalBase + bucket] * midpoint;
+        const double blocked = counters[kUnsteerableBlockedBase + bucket] * midpoint;
+        total += all;
+        unreachable += blocked;
+        samples += counters[kUnsteerableTotalBase + bucket];
+        // "Firefly" here means a squared contribution above 1, i.e. a sample brighter than
+        // the whole rest of the image's typical scale.
+        if (bucket >= 32)
+            fireflyMass += all;
+    }
+    const double largeShare = total > 0.0 ? fireflyMass / total : 0.0;
+    const uint32_t clipped = 0;
+
+    const D3D12_RANGE writeRange{0, 0};
+    if (total <= 0.0 && m_unsteerableRetries < kProbeMaxRetries)
+    {
+        ++m_unsteerableRetries;
+        m_countersReadback->Unmap(0, &writeRange);
+        return;
+    }
+    m_countersReadback->Unmap(0, &writeRange);
+
+    if (total <= 0.0)
+    {
+        spdlog::warn("[VXPG unsteerable] no BSDF-strategy samples accumulated - is the guided "
+                     "technique active and the debug view off?");
+        g_unsteerableProbe.Set(0);
+        m_unsteerableRetries = 0;
+        return;
+    }
+
+    const double share = unreachable / total;
+    if (share > 0.0)
+        spdlog::info("[VXPG unsteerable] sigma_u = {:.5f} over {} samples; ceiling on "
+                     "Var_B/Var_MIS = {:.1f}x; {:.1f}% of the second moment above squared 1",
+                     share, samples, 1.0 / share, 100.0 * largeShare);
+    else
+        spdlog::info("[VXPG unsteerable] sigma_u = 0 over {} samples: every sample carrying "
+                     "second moment landed where the guide has density, so this ceiling does "
+                     "not bind at all; {:.1f}% of the second moment above squared 1",
+                     samples, 100.0 * largeShare);
+    (void)clipped;
+
+    g_unsteerableProbe.Set(0); // one-shot
+    m_unsteerableRetries = 0;
 }
 
 void VoxelGuidingBuildPass::ReportMemory(GpuMemoryReport& report) const
