@@ -60,6 +60,35 @@ RWTexture3D<uint> gVoxVplCount   : BAMBOO_PASS_UAV(GUIDED_REG_VPL_COUNT);
 
 // [0] = compacted voxel count ([1] retired with the flat CDF)
 RWStructuredBuffer<uint>  gVoxCounters     : BAMBOO_PASS_UAV(GUIDED_REG_COUNTERS);
+
+// Second-moment probe histograms, 64 octaves each (VoxelGuidingBuildPass rebuilds the sums).
+// A LOG2 HISTOGRAM rather than a fixed-point sum: squared contributions span ten orders of
+// magnitude between a dark corridor and a firefly, so any single scale either quantises the
+// bulk to zero - measured, a whole scene summed to nothing - or clips the bright tail, which
+// IS most of the second moment. Counting per octave cannot overflow at 129k samples a frame,
+// and every reported figure is a ratio of two histograms sharing these octaves, so the bucket
+// width cancels out of it.
+#define PROBE_HIST_BSDF_RAW        16u  // BSDF strategy alone: the baseline second moment
+#define PROBE_HIST_BSDF_UNREACHED  80u  // ...the part of it where the guide has no density
+#define PROBE_HIST_BSDF_WEIGHTED  144u  // BSDF branch of the MIS estimator, weight applied
+#define PROBE_HIST_GUIDE_WEIGHTED 208u  // guide branch of the MIS estimator, weight applied
+#define PROBE_HIST_GUIDE_RAW      272u  // guide strategy alone on its support, no weight
+
+float ProbeLuminanceSquared(float3 contribution)
+{
+    const float luminance = dot(contribution, float3(0.2126, 0.7152, 0.0722));
+    return luminance * luminance;
+}
+
+void ProbeAccumulate(uint base, float squared)
+{
+    if (squared > 0.0)
+    {
+        const int bucket = clamp(int(floor(log2(squared))) + 32, 0, 63);
+        uint previous;
+        InterlockedAdd(gVoxCounters[base + bucket], 1u, previous);
+    }
+}
 RWStructuredBuffer<uint>  gVoxCompactIds   : BAMBOO_PASS_UAV(GUIDED_REG_COMPACT_IDS);
 // Per-pixel SLIC superpixel assignment (flat map index, -1 invalid), written by
 // SuperpixelBuildPass. SIByL u_spixelIdx. NOT pixel/32 — assignment follows
@@ -1279,42 +1308,41 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                     pdfGAtDir = float(EvalTreeGuidePdf(fuzzyWeights, fuzzyIndices, hit.position, surface.N, hitPos, treeWeightMode));
                 if (isnan(pdfGAtDir)) pdfGAtDir = 0.0; // SIByL w2 guard
 
-                // Unsteerable-share probe (vxpg.guiding.unsteerable, guidingFlags bit 0).
-                // Where pdfGAtDir is zero the balance weight is 1 and this estimator IS the
-                // BSDF estimator, so the share of the second moment landing there is a hard
-                // ceiling on what guiding can win. Accumulated on 1/16 of the samples, chosen
-                // by a hash rather than a pixel stride (the pixel index is not in scope here
-                // and this file also compiles for the inline-RayQuery backend); sigma_u is a
-                // ratio, so an unbiased subsample does not move it.
-                if ((guidingFlags & 1u) != 0u && (pcg_hash(seed ^ 0x9E3779B9u) & 15u) == 0u)
-                {
-                    const float3 contribution = f * dot(surface.N, dir) * incoming / pdfB;
-                    const float second = dot(contribution, float3(0.2126, 0.7152, 0.0722));
-                    const float squared = second * second;
-                    // Fixed point, because the counters are uint32 and HLSL has no float
-                    // atomics: 129k samples of a clamped 256 at scale 16 stay two orders
-                    // below the wrap. The clamp is counted so the log can say if it bit.
-                    // A LOG2 HISTOGRAM, not a fixed-point sum. The squared contribution
-                    // spans ten orders of magnitude between a dark corridor and a firefly,
-                    // so any single scale either quantises the bulk to zero (measured: a
-                    // whole scene summing to nothing) or clips the bright tail, which IS
-                    // the second moment. Counting per octave costs 64 addresses and cannot
-                    // overflow at 129k samples; the CPU rebuilds both sums from the bucket
-                    // midpoints, and because numerator and denominator share the buckets,
-                    // the RATIO is unaffected by the octave width.
-                    if (squared > 0.0)
-                    {
-                        const int bucket = clamp(int(floor(log2(squared))) + 32, 0, 63);
-                        uint previous;
-                        InterlockedAdd(gVoxCounters[16 + bucket], 1u, previous);
-                        if (pdfGAtDir <= 0.0)
-                            InterlockedAdd(gVoxCounters[80 + bucket], 1u, previous);
-                    }
-                }
-
                 float weight = BalanceWeight(pdfB, pdfGAtDir, 0.0);
                 misWeightB = weight;
                 float NdotL = dot(surface.N, dir);
+
+                // Second-moment probe (vxpg.guiding.unsteerable, guidingFlags bit 0), BSDF
+                // strategy half. Two questions share these atomics:
+                //   sigma_u - the share of this strategy's second moment landing where the
+                //             guide has no density at all, which no guide can improve;
+                //   the MIS branch split - how much of the combined estimator's second moment
+                //             this branch still carries once its weight is applied.
+                // Every sample counts. The earlier 1/16 hash subsample left Zero Day standing
+                // on 595 readings; the probe is one-shot and off by default, so the atomics it
+                // costs are paid on a single frame nobody times.
+                if ((guidingFlags & 1u) != 0u)
+                {
+                    // The baseline is this same estimator with the guide switched off, which is
+                    // what the code below collapses to at pdfGAtDir == 0: full weight on the
+                    // traced direction and PT's own two-way weight against NEE on a first-segment
+                    // emissive hit. Leaving the emissive term out of the baseline understates it
+                    // by the whole direct-emitter signal - measured on Zero Day, where it made the
+                    // baseline sixteen times too small and the reported gain absurd.
+                    const float wLeBase = any(firstLe > 0.0)
+                                        ? BalanceWeight(pdfB, firstNeePdf, 0.0) : 0.0;
+                    const float3 raw = f * NdotL * (incoming + firstLe * wLeBase) / pdfB;
+                    const float wLeProbe = any(firstLe > 0.0)
+                                         ? BalanceWeight(pdfB, pdfGAtDir + firstNeePdf, 0.0) : 0.0;
+                    const float3 weighted = f * NdotL * (incoming * weight + firstLe * wLeProbe) / pdfB;
+                    const float rawSquared      = ProbeLuminanceSquared(raw);
+                    const float weightedSquared = ProbeLuminanceSquared(weighted);
+
+                    ProbeAccumulate(PROBE_HIST_BSDF_RAW, rawSquared);
+                    if (pdfGAtDir <= 0.0)
+                        ProbeAccumulate(PROBE_HIST_BSDF_UNREACHED, rawSquared);
+                    ProbeAccumulate(PROBE_HIST_BSDF_WEIGHTED, weightedSquared);
+                }
                 if (debugView != 3u)
                 {
                     radiance += f * NdotL * incoming * weight / pdfB;
@@ -1412,6 +1440,28 @@ float3 ShadeFirstVertex(HitData hit, SurfaceData surface, float specularProb, ui
                         if (isnan(pdfBAtDir)) pdfBAtDir = 0.0; // SIByL w1 guard
                         float weight = BalanceWeight(float(pdfG), pdfBAtDir, 0.0);
                         misWeightG = weight;
+
+                        // Guide strategy half of the second-moment probe. The raw histogram is
+                        // the guide used ALONE on its own support - how good a sampler it is
+                        // before MIS rescues it - and the weighted one is this branch's share
+                        // of the combined estimator. Rejected guide samples contribute exactly
+                        // zero and so are simply absent from the histogram.
+                        if ((guidingFlags & 1u) != 0u)
+                        {
+                            const float probeNdotL = dot(surface.N, dir);
+                            const float wLeBase = any(firstLe > 0.0)
+                                ? BalanceWeight(float(pdfG), firstNeePdf, 0.0) : 0.0;
+                            const float3 raw =
+                                f * probeNdotL * (incoming + firstLe * wLeBase) / float(pdfG);
+                            const float wLeProbe = any(firstLe > 0.0)
+                                ? BalanceWeight(float(pdfG), pdfBAtDir + firstNeePdf, 0.0) : 0.0;
+                            const float3 weighted =
+                                f * probeNdotL * (incoming * weight + firstLe * wLeProbe) / float(pdfG);
+
+                            ProbeAccumulate(PROBE_HIST_GUIDE_RAW, ProbeLuminanceSquared(raw));
+                            ProbeAccumulate(PROBE_HIST_GUIDE_WEIGHTED, ProbeLuminanceSquared(weighted));
+                        }
+
                         if (debugView < 3u)
                         {
                             float NdotL = dot(surface.N, dir);

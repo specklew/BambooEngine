@@ -61,7 +61,7 @@ void ClearCounters(uint3 tid : SV_DispatchThreadID)
     gCounters[3] = 0u; // largest accumulated packed irradiance seen (probe)
     // Unsteerable probe: [16..79] the log2 histogram of the BSDF strategy's squared
     // contribution, [80..143] the same restricted to directions the guide cannot reach.
-    for (uint slot = 4u; slot < 144u; ++slot)
+    for (uint slot = 4u; slot < 336u; ++slot)
         gCounters[slot] = 0u;
 }
 

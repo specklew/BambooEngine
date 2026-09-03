@@ -31,15 +31,17 @@ constexpr BindingSlot kGuidingBuildCounters      = PassUav("gCounters", GUIDING_
 // number of cells the bake marked as holding geometry, and nothing else counted them.
 constexpr BindingSlot kGuidingBuildOccupancy =
     PassTableEntry("gOccupancy", BindingKind::Uav, GUIDING_BUILD_REG_OCCUPANCY, GlobalDescriptor::VoxelOccupancy);
-// [0..3] the compaction count and the accumulator probe; [4..6] the unsteerable-share
-// probe (second moment where the guide has no density, its total, and how many samples hit
-// the fixed-point ceiling).
-// [0..3] compaction + accumulator probe; [16..79] and [80..143] the two halves of the
-// unsteerable probe's log2 histogram.
-constexpr uint32_t kCounterCount = 144;
-constexpr uint32_t kUnsteerableBuckets = 64;
-constexpr uint32_t kUnsteerableTotalBase = 16;
-constexpr uint32_t kUnsteerableBlockedBase = 80;
+// [0..3] compaction count and the accumulator probe. From 16 up, five log2 histograms of
+// 64 octaves each, filled by the integrator (see PROBE_HIST_* in guidedPathTracing.hlsl):
+// the BSDF strategy's second moment, the part of it the guide cannot reach, the two MIS
+// branches with their weights applied, and the guide strategy used alone on its support.
+constexpr uint32_t kProbeBuckets = 64;
+constexpr uint32_t kProbeBsdfRawBase       = 16;
+constexpr uint32_t kProbeBsdfUnreachedBase = 80;
+constexpr uint32_t kProbeBsdfWeightedBase  = 144;
+constexpr uint32_t kProbeGuideWeightedBase = 208;
+constexpr uint32_t kProbeGuideRawBase      = 272;
+constexpr uint32_t kCounterCount = kProbeGuideRawBase + kProbeBuckets;
 // Retried because the first frame runs before the bake and the first injection, so an
 // unarmed-looking zero is indistinguishable from a genuinely unlit grid on frame 0.
 constexpr uint32_t kProbeMaxRetries = 8;
@@ -384,28 +386,37 @@ void VoxelGuidingBuildPass::ResolveUnsteerable()
     if (FAILED(m_countersReadback->Map(0, &readRange, reinterpret_cast<void**>(&counters))))
         return;
 
-    // Rebuild both sums from the histogram, weighting each octave by its geometric
-    // midpoint. Sharing the buckets between numerator and denominator is what makes the
-    // ratio insensitive to the octave width.
-    double unreachable = 0.0;
-    double total = 0.0;
-    double fireflyMass = 0.0;
-    uint64_t samples = 0;
-    for (uint32_t bucket = 0; bucket < kUnsteerableBuckets; ++bucket)
+    // Rebuild every sum from its histogram, weighting each octave by its geometric midpoint.
+    // Sharing the buckets between numerator and denominator is what makes the ratios
+    // insensitive to the octave width.
+    auto rebuild = [counters](uint32_t base, double& mass, uint64_t& count, double* tail = nullptr)
     {
-        const double midpoint = std::pow(2.0, static_cast<double>(bucket) - 32.0 + 0.5);
-        const double all     = counters[kUnsteerableTotalBase + bucket] * midpoint;
-        const double blocked = counters[kUnsteerableBlockedBase + bucket] * midpoint;
-        total += all;
-        unreachable += blocked;
-        samples += counters[kUnsteerableTotalBase + bucket];
-        // "Firefly" here means a squared contribution above 1, i.e. a sample brighter than
-        // the whole rest of the image's typical scale.
-        if (bucket >= 32)
-            fireflyMass += all;
-    }
+        mass = 0.0;
+        count = 0;
+        if (tail)
+            *tail = 0.0;
+        for (uint32_t bucket = 0; bucket < kProbeBuckets; ++bucket)
+        {
+            const double midpoint = std::pow(2.0, static_cast<double>(bucket) - 32.0 + 0.5);
+            const double octave = counters[base + bucket] * midpoint;
+            mass += octave;
+            count += counters[base + bucket];
+            // "Firefly" here means a squared contribution above 1, i.e. a sample brighter
+            // than the whole rest of the image's typical scale.
+            if (tail && bucket >= 32)
+                *tail += octave;
+        }
+    };
+
+    double total = 0.0, unreachable = 0.0, fireflyMass = 0.0;
+    double bsdfWeighted = 0.0, guideWeighted = 0.0, guideRaw = 0.0;
+    uint64_t samples = 0, ignored = 0, guideSamples = 0;
+    rebuild(kProbeBsdfRawBase, total, samples, &fireflyMass);
+    rebuild(kProbeBsdfUnreachedBase, unreachable, ignored);
+    rebuild(kProbeBsdfWeightedBase, bsdfWeighted, ignored);
+    rebuild(kProbeGuideWeightedBase, guideWeighted, guideSamples);
+    rebuild(kProbeGuideRawBase, guideRaw, ignored);
     const double largeShare = total > 0.0 ? fireflyMass / total : 0.0;
-    const uint32_t clipped = 0;
 
     const D3D12_RANGE writeRange{0, 0};
     if (total <= 0.0 && m_unsteerableRetries < kProbeMaxRetries)
@@ -435,7 +446,29 @@ void VoxelGuidingBuildPass::ResolveUnsteerable()
                      "second moment landed where the guide has density, so this ceiling does "
                      "not bind at all; {:.1f}% of the second moment above squared 1",
                      samples, 100.0 * largeShare);
-    (void)clipped;
+
+    // The realised side of the same ledger. Both strategies estimate the same integral, so
+    // the ratio of second moments is a floor under the ratio of variances - the gain is at
+    // least this. The branch split says where what remains actually sits: a combined
+    // estimator whose second moment is dominated by the guide branch is limited by how well
+    // the guide samples (voxel granularity and the tree's ranking), one dominated by the BSDF
+    // branch is limited by directions the guide never covers.
+    const double combined = bsdfWeighted + guideWeighted;
+    if (combined > 0.0)
+    {
+        spdlog::info("[VXPG moments] M_B = {:.4e}, M_MIS = {:.4e} (BSDF branch {:.1f}%, guide "
+                     "branch {:.1f}%); realised gain >= {:.2f}x over {} guided samples",
+                     total, combined, 100.0 * bsdfWeighted / combined,
+                     100.0 * guideWeighted / combined, total / combined, guideSamples);
+        if (guideRaw > 0.0)
+            spdlog::info("[VXPG moments] guide strategy alone on its support: M_G = {:.4e}, "
+                         "M_B/M_G = {:.2f}x", guideRaw, total / guideRaw);
+    }
+    else
+    {
+        spdlog::warn("[VXPG moments] no weighted contribution accumulated - the guide branch "
+                     "may be disabled for this run");
+    }
 
     g_unsteerableProbe.Set(0); // one-shot
     m_unsteerableRetries = 0;
